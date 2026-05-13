@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuraGold — Financial Statement menus (values &amp; data sources)</title>
+  <style>
+    body { font-family: Calibri, "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #111; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    h1 { font-size: 18pt; border-bottom: 2px solid #c9a227; padding-bottom: 8px; }
+    h2 { font-size: 14pt; margin-top: 1.4em; color: #11294b; }
+    h3 { font-size: 12pt; margin-top: 1em; }
+    p { margin: 0.6em 0; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0 16px; font-size: 10.5pt; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f4f5f7; font-weight: 600; }
+    .note { background: #fffbf0; border-left: 4px solid #c9a227; padding: 10px 12px; margin: 12px 0; }
+    code { font-family: Consolas, monospace; font-size: 10pt; background: #f4f5f7; padding: 1px 4px; }
+    ul { margin: 0.4em 0 0.8em 1.2em; }
+    .footer { margin-top: 2em; font-size: 9pt; color: #666; border-top: 1px solid #ddd; padding-top: 12px; }
+    @media print { body { margin: 12px; } .no-print { display: none; } }
+  </style>
+</head>
+<body>
+
+<h1>AuraGold — Financial Statement reference</h1>
+<p><strong>Generated for:</strong> admin sidebar → Financial Statement submenu.<br />
+<strong>Purpose:</strong> Which URL, parameters, tables, and formulas drive each screen.</p>
+
+<div class="note no-print">
+  <strong>To get Word (.docx):</strong> Open this file in Microsoft Word → File → Save As → Word Document.<br />
+  <strong>To get PDF:</strong> Open in Chrome/Edge → Print → Destination: Save as PDF (or Microsoft Print to PDF).
+</div>
+
+<h2>1. Menu → file mapping</h2>
+<table>
+  <thead>
+    <tr><th>Menu label</th><th>File</th><th>Main data source</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Trial Balance</td><td><code>trial-balance.php</code></td><td><code>tbl_customer_ledger</code>, <code>tbl_customers</code></td></tr>
+    <tr><td>Balance Sheet</td><td><code>balance-sheet.php</code></td><td>Ledger groups + <code>tbl_stock</code></td></tr>
+    <tr><td>Profit Loss</td><td><code>profit-loss.php</code></td><td>P&amp;L buckets + <code>tbl_stock</code></td></tr>
+    <tr><td>Cash Flow</td><td><code>cash-flow.php</code></td><td><code>tbl_customer_ledger</code> (per-ledger closing → buckets)</td></tr>
+    <tr><td>Fund Flow</td><td><code>fund-flow.php</code></td><td>Working capital from groups + net P&amp;L</td></tr>
+    <tr><td>Chart Of Account</td><td><code>chart-of-account.php</code></td><td><code>tbl_customer_ledger</code> (folder tree)</td></tr>
+    <tr><td>Tax Return</td><td><code>tax-return.php</code></td><td>Invoice / tax tables (by tab)</td></tr>
+    <tr><td>Sale Analysis</td><td><code>sale-analysis.php</code></td><td>UI columns; sample rows until wired to live queries</td></tr>
+    <tr><td>Purchase Analysis</td><td><code>purchase-financial-analysis.php</code></td><td>UI columns; sample rows until wired to live queries</td></tr>
+    <tr><td>Trial Balance Detailed Report</td><td><code>trial-balance-detailed-report.php</code></td><td>Same as TB + per-ledger children under each group</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Shared rules (ledger reports)</h2>
+<ul>
+  <li><strong>Primary table:</strong> <code>tbl_customer_ledger</code> — <code>customer_name</code> is the ledger name.</li>
+  <li><strong>Party typing:</strong> <code>tbl_customers.sundry_debtors_id</code> — commonly <strong>1</strong> = debtor (current assets), <strong>2</strong> = creditor (current liabilities), <strong>29</strong> = bank (current assets).</li>
+  <li><strong>Sign convention:</strong> Positive = <strong>Debit</strong>, negative = <strong>Credit</strong> (JewelSteps-style).</li>
+  <li><strong>GET parameter:</strong> <code>date_range</code> = <code>DD-MM-YYYY - DD-MM-YYYY</code> (space-hyphen-space between dates).</li>
+  <li><strong>Default date behaviour:</strong> First visit (no <code>date_range</code> in URL) → current Indian FY (April–March). Empty range + Apply → all dates (opening from <code>transaction_type = 'opening'</code>).</li>
+  <li><strong>Opening (when from/to set):</strong> Last <code>balance_amount</code> before <code>from_date</code> for that ledger.</li>
+  <li><strong>Period movement:</strong> Sum <code>debit_amount</code> / <code>credit_amount</code> where <code>transaction_type</code> ≠ opening, within range.</li>
+  <li><strong>Closing:</strong> <code>opening + period_debit − period_credit</code>.</li>
+  <li><strong>Excluded ledger:</strong> <code>Purchase Fixing Account</code> filtered out on TB-style reports.</li>
+</ul>
+
+<h2>3. Trial Balance</h2>
+<p><strong>File:</strong> <code>trial-balance.php</code></p>
+<p>Shows one row per <strong>aggregated group</strong> (not each ledger): Opening, Debit, Credit, Balance.</p>
+<p><strong>Group order:</strong> Current Liabilities → Current Assets → Sales Account → Purchase Account → Indirect Expenses → Profit and Loss → Profit and Loss Opening.</p>
+<p>Mapping function groups each <code>customer_name</code> into those buckets (named accounts + party sundry type).</p>
+
+<h2>4. Balance Sheet</h2>
+<p><strong>File:</strong> <code>balance-sheet.php</code> — uses <code>fs_compute_ledger_groups()</code> in <code>includes/fs_ledger_groups.php</code>.</p>
+<ul>
+  <li><strong>Current Liabilities (display):</strong> <code>−1 ×</code> closing of group Current Liabilities.</li>
+  <li><strong>Profit and Loss block:</strong> Combines Profit and Loss Opening display and a computed “current” piece from Sales + Purchase + Indirect Expenses + Profit and Loss group closings (each negated for display).</li>
+  <li><strong>Current Assets:</strong> Group closing for Current Assets.</li>
+  <li><strong>Closing stock:</strong> <code>SUM(value)</code> from <code>tbl_stock</code> where active stock rows exist.</li>
+  <li><strong>Balancing difference:</strong> Plug so total assets align with total liabilities (see code in <code>balance-sheet.php</code>).</li>
+</ul>
+
+<h2>5. Profit and Loss</h2>
+<p><strong>File:</strong> <code>profit-loss.php</code> — <code>fs_compute_pnl_buckets()</code>.</p>
+<p>Buckets (sales, purchase, direct/indirect expense/income) use <code>pl_map_ledger_for_pnl()</code>; P&amp;L reserve ledgers are excluded from trading buckets.</p>
+<p><strong>Net formulas:</strong> e.g. sales net = credits minus debits on sales bucket; purchase net = debits minus credits; similar for other buckets (see <code>fs_ledger_groups.php</code> return block).</p>
+<p><strong>Closing stock</strong> from <code>tbl_stock</code>; <strong>opening stock</strong> is 0 in code until posted elsewhere.</p>
+<p><strong>Gross profit</strong> = (closing stock + sales + direct income) − (opening stock + purchase + direct expenses). <strong>Net</strong> = gross + indirect income − indirect expenses.</p>
+
+<h2>6. Cash Flow</h2>
+<p><strong>File:</strong> <code>cash-flow.php</code></p>
+<p>For each ledger, computes opening/period/closing as usual, then assigns <strong>closing balance</strong> to a cash-flow bucket (Capital, Loans, Current Assets, Sales, Direct Income, etc.) via <code>cash_flow_map_ledger_to_bucket()</code>. Left and right columns sum those bucket closings.</p>
+
+<h2>7. Fund Flow</h2>
+<p><strong>File:</strong> <code>fund-flow.php</code></p>
+<p>Working capital table: Current Assets and Current Liabilities opening/closing and change; working capital = CA − CL. Sources section uses the same P&amp;L net result as Profit Loss (with stock) for net profit/loss line.</p>
+
+<h2>8. Chart of Account</h2>
+<p><strong>File:</strong> <code>chart-of-account.php</code></p>
+<p>Same period arithmetic as Trial Balance, but each ledger is placed in a <strong>folder path</strong> via <code>auragold_coa_ledger_folders()</code> (broader tree: direct income/expense, fixed assets, investments, capital, loans, GST/TDS-style names, etc.).</p>
+
+<h2>9. Tax Return</h2>
+<p><strong>File:</strong> <code>tax-return.php</code></p>
+<p><strong>Parameters:</strong> <code>tab</code>, <code>start_date</code>, <code>end_date</code>. Main “tax-return” tab aggregates VAT-style figures from sale invoice line data and customer address/state mapping (not from <code>tbl_customer_ledger</code> for that block).</p>
+
+<h2>10. Sale Analysis &amp; Purchase Analysis</h2>
+<p><strong>Files:</strong> <code>sale-analysis.php</code>, <code>purchase-financial-analysis.php</code></p>
+<p>Currently use <strong>static sample rows</strong> in PHP arrays for demonstration; production use requires wiring to invoice/line-item queries.</p>
+
+<h2>11. Trial Balance Detailed Report</h2>
+<p><strong>File:</strong> <code>trial-balance-detailed-report.php</code></p>
+<p>Identical grouping and math as Trial Balance, plus <strong>child rows</strong> listing each ledger (<code>customer_name</code>) under its group.</p>
+
+<h2>12. Code reference (central helpers)</h2>
+<table>
+  <thead>
+    <tr><th>Function / file</th><th>Role</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>includes/fs_ledger_groups.php</code></td><td><code>fs_compute_ledger_groups</code>, <code>fs_compute_pnl_buckets</code>, <code>fs_map_ledger_to_group</code>, <code>pl_map_ledger_for_pnl</code></td></tr>
+    <tr><td><code>trial-balance.php</code></td><td><code>trial_balance_map_ledger_to_group</code></td></tr>
+    <tr><td><code>cash-flow.php</code></td><td><code>cash_flow_map_ledger_to_bucket</code></td></tr>
+  </tbody>
+</table>
+
+<p class="footer">AuraGold admin — Financial Statement reference. Open in Word or print to PDF from browser.</p>
+
+</body>
+</html>

@@ -1,0 +1,612 @@
+<?php
+session_start();
+require_once __DIR__ . '/../config.php';
+
+header('Content-Type: application/json');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid request']);
+    exit;
+}
+
+$sale_order_id = isset($_POST['sale_order_id']) ? (int)$_POST['sale_order_id'] : 0;
+/** When 1, always INSERT a new tbl_jobwork_orders row (do not reuse existing JWO for same sale order). Used for one-JWO-per-line from sale-order-process. */
+$force_new_jwo = isset($_POST['force_new_jwo']) && ($_POST['force_new_jwo'] === '1' || $_POST['force_new_jwo'] === 1 || $_POST['force_new_jwo'] === true);
+$jwo_status = isset($_POST['jwo_status']) ? trim($_POST['jwo_status']) : 'Processing';
+$department_id = (isset($_POST['department_id']) && $_POST['department_id'] !== '') ? (int)$_POST['department_id'] : null;
+$priority = isset($_POST['priority']) ? trim($_POST['priority']) : 'Medium';
+$jwo_id = isset($_POST['jwo_id']) ? (int)$_POST['jwo_id'] : 0;
+$department_user_id_provided = isset($_POST['department_user_id']);
+$department_user_id = null;
+if ($department_user_id_provided) {
+    $v_du = trim((string)$_POST['department_user_id']);
+    $department_user_id = ($v_du !== '' && (int)$v_du > 0) ? (int)$v_du : null;
+}
+
+$sales_person_post = isset($_POST['sales_person']) ? trim((string)$_POST['sales_person']) : '';
+
+// Items JSON (product list from form)
+$items_json = isset($_POST['items']) ? $_POST['items'] : '';
+$items = [];
+if (is_string($items_json) && $items_json !== '') {
+    $items = json_decode($items_json, true);
+}
+if (!is_array($items)) {
+    $items = [];
+}
+
+if ($sale_order_id < 1) {
+    echo json_encode(['status' => 'error', 'message' => 'Sale order ID required']);
+    exit;
+}
+
+// Use new tables: tbl_jobwork_orders, tbl_jobwork_order_items
+$tbl_master = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_orders'");
+$tbl_items = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_order_items'");
+if (!$tbl_master || mysqli_num_rows($tbl_master) === 0 || !$tbl_items || mysqli_num_rows($tbl_items) === 0) {
+    if ($tbl_master) mysqli_free_result($tbl_master);
+    if ($tbl_items) mysqli_free_result($tbl_items);
+    echo json_encode(['status' => 'error', 'message' => 'Job work order tables not found. Please run admin/sql/create_tbl_jobwork_orders.sql']);
+    exit;
+}
+mysqli_free_result($tbl_master);
+mysqli_free_result($tbl_items);
+
+// Ensure optional columns exist (otherwise department/priority are never persisted)
+$cd = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_id'");
+if ($cd && mysqli_num_rows($cd) === 0) {
+    mysqli_free_result($cd);
+    @mysqli_query($conn, "ALTER TABLE `tbl_jobwork_orders` ADD COLUMN `department_id` int(11) DEFAULT NULL AFTER `customer_name`");
+} elseif ($cd) {
+    mysqli_free_result($cd);
+}
+$cp = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'priority'");
+if ($cp && mysqli_num_rows($cp) === 0) {
+    mysqli_free_result($cp);
+    @mysqli_query($conn, "ALTER TABLE `tbl_jobwork_orders` ADD COLUMN `priority` varchar(30) DEFAULT 'Medium' AFTER `status`");
+} elseif ($cp) {
+    mysqli_free_result($cp);
+}
+$cdu = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_user_id'");
+if ($cdu && mysqli_num_rows($cdu) === 0) {
+    mysqli_free_result($cdu);
+    @mysqli_query($conn, "ALTER TABLE `tbl_jobwork_orders` ADD COLUMN `department_user_id` int(11) DEFAULT NULL AFTER `department_id`");
+} elseif ($cdu) {
+    mysqli_free_result($cdu);
+}
+
+$cq_jqn = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'jobwork_queue_no'");
+if ($cq_jqn && mysqli_num_rows($cq_jqn) === 0) {
+    mysqli_free_result($cq_jqn);
+    @mysqli_query($conn, "ALTER TABLE `tbl_jobwork_orders` ADD COLUMN `jobwork_queue_no` varchar(50) NOT NULL DEFAULT '' COMMENT 'Jobwork Queue No (bill series)' AFTER `jobwork_no`");
+} elseif ($cq_jqn) {
+    mysqli_free_result($cq_jqn);
+}
+
+$map_chk_req = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_department_user_map'");
+$has_department_user_map = ($map_chk_req && mysqli_num_rows($map_chk_req) > 0);
+if ($map_chk_req) {
+    mysqli_free_result($map_chk_req);
+}
+
+// Department is optional. When department–user map exists, Name (ledger in tbl_customers) is required.
+if ($has_department_user_map) {
+    if (!$department_user_id_provided || $department_user_id === null || (int)$department_user_id < 1) {
+        echo json_encode(['status' => 'error', 'message' => 'Name is required']);
+        exit;
+    }
+}
+if ($department_id !== null && (int)$department_id > 0) {
+    // keep normalized positive id only
+    $department_id = (int)$department_id;
+} else {
+    $department_id = null;
+}
+
+// If the browser did not send jwo_id (or it is stale 0) but a JWO row exists for this sale order, update that row — unless forcing a new JWO (one job work order per sale order line item).
+if ($jwo_id < 1 && !$force_new_jwo) {
+    $row_existing = getRecord("SELECT id FROM tbl_jobwork_orders WHERE sale_order_id = $sale_order_id LIMIT 1");
+    if ($row_existing && !empty($row_existing['id'])) {
+        $jwo_id = (int)$row_existing['id'];
+    }
+}
+
+$sale_order = getRecord("SELECT id, order_no, customer_name, order_date, due_date, grand_total, status FROM tbl_sale_orders WHERE id = $sale_order_id");
+if (!$sale_order) {
+    echo json_encode(['status' => 'error', 'message' => 'Sale order not found']);
+    exit;
+}
+
+// Keep tbl_sale_orders.department_id in sync with JWO (users often save department only on job work screen)
+$cd_so = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_orders LIKE 'department_id'");
+if ($cd_so && mysqli_num_rows($cd_so) === 0) {
+    mysqli_free_result($cd_so);
+    @mysqli_query($conn, "ALTER TABLE `tbl_sale_orders` ADD COLUMN `department_id` int(11) DEFAULT NULL AFTER `customer_name`");
+} elseif ($cd_so) {
+    mysqli_free_result($cd_so);
+}
+
+/** @param mysqli $conn */
+function auragold_sync_sale_order_department($conn, $sale_order_id, $department_id) {
+    $c = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_orders LIKE 'department_id'");
+    if (!$c || mysqli_num_rows($c) === 0) {
+        if ($c) {
+            mysqli_free_result($c);
+        }
+        return;
+    }
+    mysqli_free_result($c);
+    $sid = (int)$sale_order_id;
+    if ($department_id !== null && (int)$department_id > 0) {
+        mysqli_query($conn, "UPDATE tbl_sale_orders SET department_id = " . (int)$department_id . " WHERE id = $sid");
+    } else {
+        mysqli_query($conn, "UPDATE tbl_sale_orders SET department_id = NULL WHERE id = $sid");
+    }
+}
+
+/**
+ * When posted line weights are all zero, copy from tbl_sale_order_items so manufacturing-process / inward stock show weight on first save.
+ *
+ * @param mysqli $conn
+ * @param int    $sale_order_id
+ * @param array<string,mixed> $item
+ */
+function auragold_jobwork_merge_weights_from_sale_order_line($conn, $sale_order_id, array &$item) {
+    $sid = (int) $sale_order_id;
+    if ($sid < 1) {
+        return;
+    }
+    $g = (float) ($item['gross_weight'] ?? 0);
+    $f = (float) ($item['final_weight'] ?? 0);
+    $n = (float) ($item['net_weight'] ?? 0);
+    if (($g > 0.0000001) || ($f > 0.0000001) || ($n > 0.0000001)) {
+        return;
+    }
+    $chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_items'");
+    if (!$chk || mysqli_num_rows($chk) === 0) {
+        if ($chk) {
+            mysqli_free_result($chk);
+        }
+        return;
+    }
+    mysqli_free_result($chk);
+
+    $pid = (int) ($item['product_id'] ?? 0);
+    $cid = isset($item['characteristic_id']) && $item['characteristic_id'] !== '' && $item['characteristic_id'] !== null
+        ? (int) $item['characteristic_id'] : 0;
+    $barcode = isset($item['barcode']) ? trim((string) $item['barcode']) : '';
+    $barcode_esc = mysqli_real_escape_string($conn, $barcode);
+
+    $row = null;
+    if ($pid > 0 && $cid > 0 && function_exists('getRecord')) {
+        $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid
+            . ' AND product_characteristic_id = ' . $cid . ' ORDER BY id ASC LIMIT 1');
+    }
+    if (!$row && $pid > 0 && $barcode !== '' && function_exists('getRecord')) {
+        $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid
+            . " AND TRIM(IFNULL(barcode,'')) = '" . $barcode_esc . "' ORDER BY id ASC LIMIT 1");
+    }
+    if (!$row && $pid > 0 && function_exists('getRecord')) {
+        $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid . ' ORDER BY id ASC LIMIT 1');
+    }
+    if (!$row || !is_array($row)) {
+        return;
+    }
+
+    $sg = isset($row['gross_weight']) ? (float) $row['gross_weight'] : 0.0;
+    $sm = isset($row['metal_weight']) ? (float) $row['metal_weight'] : 0.0;
+    if ($sg > 0.0000001) {
+        $item['gross_weight'] = $sg;
+    } elseif ($sm > 0.0000001) {
+        $item['gross_weight'] = $sm;
+    }
+
+    if (isset($row['less_weight']) && (float) $row['less_weight'] > 0.0000001) {
+        $item['less_weight'] = (float) $row['less_weight'];
+    }
+    if (isset($row['net_weight']) && (float) $row['net_weight'] > 0.0000001) {
+        $item['net_weight'] = (float) $row['net_weight'];
+    }
+    if (isset($row['final_weight']) && (float) $row['final_weight'] > 0.0000001) {
+        $item['final_weight'] = (float) $row['final_weight'];
+    }
+    $pp = null;
+    if (isset($row['pure_weight'])) {
+        $pp = (float) $row['pure_weight'];
+    } elseif (isset($row['purity_weight'])) {
+        $pp = (float) $row['purity_weight'];
+    }
+    if ($pp !== null && $pp > 0.0000001) {
+        $item['pure_weight'] = $pp;
+        $item['purity_weight'] = $pp;
+    }
+    if (isset($row['purity']) && (float) $row['purity'] > 0.0000001) {
+        $item['purity'] = (float) $row['purity'];
+    }
+}
+
+/** Mirror sales person from JWO form to tbl_sale_orders (same field as sale invoice). */
+function auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person) {
+    $c = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_orders LIKE 'sales_person'");
+    if (!$c || mysqli_num_rows($c) === 0) {
+        if ($c) {
+            mysqli_free_result($c);
+        }
+        return;
+    }
+    mysqli_free_result($c);
+    $sid = (int)$sale_order_id;
+    $sp = mysqli_real_escape_string($conn, $sales_person);
+    if ($sales_person !== '') {
+        mysqli_query($conn, "UPDATE tbl_sale_orders SET sales_person = '$sp' WHERE id = $sid");
+    } else {
+        mysqli_query($conn, "UPDATE tbl_sale_orders SET sales_person = NULL WHERE id = $sid");
+    }
+}
+
+/**
+ * Log assignment so manufacturing-process.php Inward / Outward stock grids show the job
+ * (same tbl_jobwork_queue_activity row as ajax/mp-save-jobwork-queue.php after To Dept / To User).
+ */
+function auragold_jwo_log_manufacturing_queue_activity($conn, $jobwork_order_id, $to_dept_id, $to_user_id) {
+    $jid = (int)$jobwork_order_id;
+    $td = (int)$to_dept_id;
+    if ($jid < 1 || $td < 1) {
+        return;
+    }
+    $tu_sql = 'NULL';
+    if ($to_user_id !== null && (int)$to_user_id > 0) {
+        $tu_sql = (string)(int)$to_user_id;
+    }
+    $act_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_queue_activity'");
+    if (!$act_chk || mysqli_num_rows($act_chk) === 0) {
+        if ($act_chk) {
+            mysqli_free_result($act_chk);
+        }
+        @mysqli_query($conn, 'CREATE TABLE IF NOT EXISTS `tbl_jobwork_queue_activity` (
+      `id` int(11) NOT NULL AUTO_INCREMENT,
+      `jobwork_order_id` int(11) NOT NULL,
+      `jobwork_queue_no` varchar(50) NOT NULL DEFAULT \'\',
+      `from_dept_id` int(11) DEFAULT NULL,
+      `from_user_id` int(11) DEFAULT NULL,
+      `to_dept_id` int(11) DEFAULT NULL,
+      `to_user_id` int(11) DEFAULT NULL,
+      `activity_action` varchar(32) DEFAULT NULL,
+      `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      KEY `jobwork_order_id` (`jobwork_order_id`),
+      KEY `created_at` (`created_at`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    } elseif ($act_chk) {
+        mysqli_free_result($act_chk);
+    }
+    $aca_so = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_queue_activity LIKE 'activity_action'");
+    if (!$aca_so || mysqli_num_rows($aca_so) === 0) {
+        @mysqli_query($conn, 'ALTER TABLE tbl_jobwork_queue_activity ADD COLUMN activity_action varchar(32) DEFAULT NULL AFTER to_user_id');
+    }
+    if ($aca_so) {
+        mysqli_free_result($aca_so);
+    }
+    $acf_so = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_queue_activity LIKE 'from_dept_id'");
+    if (!$acf_so || mysqli_num_rows($acf_so) === 0) {
+        @mysqli_query($conn, 'ALTER TABLE tbl_jobwork_queue_activity ADD COLUMN from_dept_id int(11) DEFAULT NULL AFTER jobwork_queue_no, ADD COLUMN from_user_id int(11) DEFAULT NULL AFTER from_dept_id');
+    }
+    if ($acf_so) {
+        mysqli_free_result($acf_so);
+    }
+    $queue_no = '';
+    if (function_exists('ensureJobworkQueueNoForOrder')) {
+        $qn = ensureJobworkQueueNoForOrder($conn, $jid);
+        if ($qn !== null && $qn !== '') {
+            $queue_no = trim((string)$qn);
+        }
+    }
+    if ($queue_no === '' && function_exists('getRecord')) {
+        $jrow = getRecord("SELECT jobwork_queue_no FROM tbl_jobwork_orders WHERE id = $jid LIMIT 1");
+        if ($jrow && isset($jrow['jobwork_queue_no'])) {
+            $queue_no = trim((string)$jrow['jobwork_queue_no']);
+        }
+    }
+    $qn_esc = mysqli_real_escape_string($conn, $queue_no);
+    @mysqli_query($conn, 'INSERT INTO tbl_jobwork_queue_activity (jobwork_order_id, jobwork_queue_no, from_dept_id, from_user_id, to_dept_id, to_user_id, activity_action) VALUES ('
+        . $jid . ', \'' . $qn_esc . '\', NULL, NULL, ' . $td . ', ' . $tu_sql . ", 'jobwork_create')");
+}
+
+$sale_order_no = mysqli_real_escape_string($conn, $sale_order['order_no']);
+$customer_name = mysqli_real_escape_string($conn, $sale_order['customer_name'] ?? '');
+$order_date = !empty($sale_order['order_date']) ? mysqli_real_escape_string($conn, $sale_order['order_date']) : 'NULL';
+$due_date = !empty($sale_order['due_date']) ? "'" . mysqli_real_escape_string($conn, $sale_order['due_date']) . "'" : 'NULL';
+$grand_total = (float)($sale_order['grand_total'] ?? 0);
+
+if ($jwo_id > 0) {
+    // Update existing JWO (edit mode): update master and replace items
+    $jwo = getRecord("SELECT id, sale_order_id, status, department_id, department_user_id FROM tbl_jobwork_orders WHERE id = $jwo_id");
+    if (!$jwo) {
+        echo json_encode(['status' => 'error', 'message' => 'Job work order not found']);
+        exit;
+    }
+    if ((int)$jwo['sale_order_id'] !== $sale_order_id) {
+        echo json_encode(['status' => 'error', 'message' => 'Sale order mismatch']);
+        exit;
+    }
+    $new_status = mysqli_real_escape_string($conn, $jwo_status);
+    $grand_total = 0;
+    foreach ($items as $item) {
+        $grand_total += (float)($item['net_amt_with_tax'] ?? $item['net_amount'] ?? 0);
+    }
+    $grand_total = round($grand_total, 2);
+    $cols = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_id'");
+    $has_dept = ($cols && mysqli_num_rows($cols) > 0);
+    if ($cols) mysqli_free_result($cols);
+    $cols2 = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'priority'");
+    $has_priority = ($cols2 && mysqli_num_rows($cols2) > 0);
+    if ($cols2) mysqli_free_result($cols2);
+    $cols_du = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_user_id'");
+    $has_dept_user = ($cols_du && mysqli_num_rows($cols_du) > 0);
+    if ($cols_du) {
+        mysqli_free_result($cols_du);
+    }
+    $upd = "UPDATE tbl_jobwork_orders SET status = '$new_status', grand_total = $grand_total, updated_at = NOW()";
+    // Only update department_id when a valid option was selected (not --Select--)
+    if ($has_dept && $department_id !== null && $department_id > 0) {
+        $upd .= ", department_id = " . (int)$department_id;
+    }
+    if ($has_priority) {
+        $priority_esc = mysqli_real_escape_string($conn, $priority);
+        $upd .= ", priority = '$priority_esc'";
+    }
+    if ($has_dept_user && $department_user_id_provided) {
+        if ($department_user_id !== null && $department_user_id > 0) {
+            $upd .= ", department_user_id = " . (int)$department_user_id;
+        } else {
+            $upd .= ", department_user_id = NULL";
+        }
+    }
+    $upd .= " WHERE id = $jwo_id";
+    mysqli_query($conn, $upd);
+    mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=jwo|hid=" . (int) $jwo_id . "|%'");
+    mysqli_query($conn, "DELETE FROM tbl_jobwork_order_items WHERE jobwork_order_id = $jwo_id");
+    foreach ($items as $ik => $_tmp) {
+        auragold_jobwork_merge_weights_from_sale_order_line($conn, $sale_order_id, $items[$ik]);
+    }
+    foreach ($items as $item) {
+        $product_id = (int)($item['product_id'] ?? 0);
+        $characteristic_id = isset($item['characteristic_id']) && $item['characteristic_id'] !== '' ? (int)$item['characteristic_id'] : null;
+        $barcode = mysqli_real_escape_string($conn, $item['barcode'] ?? '');
+        $product_name = mysqli_real_escape_string($conn, $item['product_name'] ?? '');
+        $design_no = mysqli_real_escape_string($conn, $item['design_no'] ?? '');
+        $carat = mysqli_real_escape_string($conn, $item['carat'] ?? '');
+        $quantity = (float)($item['quantity'] ?? 1);
+        $gross_weight = (float)($item['gross_weight'] ?? 0);
+        $less_weight = (float)($item['less_weight'] ?? 0);
+        $purity = (float)($item['purity'] ?? 0);
+        $purity_weight = (float)($item['purity_weight'] ?? 0);
+        $final_weight = (float)($item['final_weight'] ?? 0);
+        $net_weight = (float)($item['net_weight'] ?? 0);
+        $pure_weight = (float)($item['pure_weight'] ?? 0);
+        $rate = (float)($item['rate'] ?? 0);
+        $making_amount = (float)($item['making_amount'] ?? 0);
+        $amount = (float)($item['amount'] ?? 0);
+        $tax_amount = (float)($item['tax'] ?? 0);
+        $net_amount = (float)($item['net_amount'] ?? 0);
+        $net_amt_with_tax = (float)($item['net_amt_with_tax'] ?? 0);
+        $char_sql = $characteristic_id !== null ? $characteristic_id : 'NULL';
+        $barcode_sql = $barcode !== '' ? "'$barcode'" : 'NULL';
+        $design_sql = $design_no !== '' ? "'$design_no'" : 'NULL';
+        $carat_sql = $carat !== '' ? "'$carat'" : 'NULL';
+        $ins_item = "INSERT INTO tbl_jobwork_order_items (jobwork_order_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax, status, created_at) VALUES ($jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax, 1, NOW())";
+        mysqli_query($conn, $ins_item);
+        $jwo_line_id = (int) mysqli_insert_id($conn);
+        require_once dirname(__DIR__) . '/includes/stock_history_audit_journal.php';
+        $jwb = getRecord("SELECT jobwork_no, order_date FROM tbl_jobwork_orders WHERE id = " . (int) $jwo_id . " LIMIT 1");
+        $jw_no = trim((string) ($jwb['jobwork_no'] ?? ''));
+        $jw_dt = substr(trim((string) ($jwb['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $jw_dt) && !empty($sale_order['order_date'])) {
+            $jw_dt = substr(trim((string) $sale_order['order_date']), 0, 10);
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $jw_dt)) {
+            $jw_dt = date('Y-m-d');
+        }
+        auragold_stock_history_audit_for_document_barcode_line($conn, 'Jobwork Order', $jw_no, $jw_dt, 'JWO', (int) $jwo_id, $jwo_line_id, 'jwo', array_merge($item, [
+            'product_id' => $product_id,
+            'product_characteristic_id' => $characteristic_id !== null ? (int) $characteristic_id : 0,
+        ]));
+    }
+    if (strtolower($new_status) === 'completed') {
+        mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'completed', updated_at = NOW() WHERE id = $sale_order_id");
+    }
+    auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
+    auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
+    $new_dept = ($department_id !== null && (int)$department_id > 0) ? (int)$department_id : 0;
+    $new_user = ($department_user_id !== null && (int)$department_user_id > 0) ? (int)$department_user_id : 0;
+    $old_dept = (int)($jwo['department_id'] ?? 0);
+    $old_user = isset($jwo['department_user_id']) && $jwo['department_user_id'] !== null && $jwo['department_user_id'] !== ''
+        ? (int)$jwo['department_user_id'] : 0;
+    $log_activity = false;
+    if ($new_dept > 0) {
+        if ($new_dept !== $old_dept || $new_user !== $old_user) {
+            $log_activity = true;
+        } else {
+            $achk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_queue_activity'");
+            if ($achk && mysqli_num_rows($achk) > 0) {
+                mysqli_free_result($achk);
+                $ex = @mysqli_query($conn, 'SELECT id FROM tbl_jobwork_queue_activity WHERE jobwork_order_id = ' . (int)$jwo_id . ' LIMIT 1');
+                if ($ex && mysqli_num_rows($ex) === 0) {
+                    $log_activity = true;
+                }
+                if ($ex) {
+                    mysqli_free_result($ex);
+                }
+            } elseif ($achk) {
+                mysqli_free_result($achk);
+            }
+        }
+    }
+    if ($log_activity) {
+        auragold_jwo_log_manufacturing_queue_activity($conn, $jwo_id, $new_dept, $department_user_id);
+    }
+    require_once __DIR__ . '/../includes/auragold_notifications.php';
+    $rjw = @getRecord('SELECT jobwork_no, customer_name, order_date, due_date FROM tbl_jobwork_orders WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+    if (is_array($rjw)) {
+        $dued = isset($rjw['due_date']) && $rjw['due_date'] !== null && trim((string) $rjw['due_date']) !== ''
+            ? substr(trim((string) $rjw['due_date']), 0, 10) : '';
+        $od = substr(trim((string) ($rjw['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od)) {
+            $od = date('Y-m-d');
+        }
+        auragold_notify_document_saved($conn, [
+            'label' => 'Jobwork Order',
+            'verb' => 'updated',
+            'number' => trim((string) ($rjw['jobwork_no'] ?? '')),
+            'party' => trim((string) ($rjw['customer_name'] ?? '')),
+            'doc_date' => $od,
+            'due_date' => $dued,
+            'ref_id' => (int) $jwo_id,
+        ]);
+    }
+    echo json_encode(['status' => 'success', 'message' => 'Job work order updated', 'jwo_id' => $jwo_id]);
+    exit;
+}
+
+// New JWO with exactly one line in this request: store that line's total on the master (not the whole sale order).
+if (count($items) === 1) {
+    $grand_total = 0;
+    foreach ($items as $item) {
+        $grand_total += (float)($item['net_amt_with_tax'] ?? $item['net_amount'] ?? 0);
+    }
+    $grand_total = round($grand_total, 2);
+}
+
+// Insert master — jobwork_no from Bill Series (bill-series.php, voucher type Jobwork Order / Job Work Order), else legacy JWO-1
+$cfg_jwo = function_exists('getJobworkOrderBillSeriesConfig')
+    ? getJobworkOrderBillSeriesConfig($conn)
+    : ['prefix' => 'JWO-', 'suffix' => '', 'start_count' => 1, 'from_series_table' => false];
+$jobwork_no = function_exists('getNextJobworkOrderNo') ? getNextJobworkOrderNo($conn) : 'JWO-1';
+$jobwork_no_esc = mysqli_real_escape_string($conn, $jobwork_no);
+$existing_no = getRecord("SELECT id FROM tbl_jobwork_orders WHERE jobwork_no = '$jobwork_no_esc'");
+$guard_no = 0;
+while ($existing_no && $guard_no < 5000) {
+    $jobwork_no = function_exists('bumpJobworkOrderNo') ? bumpJobworkOrderNo($conn, $jobwork_no, $cfg_jwo) : ($jobwork_no . '-1');
+    $jobwork_no_esc = mysqli_real_escape_string($conn, $jobwork_no);
+    $existing_no = getRecord("SELECT id FROM tbl_jobwork_orders WHERE jobwork_no = '$jobwork_no_esc'");
+    $guard_no++;
+}
+
+$status_esc = mysqli_real_escape_string($conn, $jwo_status);
+$ins_master = "INSERT INTO tbl_jobwork_orders (jobwork_no, sale_order_id, sale_order_no, customer_name, order_date, due_date, grand_total, status, created_at) VALUES ('$jobwork_no_esc', $sale_order_id, '$sale_order_no', '$customer_name', " . ($order_date !== 'NULL' ? "'$order_date'" : 'NULL') . ", $due_date, $grand_total, '$status_esc', NOW())";
+if (!mysqli_query($conn, $ins_master)) {
+    echo json_encode(['status' => 'error', 'message' => 'Failed to create job work order: ' . mysqli_error($conn)]);
+    exit;
+}
+
+$new_jwo_id = mysqli_insert_id($conn);
+
+// Save department_id and priority if columns exist (run sql/alter_tbl_jobwork_orders_add_columns.sql)
+$cols = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_id'");
+$has_dept = ($cols && mysqli_num_rows($cols) > 0);
+if ($cols) mysqli_free_result($cols);
+$cols2 = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'priority'");
+$has_priority = ($cols2 && mysqli_num_rows($cols2) > 0);
+if ($cols2) mysqli_free_result($cols2);
+$cols_du = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_user_id'");
+$has_dept_user = ($cols_du && mysqli_num_rows($cols_du) > 0);
+if ($cols_du) {
+    mysqli_free_result($cols_du);
+}
+if ($has_dept && $department_id !== null && $department_id > 0) {
+    mysqli_query($conn, "UPDATE tbl_jobwork_orders SET department_id = " . (int)$department_id . " WHERE id = $new_jwo_id");
+}
+if ($has_priority) {
+    $priority_esc = mysqli_real_escape_string($conn, $priority);
+    mysqli_query($conn, "UPDATE tbl_jobwork_orders SET priority = '$priority_esc' WHERE id = $new_jwo_id");
+}
+if ($has_dept_user && $department_user_id_provided) {
+    if ($department_user_id !== null && $department_user_id > 0) {
+        mysqli_query($conn, "UPDATE tbl_jobwork_orders SET department_user_id = " . (int)$department_user_id . " WHERE id = $new_jwo_id");
+    } else {
+        mysqli_query($conn, "UPDATE tbl_jobwork_orders SET department_user_id = NULL WHERE id = $new_jwo_id");
+    }
+}
+
+// Insert items
+foreach ($items as $ik => $_tmp) {
+    auragold_jobwork_merge_weights_from_sale_order_line($conn, $sale_order_id, $items[$ik]);
+}
+foreach ($items as $item) {
+    $product_id = (int)($item['product_id'] ?? 0);
+    $characteristic_id = isset($item['characteristic_id']) && $item['characteristic_id'] !== '' ? (int)$item['characteristic_id'] : null;
+    $barcode = mysqli_real_escape_string($conn, $item['barcode'] ?? '');
+    $product_name = mysqli_real_escape_string($conn, $item['product_name'] ?? '');
+    $design_no = mysqli_real_escape_string($conn, $item['design_no'] ?? '');
+    $carat = mysqli_real_escape_string($conn, $item['carat'] ?? '');
+    $quantity = (float)($item['quantity'] ?? 1);
+    $gross_weight = (float)($item['gross_weight'] ?? 0);
+    $less_weight = (float)($item['less_weight'] ?? 0);
+    $purity = (float)($item['purity'] ?? 0);
+    $purity_weight = (float)($item['purity_weight'] ?? 0);
+    $final_weight = (float)($item['final_weight'] ?? 0);
+    $net_weight = (float)($item['net_weight'] ?? 0);
+    $pure_weight = (float)($item['pure_weight'] ?? 0);
+    $rate = (float)($item['rate'] ?? 0);
+    $making_amount = (float)($item['making_amount'] ?? 0);
+    $amount = (float)($item['amount'] ?? 0);
+    $tax_amount = (float)($item['tax'] ?? 0);
+    $net_amount = (float)($item['net_amount'] ?? 0);
+    $net_amt_with_tax = (float)($item['net_amt_with_tax'] ?? 0);
+
+    $char_sql = $characteristic_id !== null ? $characteristic_id : 'NULL';
+    $barcode_sql = $barcode !== '' ? "'$barcode'" : 'NULL';
+    $design_sql = $design_no !== '' ? "'$design_no'" : 'NULL';
+    $carat_sql = $carat !== '' ? "'$carat'" : 'NULL';
+
+    $ins_item = "INSERT INTO tbl_jobwork_order_items (jobwork_order_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax, status, created_at) VALUES ($new_jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax, 1, NOW())";
+    mysqli_query($conn, $ins_item);
+    $jwo_line_id = (int) mysqli_insert_id($conn);
+    require_once dirname(__DIR__) . '/includes/stock_history_audit_journal.php';
+    $jw_dt_n = !empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $jw_dt_n)) {
+        $jw_dt_n = date('Y-m-d');
+    }
+    auragold_stock_history_audit_for_document_barcode_line($conn, 'Jobwork Order', $jobwork_no, $jw_dt_n, 'JWO', (int) $new_jwo_id, $jwo_line_id, 'jwo', array_merge($item, [
+        'product_id' => $product_id,
+        'product_characteristic_id' => $characteristic_id !== null ? (int) $characteristic_id : 0,
+    ]));
+}
+
+// Update sale order status to processing (so sale-order-process.php shows "Processing") and mirror department / sales person
+auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
+auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
+mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'processing' WHERE id = $sale_order_id");
+
+if ($department_id !== null && (int)$department_id > 0) {
+    auragold_jwo_log_manufacturing_queue_activity($conn, $new_jwo_id, (int)$department_id, $department_user_id);
+}
+
+require_once __DIR__ . '/../includes/auragold_notifications.php';
+$rjw_new = @getRecord('SELECT jobwork_no, customer_name, order_date, due_date FROM tbl_jobwork_orders WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+if (is_array($rjw_new)) {
+    $dued = isset($rjw_new['due_date']) && $rjw_new['due_date'] !== null && trim((string) $rjw_new['due_date']) !== ''
+        ? substr(trim((string) $rjw_new['due_date']), 0, 10) : '';
+    $od = substr(trim((string) ($rjw_new['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od)) {
+        $od = date('Y-m-d');
+    }
+    auragold_notify_document_saved($conn, [
+        'label' => 'Jobwork Order',
+        'verb' => 'created',
+        'number' => trim((string) ($rjw_new['jobwork_no'] ?? '')),
+        'party' => trim((string) ($rjw_new['customer_name'] ?? '')),
+        'doc_date' => $od,
+        'due_date' => $dued,
+        'ref_id' => (int) $new_jwo_id,
+    ]);
+}
+
+echo json_encode([
+    'status' => 'success',
+    'message' => 'Job work order created',
+    'jwo_id' => $new_jwo_id,
+    'job_work_no' => $jobwork_no,
+    'jobwork_no' => $jobwork_no,
+    'sale_order_id' => $sale_order_id
+]);

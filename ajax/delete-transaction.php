@@ -1,0 +1,480 @@
+<?php
+session_start();
+require_once '../config.php';
+
+header('Content-Type: application/json');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid Request']);
+    exit;
+}
+
+$type = isset($_POST['type']) ? trim($_POST['type']) : '';
+$id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+
+// Sale Fixing Direct: remove items + ledger, hard-delete SFD row, set linked PI fixing_type to Standard
+if ($type === 'sale_fixing_direct') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $sf_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_fixing_direct'");
+    if (!$sf_check || mysqli_num_rows($sf_check) == 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Table not found']);
+        exit;
+    }
+    mysqli_free_result($sf_check);
+    $sf = getRecord("SELECT id, against_of FROM tbl_sale_fixing_direct WHERE id = $id");
+    if (!$sf) {
+        echo json_encode(['status' => 'error', 'message' => 'Record not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        $against_of = $sf['against_of'] ?? '';
+        $pi_no = function_exists('auragold_pi_invoice_from_sfd_against_of')
+            ? auragold_pi_invoice_from_sfd_against_of($against_of)
+            : '';
+        // Auto-linked PI hedging posts Hedging Account rows as purchase_invoice — remove them when SFD is deleted (SFD has no separate HA ledger type).
+        if ($pi_no !== '') {
+            $pi_esc = mysqli_real_escape_string($conn, $pi_no);
+            $pi_row = getRecord("SELECT id FROM tbl_purchase_invoices WHERE (status IS NULL OR status != 'deleted') AND (invoice_no = '$pi_esc' OR LOWER(TRIM(invoice_no)) = LOWER('$pi_esc')) LIMIT 1");
+            if ($pi_row && (int)($pi_row['id'] ?? 0) > 0) {
+                $pi_id_del = (int)$pi_row['id'];
+                if (!mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE customer_name = 'Hedging Account' AND transaction_type = 'purchase_invoice' AND transaction_id = $pi_id_del AND status = 1")) {
+                    throw new Exception('Hedging Account PI ledger: ' . mysqli_error($conn));
+                }
+            }
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'sale_fixing_direct' AND transaction_id = $id")) {
+            throw new Exception('Ledger: ' . mysqli_error($conn));
+        }
+        $it_tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_fixing_direct_items'");
+        if ($it_tbl && mysqli_num_rows($it_tbl) > 0) {
+            mysqli_free_result($it_tbl);
+            if (!mysqli_query($conn, "DELETE FROM tbl_sale_fixing_direct_items WHERE fixing_id = $id")) {
+                throw new Exception('Sale fixing items: ' . mysqli_error($conn));
+            }
+        } elseif ($it_tbl) {
+            mysqli_free_result($it_tbl);
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_sale_fixing_direct WHERE id = $id")) {
+            throw new Exception(mysqli_error($conn));
+        }
+        if ($pi_no !== '') {
+            $pi_esc = mysqli_real_escape_string($conn, $pi_no);
+            mysqli_query($conn, "UPDATE tbl_purchase_invoices SET fixing_type = 'Standard' WHERE invoice_no = '$pi_esc' AND (status IS NULL OR status != 'deleted')");
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Sale fixing deleted. Linked purchase invoice set to Standard fixing.']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// Purchase Fixing Direct (from sale invoice hedging): delete row; set linked sale invoice fixing_type to Standard
+if ($type === 'purchase_fixing_direct') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $pf_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_purchase_fixing_direct'");
+    if (!$pf_check || mysqli_num_rows($pf_check) == 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Table not found']);
+        exit;
+    }
+    mysqli_free_result($pf_check);
+    $pf_si_col = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_purchase_fixing_direct LIKE 'sale_invoice_no'");
+    $pf_has_si = ($pf_si_col && mysqli_num_rows($pf_si_col) > 0);
+    if ($pf_si_col) {
+        mysqli_free_result($pf_si_col);
+    }
+    $sel = $pf_has_si ? 'id, sale_invoice_no, against_of' : 'id, against_of';
+    $pf = getRecord("SELECT $sel FROM tbl_purchase_fixing_direct WHERE id = $id");
+    if (!$pf) {
+        echo json_encode(['status' => 'error', 'message' => 'Record not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        $pfi_del = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_purchase_fixing_direct_items'");
+        if ($pfi_del && mysqli_num_rows($pfi_del) > 0) {
+            mysqli_free_result($pfi_del);
+            if (!mysqli_query($conn, "DELETE FROM tbl_purchase_fixing_direct_items WHERE fixing_id = $id")) {
+                throw new Exception('Purchase fixing items: ' . mysqli_error($conn));
+            }
+        } elseif ($pfi_del) {
+            mysqli_free_result($pfi_del);
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_purchase_fixing_direct WHERE id = $id")) {
+            throw new Exception(mysqli_error($conn));
+        }
+        $sino = trim((string) ($pf['sale_invoice_no'] ?? ''));
+        if ($sino === '' && function_exists('auragold_si_invoice_from_pfd_against_of')) {
+            $sino = auragold_si_invoice_from_pfd_against_of($pf['against_of'] ?? '');
+        }
+        if ($sino !== '') {
+            $esc = mysqli_real_escape_string($conn, $sino);
+            mysqli_query($conn, "UPDATE tbl_sale_invoices SET fixing_type = 'Standard' WHERE (status IS NULL OR status != 'deleted') AND (invoice_no = '$esc' OR LOWER(TRIM(invoice_no)) = LOWER('$esc'))");
+            $si_map = getRecord("SELECT id FROM tbl_sale_invoices WHERE (status IS NULL OR status != 'deleted') AND (invoice_no = '$esc' OR LOWER(TRIM(invoice_no)) = LOWER('$esc')) LIMIT 1");
+            if ($si_map && (int) ($si_map['id'] ?? 0) > 0) {
+                @mysqli_query($conn, "DELETE FROM invoice_fixing_mapping WHERE source_type = 'sale_invoice' AND source_transaction_id = " . (int) $si_map['id']);
+            }
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Purchase fixing deleted. Linked sale invoice set to Standard fixing.']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// Standalone Old Jewelry Scrap Invoice (not auto-linked from purchase invoice ref_no PI:{id})
+if ($type === 'old_jewelry_scrap_invoice') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $oj_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_old_jewelry_scrap_invoices'");
+    if (!$oj_chk || mysqli_num_rows($oj_chk) == 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Table not found']);
+        exit;
+    }
+    mysqli_free_result($oj_chk);
+    $oj = getRecord("SELECT id, ref_no, invoice_no, customer_name FROM tbl_old_jewelry_scrap_invoices WHERE id = $id");
+    if (!$oj) {
+        echo json_encode(['status' => 'error', 'message' => 'Record not found']);
+        exit;
+    }
+    $rn = trim((string) ($oj['ref_no'] ?? ''));
+    if ($rn !== '' && preg_match('/^PI:\d+$/i', $rn)) {
+        echo json_encode(['status' => 'error', 'message' => 'This scrap invoice is linked to a Purchase Invoice. Remove the scrap payment on that invoice and save, or delete the purchase invoice.']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_id = $id AND transaction_type IN ('old_jewelry_scrap_invoice', 'old_jewelry_scrap_contra') AND status = 1");
+        $ino_m = mysqli_real_escape_string($conn, trim((string) ($oj['invoice_no'] ?? '')));
+        $cn_m = mysqli_real_escape_string($conn, trim((string) ($oj['customer_name'] ?? '')));
+        if ($ino_m !== '' && $cn_m !== '') {
+            mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE status = 1 AND customer_name = '$cn_m' AND transaction_no = '$ino_m' AND transaction_type IN ('old_jewelry_scrap_invoice', 'Old Jewelry - Scrap Invoice')");
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_old_jewelry_scrap_invoices WHERE id = $id")) {
+            throw new Exception(mysqli_error($conn));
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Old jewelry scrap invoice deleted.']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+$allowed_types = [
+    'purchase_invoice' => 'tbl_purchase_invoices',
+    'sale_invoice' => 'tbl_sale_invoices',
+    'sale_return' => 'tbl_sale_returns',
+    'purchase_return' => 'tbl_purchase_returns',
+    'sale_quotation' => 'tbl_sale_quotations',
+    'purchase_quotation' => 'tbl_purchase_quotations',
+];
+
+if ($id <= 0 || !isset($allowed_types[$type])) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid type or ID']);
+    exit;
+}
+
+$table = $allowed_types[$type];
+
+// Check table exists
+$check = @mysqli_query($conn, "SHOW TABLES LIKE '$table'");
+if (!$check || mysqli_num_rows($check) == 0) {
+    echo json_encode(['status' => 'error', 'message' => 'Table not found']);
+    exit;
+}
+if ($check) mysqli_free_result($check);
+
+// Check if record exists and has status column
+$col_check = @mysqli_query($conn, "SHOW COLUMNS FROM $table LIKE 'status'");
+$has_status = ($col_check && mysqli_num_rows($col_check) > 0);
+if ($col_check) mysqli_free_result($col_check);
+
+$record = getRecord("SELECT id FROM $table WHERE id = $id");
+if (!$record) {
+    echo json_encode(['status' => 'error', 'message' => 'Record not found']);
+    exit;
+}
+
+mysqli_begin_transaction($conn);
+try {
+    if ($type === 'sale_invoice') {
+        $si_chk = getRecord("SELECT invoice_no FROM tbl_sale_invoices WHERE id = $id");
+        if ($si_chk && !empty($si_chk['invoice_no']) && function_exists('auragold_si_has_active_purchase_fixing')) {
+            if (auragold_si_has_active_purchase_fixing($si_chk['invoice_no'])) {
+                throw new Exception('Delete the purchase fixing first, then you can delete this sale invoice.');
+            }
+        }
+    }
+
+    $pi_invoice_no_esc = '';
+    if ($type === 'purchase_invoice') {
+        $pi_row_chk = getRecord("SELECT invoice_no FROM tbl_purchase_invoices WHERE id = $id");
+        if ($pi_row_chk && !empty($pi_row_chk['invoice_no']) && function_exists('auragold_pi_has_active_sale_fixing')) {
+            if (auragold_pi_has_active_sale_fixing($pi_row_chk['invoice_no'])) {
+                throw new Exception('Delete the sale fixing first, then you can delete this purchase invoice.');
+            }
+        }
+        if ($pi_row_chk && !empty($pi_row_chk['invoice_no'])) {
+            $pi_invoice_no_esc = mysqli_real_escape_string($conn, (string) $pi_row_chk['invoice_no']);
+        }
+    }
+
+    // 1. Remove related customer ledger entries (so balances revert)
+    $ledger_types = [];
+    switch ($type) {
+        case 'purchase_invoice':
+            // "Purchase Invoice" = legacy type on some rows (e.g. old Purchase Account cash lines). payment_voucher ledgers removed by voucher id below.
+            $ledger_types = ["'purchase_invoice'", "'Purchase Invoice'", "'previous_balance_payment'", "'payment'"];
+            break;
+        case 'sale_invoice':
+            $ledger_types = ["'sale_invoice'", "'sale_revenue'", "'previous_balance_payment'", "'payment'"];
+            break;
+        case 'purchase_return':
+            $ledger_types = ["'purchase_return'"];
+            break;
+        case 'sale_return':
+            $ledger_types = ["'sale_return'"];
+            break;
+        case 'sale_quotation':
+            $ledger_types = ["'sale_quotation'", "'sale_quotation_revenue'", "'quotation_payment'"];
+            break;
+        case 'purchase_quotation':
+            $ledger_types = ["'purchase_quotation'", "'purchase_quotation_revenue'"];
+            break;
+    }
+    if (!empty($ledger_types)) {
+        $ledger_list = implode(',', $ledger_types);
+        $del1 = "
+            DELETE FROM tbl_customer_ledger
+            WHERE transaction_type IN ($ledger_list) AND transaction_id = $id AND status = 1
+        ";
+        if (!mysqli_query($conn, $del1)) {
+            throw new Exception('Ledger delete failed: ' . mysqli_error($conn));
+        }
+    }
+
+    if ($type === 'sale_invoice') {
+        @mysqli_query($conn, "DELETE FROM invoice_fixing_mapping WHERE source_type = 'sale_invoice' AND source_transaction_id = " . (int)$id);
+        $si_row = getRecord("SELECT invoice_no FROM tbl_sale_invoices WHERE id = " . (int)$id);
+        if ($si_row && !empty($si_row['invoice_no']) && function_exists('auragold_delete_purchase_fixing_direct_for_sale_invoice')) {
+            auragold_delete_purchase_fixing_direct_for_sale_invoice($conn, (string) $si_row['invoice_no']);
+        }
+        if ($si_row && !empty($si_row['invoice_no'])) {
+            $si_no_esc = mysqli_real_escape_string($conn, (string) $si_row['invoice_no']);
+            $rv_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
+            if ($rv_chk && mysqli_num_rows($rv_chk) > 0) {
+                mysqli_free_result($rv_chk);
+                $rv_rows = getList("SELECT id FROM tbl_receipt_vouchers WHERE ref_no = '$si_no_esc' AND voucher_type = 'Sale Invoice Payment'");
+                if (is_array($rv_rows)) {
+                    foreach ($rv_rows as $rvr) {
+                        $rvid = (int) ($rvr['id'] ?? 0);
+                        if ($rvid <= 0) {
+                            continue;
+                        }
+                        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'receipt_voucher' AND transaction_id = $rvid AND status = 1");
+                        mysqli_query($conn, "DELETE FROM tbl_receipt_voucher_items WHERE voucher_id = $rvid");
+                        mysqli_query($conn, "DELETE FROM tbl_receipt_vouchers WHERE id = $rvid");
+                    }
+                }
+            } elseif ($rv_chk) {
+                mysqli_free_result($rv_chk);
+            }
+        }
+        $si_ref_scrap = 'SI:' . (int) $id;
+        $si_ref_esc = mysqli_real_escape_string($conn, $si_ref_scrap);
+        $ojb_si_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_old_jewelry_scrap_invoices'");
+        if ($ojb_si_chk && mysqli_num_rows($ojb_si_chk) > 0) {
+            mysqli_free_result($ojb_si_chk);
+            $ojb_si_rows = getList("SELECT id FROM tbl_old_jewelry_scrap_invoices WHERE ref_no = '$si_ref_esc'");
+            if (is_array($ojb_si_rows)) {
+                foreach ($ojb_si_rows as $ojbs) {
+                    $ojbid = (int) ($ojbs['id'] ?? 0);
+                    if ($ojbid <= 0) {
+                        continue;
+                    }
+                    mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE status = 1 AND transaction_type IN ('old_jewelry_scrap_invoice', 'old_jewelry_scrap_contra') AND transaction_id = $ojbid");
+                    $ojb_meta = getRecord("SELECT invoice_no, customer_name FROM tbl_old_jewelry_scrap_invoices WHERE id = $ojbid LIMIT 1");
+                    if ($ojb_meta) {
+                        $ino_m = esc(trim((string) ($ojb_meta['invoice_no'] ?? '')));
+                        $cn_m = esc(trim((string) ($ojb_meta['customer_name'] ?? '')));
+                        if ($ino_m !== '' && $cn_m !== '') {
+                            mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE status = 1 AND customer_name = '$cn_m' AND transaction_no = '$ino_m' AND transaction_type IN ('old_jewelry_scrap_invoice', 'Old Jewelry - Scrap Invoice')");
+                        }
+                    }
+                    mysqli_query($conn, "DELETE FROM tbl_old_jewelry_scrap_invoice_items WHERE invoice_id = $ojbid");
+                    mysqli_query($conn, "DELETE FROM tbl_old_jewelry_scrap_invoices WHERE id = $ojbid");
+                }
+            }
+        } elseif ($ojb_si_chk) {
+            mysqli_free_result($ojb_si_chk);
+        }
+    }
+
+    // Purchase invoice: remove ledgers tied to auto payment vouchers (ref = invoice no) and any orphan rows matching invoice number.
+    if ($type === 'purchase_invoice' && $pi_invoice_no_esc !== '') {
+        $pv_tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_payment_vouchers'");
+        if ($pv_tbl && mysqli_num_rows($pv_tbl) > 0) {
+            mysqli_free_result($pv_tbl);
+            $pv_rows = getList("SELECT id FROM tbl_payment_vouchers WHERE ref_no = '$pi_invoice_no_esc'");
+            if (is_array($pv_rows) && count($pv_rows) > 0) {
+                $pv_ids = [];
+                foreach ($pv_rows as $pr) {
+                    $vid = (int)($pr['id'] ?? 0);
+                    if ($vid > 0) {
+                        $pv_ids[] = $vid;
+                    }
+                }
+                if (count($pv_ids) > 0) {
+                    $in_list = implode(',', $pv_ids);
+                    $del_pv_led = "
+                        DELETE FROM tbl_customer_ledger
+                        WHERE status = 1 AND transaction_type = 'payment_voucher' AND transaction_id IN ($in_list)
+                    ";
+                    if (!mysqli_query($conn, $del_pv_led)) {
+                        throw new Exception('Payment voucher ledger delete failed: ' . mysqli_error($conn));
+                    }
+                }
+            }
+            if (!mysqli_query($conn, "
+                DELETE pvi FROM tbl_payment_voucher_items pvi
+                INNER JOIN tbl_payment_vouchers pv ON pvi.voucher_id = pv.id
+                WHERE pv.ref_no = '$pi_invoice_no_esc'
+            ")) {
+                throw new Exception('Payment voucher items delete failed: ' . mysqli_error($conn));
+            }
+            if (!mysqli_query($conn, "DELETE FROM tbl_payment_vouchers WHERE ref_no = '$pi_invoice_no_esc'")) {
+                throw new Exception('Payment voucher header delete failed: ' . mysqli_error($conn));
+            }
+        } elseif ($pv_tbl) {
+            mysqli_free_result($pv_tbl);
+        }
+        // Rows posted with transaction_no = bill no (Purchase Account, Hedging, supplier, bank lines that still used PRIx, etc.).
+        $del_by_no = "
+            DELETE FROM tbl_customer_ledger
+            WHERE status = 1 AND transaction_no = '$pi_invoice_no_esc'
+            AND transaction_type IN ('purchase_invoice', 'Purchase Invoice', 'previous_balance_payment', 'payment')
+        ";
+        if (!mysqli_query($conn, $del_by_no)) {
+            throw new Exception('Ledger delete by invoice no failed: ' . mysqli_error($conn));
+        }
+    }
+
+    // Sale quotation: remove auto receipt vouchers (ref = quotation_no, Sale Quotation Payment)
+    if ($type === 'sale_quotation') {
+        $sq_row = getRecord("SELECT quotation_no FROM tbl_sale_quotations WHERE id = $id");
+        if ($sq_row && !empty($sq_row['quotation_no'])) {
+            $sq_ref_esc = mysqli_real_escape_string($conn, (string) $sq_row['quotation_no']);
+            $rv_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
+            if ($rv_chk && mysqli_num_rows($rv_chk) > 0) {
+                mysqli_free_result($rv_chk);
+                $rv_rows = getList("SELECT id FROM tbl_receipt_vouchers WHERE ref_no = '$sq_ref_esc' AND voucher_type = 'Sale Quotation Payment'");
+                if (is_array($rv_rows)) {
+                    foreach ($rv_rows as $rvr) {
+                        $rvid = (int) ($rvr['id'] ?? 0);
+                        if ($rvid <= 0) {
+                            continue;
+                        }
+                        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'receipt_voucher' AND transaction_id = $rvid AND status = 1");
+                        mysqli_query($conn, "DELETE FROM tbl_receipt_voucher_items WHERE voucher_id = $rvid");
+                        mysqli_query($conn, "DELETE FROM tbl_receipt_vouchers WHERE id = $rvid");
+                    }
+                }
+            } elseif ($rv_chk) {
+                mysqli_free_result($rv_chk);
+            }
+        }
+    }
+
+    // Purchase quotation: remove auto payment vouchers (ref = quotation_no)
+    if ($type === 'purchase_quotation') {
+        $pq_row = getRecord("SELECT quotation_no FROM tbl_purchase_quotations WHERE id = $id");
+        if ($pq_row && !empty($pq_row['quotation_no'])) {
+            $pq_ref_esc = mysqli_real_escape_string($conn, (string) $pq_row['quotation_no']);
+            $pv_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_payment_vouchers'");
+            if ($pv_chk && mysqli_num_rows($pv_chk) > 0) {
+                mysqli_free_result($pv_chk);
+                $pv_rows = getList("SELECT id FROM tbl_payment_vouchers WHERE ref_no = '$pq_ref_esc' AND voucher_type = 'Purchase Quotation Payment'");
+                if (is_array($pv_rows)) {
+                    foreach ($pv_rows as $pvr) {
+                        $pvid = (int) ($pvr['id'] ?? 0);
+                        if ($pvid <= 0) {
+                            continue;
+                        }
+                        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'payment_voucher' AND transaction_id = $pvid AND status = 1");
+                        mysqli_query($conn, "DELETE FROM tbl_payment_voucher_items WHERE voucher_id = $pvid");
+                        mysqli_query($conn, "DELETE FROM tbl_payment_vouchers WHERE id = $pvid");
+                    }
+                }
+            } elseif ($pv_chk) {
+                mysqli_free_result($pv_chk);
+            }
+        }
+    }
+
+    // Sale return: remove auto payment vouchers (ref = return_no) and their ledger rows
+    if ($type === 'sale_return') {
+        $sr_row = getRecord("SELECT return_no FROM tbl_sale_returns WHERE id = $id");
+        if ($sr_row && !empty($sr_row['return_no'])) {
+            $sr_ref_esc = mysqli_real_escape_string($conn, (string)$sr_row['return_no']);
+            $pv_tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_payment_vouchers'");
+            if ($pv_tbl && mysqli_num_rows($pv_tbl) > 0) {
+                mysqli_free_result($pv_tbl);
+                $pv_rows = getList("SELECT id FROM tbl_payment_vouchers WHERE ref_no = '$sr_ref_esc'");
+                if (is_array($pv_rows) && count($pv_rows) > 0) {
+                    $pv_ids = [];
+                    foreach ($pv_rows as $pr) {
+                        $vid = (int)($pr['id'] ?? 0);
+                        if ($vid > 0) {
+                            $pv_ids[] = $vid;
+                        }
+                    }
+                    if (count($pv_ids) > 0) {
+                        $in_list = implode(',', $pv_ids);
+                        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE status = 1 AND transaction_type = 'payment_voucher' AND transaction_id IN ($in_list)");
+                    }
+                }
+                mysqli_query($conn, "
+                    DELETE pvi FROM tbl_payment_voucher_items pvi
+                    INNER JOIN tbl_payment_vouchers pv ON pvi.voucher_id = pv.id
+                    WHERE pv.ref_no = '$sr_ref_esc'
+                ");
+                mysqli_query($conn, "DELETE FROM tbl_payment_vouchers WHERE ref_no = '$sr_ref_esc'");
+            } elseif ($pv_tbl) {
+                mysqli_free_result($pv_tbl);
+            }
+        }
+    }
+
+    // 2. Soft-delete the main record
+    if ($has_status) {
+        $esc_status = mysqli_real_escape_string($conn, 'deleted');
+        if (!mysqli_query($conn, "UPDATE $table SET status = '$esc_status' WHERE id = $id")) {
+            throw new Exception('Failed to delete record: ' . mysqli_error($conn));
+        }
+    } else {
+        // Table has no status column - hard delete (use only if your schema has no status)
+        if (!mysqli_query($conn, "DELETE FROM $table WHERE id = $id")) {
+            throw new Exception('Failed to delete record: ' . mysqli_error($conn));
+        }
+    }
+
+    mysqli_commit($conn);
+    echo json_encode(['status' => 'success', 'message' => 'Transaction deleted successfully']);
+} catch (Exception $e) {
+    mysqli_rollback($conn);
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+}

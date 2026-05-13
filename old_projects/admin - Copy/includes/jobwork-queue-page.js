@@ -1,0 +1,2157 @@
+/**
+ * Jobwork Queue standalone page — shared behaviour with manufacturing-process Jobwork Queue modal.
+ * Expects: window.mpDepartments, window.mpDepartmentUsers, window.JWQ_ORDER_LINE_COL_KEYS,
+ * window.JWQ_INWARD_STOCK_MODAL_KEYS, window.JWQ_PAGE_MODE === true,
+ * window.JWQ_LINE_COL_STORAGE, window.JWQ_INWARD_COL_STORAGE
+ */
+function openPaymentModal(type) {
+    var modalMap = {
+        'cash': '#cashPaymentModal',
+        'bank': '#bankPaymentModal',
+        'cheque': '#chequePaymentModal',
+        'upi': '#upiPaymentModal',
+        'card': '#cardPaymentModal',
+        'metal-exchange': '#metalExchangeModal',
+        'scrap': '#scrapPaymentModal'
+    };
+    var modalId = modalMap[type];
+    if (!modalId || typeof window.jQuery === 'undefined' || !window.jQuery.fn.modal) {
+        return;
+    }
+    var summaryBalanceAmtEl = document.getElementById('summaryBalanceAmt');
+    var balanceAmt = summaryBalanceAmtEl ? parseFloat(summaryBalanceAmtEl.textContent.replace(/,/g, '')) || 0 : 0;
+    var amountToShow = balanceAmt > 0 ? balanceAmt.toFixed(2) : '0.00';
+    if (type === 'cash') {
+        var cashAmountEl = document.getElementById('cashAmount');
+        if (cashAmountEl) cashAmountEl.value = amountToShow;
+    } else if (type === 'bank') {
+        var bankAmountEl = document.getElementById('bankAmount');
+        if (bankAmountEl) bankAmountEl.value = amountToShow;
+    } else if (type === 'cheque') {
+        var chequeAmountEl = document.getElementById('chequeAmount');
+        if (chequeAmountEl) chequeAmountEl.value = amountToShow;
+    } else if (type === 'upi') {
+        var upiAmountEl = document.getElementById('upiAmount');
+        if (upiAmountEl) upiAmountEl.value = amountToShow;
+    } else if (type === 'card') {
+        var cardAmountEl = document.getElementById('cardAmount');
+        if (cardAmountEl) cardAmountEl.value = amountToShow;
+    } else if (type === 'metal-exchange') {
+        var metalExchangeAmountEl = document.getElementById('metalExchangeAmount');
+        if (metalExchangeAmountEl) metalExchangeAmountEl.value = amountToShow;
+    } else if (type === 'scrap') {
+        var scrapAmountEl = document.getElementById('scrapAmount');
+        if (scrapAmountEl) scrapAmountEl.value = amountToShow;
+    }
+    window.jQuery(modalId).modal('show');
+}
+
+function savePayment(type) {
+    if (typeof window.jQuery === 'undefined' || !window.jQuery.fn.modal) {
+        return;
+    }
+    var modalMap = {
+        'cash': '#cashPaymentModal',
+        'bank': '#bankPaymentModal',
+        'cheque': '#chequePaymentModal',
+        'upi': '#upiPaymentModal',
+        'card': '#cardPaymentModal',
+        'metal-exchange': '#metalExchangeModal',
+        'scrap': '#scrapPaymentModal'
+    };
+    var sel = modalMap[type];
+    if (sel) {
+        window.jQuery(sel).modal('hide');
+    }
+}
+
+function jwqPaymentTypeFromIcon(el) {
+    if (!el || !el.classList) return 'cash';
+    if (el.classList.contains('payment-cash')) return 'cash';
+    if (el.classList.contains('payment-bank')) return 'bank';
+    if (el.classList.contains('payment-cheque')) return 'cheque';
+    if (el.classList.contains('payment-mobile')) return 'upi';
+    if (el.classList.contains('payment-card')) return 'card';
+    if (el.classList.contains('payment-exchange')) return 'metal-exchange';
+    if (el.classList.contains('payment-jewelry')) return 'scrap';
+    if (el.classList.contains('payment-diamond')) return 'scrap';
+    if (el.classList.contains('payment-stone')) return 'metal-exchange';
+    if (el.classList.contains('payment-other')) return 'cash';
+    return 'cash';
+}
+
+function initJwqPaymentIcons() {
+    var wrap = document.getElementById('jwqPaymentIcons');
+    if (!wrap) return;
+    wrap.addEventListener('click', function (e) {
+        var icon = e.target.closest('.payment-icon');
+        if (!icon || !wrap.contains(icon)) return;
+        e.preventDefault();
+        openPaymentModal(jwqPaymentTypeFromIcon(icon));
+    });
+}
+
+function initColumnManager(config) {
+    var table = document.getElementById(config.tableId);
+    var panel = document.getElementById(config.panelId);
+    var toggleBtn = document.querySelector(config.toggleSelector);
+    var searchInput = document.getElementById(config.searchId);
+    var listContainer = document.getElementById(config.listId);
+    if (!table || !panel || !toggleBtn || !listContainer) return;
+
+    function applyHiddenColumns(hiddenCols) {
+        table.querySelectorAll('th[data-col], td[data-col]').forEach(function (el) {
+            var col = el.getAttribute('data-col');
+            if (hiddenCols.indexOf(col) >= 0) el.classList.add('col-hidden');
+            else el.classList.remove('col-hidden');
+        });
+    }
+
+    function readHiddenFromStorage() {
+        try {
+            var raw = localStorage.getItem(config.storageKey);
+            return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveHiddenToStorage(hiddenCols) {
+        try {
+            localStorage.setItem(config.storageKey, JSON.stringify(hiddenCols));
+        } catch (e) {}
+    }
+
+    function collectHiddenFromCheckboxes() {
+        var hidden = [];
+        listContainer.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+            if (!cb.checked) hidden.push(cb.getAttribute('data-col'));
+        });
+        return hidden;
+    }
+
+    function syncCheckboxesFromHidden(hiddenCols) {
+        listContainer.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+            var col = cb.getAttribute('data-col');
+            cb.checked = hiddenCols.indexOf(col) === -1;
+        });
+    }
+
+    function positionPanel() {
+        if (config.panelLayout === 'inline') {
+            panel.style.position = 'static';
+            panel.style.left = '';
+            panel.style.top = '';
+            panel.style.width = '100%';
+            panel.style.maxWidth = '';
+            return;
+        }
+        if (config.panelPosition === 'absolute') {
+            panel.style.position = 'absolute';
+            panel.style.left = 'auto';
+            panel.style.right = '0';
+            panel.style.top = '100%';
+            panel.style.bottom = 'auto';
+            panel.style.marginTop = '6px';
+            return;
+        }
+        panel.style.position = 'fixed';
+        var btnRect = toggleBtn.getBoundingClientRect();
+        var panelWidth = panel.offsetWidth || 250;
+        var panelHeight = panel.offsetHeight || 280;
+        var gap = 6;
+        var left = btnRect.right - panelWidth;
+        var top = btnRect.bottom + gap;
+
+        if (left < 8) left = 8;
+        if (left + panelWidth > window.innerWidth - 8) {
+            left = window.innerWidth - panelWidth - 8;
+        }
+
+        if (top + panelHeight > window.innerHeight - 8) {
+            top = btnRect.top - panelHeight - gap;
+            if (top < 8) top = 8;
+        }
+
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+    }
+
+    var initialHidden = readHiddenFromStorage();
+    syncCheckboxesFromHidden(initialHidden);
+    applyHiddenColumns(initialHidden);
+
+    listContainer.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var hidden = collectHiddenFromCheckboxes();
+            saveHiddenToStorage(hidden);
+            applyHiddenColumns(hidden);
+        });
+    });
+
+    toggleBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        document.querySelectorAll('.columns-panel.show').forEach(function (p) {
+            if (p.id !== config.panelId) p.classList.remove('show');
+        });
+        var willShow = !panel.classList.contains('show');
+        panel.classList.toggle('show');
+        if (willShow) positionPanel();
+    });
+
+    var closeBtn = panel.querySelector('[data-close-panel]');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function () {
+            panel.classList.remove('show');
+        });
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            var term = (searchInput.value || '').toLowerCase().trim();
+            listContainer.querySelectorAll('[data-label]').forEach(function (row) {
+                var labelText = row.getAttribute('data-label') || '';
+                row.style.display = labelText.indexOf(term) >= 0 ? '' : 'none';
+            });
+        });
+    }
+
+    window.addEventListener('resize', function () {
+        if (panel.classList.contains('show') && config.panelLayout !== 'inline') positionPanel();
+    });
+}
+
+document.addEventListener('click', function (e) {
+    if (!e.target.closest('.columns-panel') && !e.target.closest('.head-setting-btn')) {
+        document.querySelectorAll('.columns-panel.show').forEach(function (p) {
+            p.classList.remove('show');
+        });
+    }
+});
+
+function jwqEsc(s) {
+    if (s == null || s === '') return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+}
+
+function jwqNum3(v) {
+    var n = parseFloat(v);
+    if (isNaN(n)) return '0.000';
+    return n.toFixed(3);
+}
+
+function jwqNumOptDash3(v) {
+    if (v == null || v === '') return '—';
+    var n = parseFloat(v);
+    if (isNaN(n)) return '—';
+    return n.toFixed(3);
+}
+
+function jwqNumOptDash2(v) {
+    if (v == null || v === '') return '—';
+    var n = parseFloat(v);
+    if (isNaN(n)) return '—';
+    return n.toFixed(2);
+}
+
+function jwqInputEsc(v) {
+    return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function jwqLineFieldEl(tr, field) {
+    if (!tr || !field) {
+        return null;
+    }
+    var el = tr.querySelector('[data-field="' + field + '"]');
+    if (el) {
+        return el;
+    }
+    return tr.querySelector('[data-col-input="' + field + '"]');
+}
+
+function jwqLineFieldNum(tr, field) {
+    var el = jwqLineFieldEl(tr, field);
+    if (!el || el.value == null || el.value === '') {
+        return NaN;
+    }
+    return parseFloat(String(el.value).replace(/,/g, ''));
+}
+
+function jwqLineOrigTotalWt(it) {
+    it = it || {};
+    var fw = parseFloat(it.final_weight);
+    if (isFinite(fw) && fw > 0) {
+        return fw;
+    }
+    var nw = parseFloat(it.net_weight);
+    if (isFinite(nw) && nw > 0) {
+        return nw;
+    }
+    var gw = parseFloat(it.gross_weight);
+    if (isFinite(gw) && gw > 0) {
+        return gw;
+    }
+    return 0;
+}
+
+function jwqLineOrigMetalWt(it) {
+    it = it || {};
+    var nw = parseFloat(it.net_weight);
+    if (isFinite(nw) && nw > 0) {
+        return nw;
+    }
+    return jwqLineOrigTotalWt(it);
+}
+
+function jwqCellRawByKey(key, it, orderRef) {
+    it = it || {};
+    switch (key) {
+        case 'design_no':
+            return it.design_no != null ? String(it.design_no) : '';
+        case 'tag_no':
+            return it.barcode != null ? String(it.barcode) : '';
+        case 'description':
+            return it.product_name != null ? String(it.product_name) : '';
+        case 'order_no':
+            return orderRef != null ? String(orderRef) : '';
+        case 'total_wt':
+            if (!window.__jwqPrefillLineWeights) {
+                return '';
+            }
+            return jwqNum3(jwqLineOrigTotalWt(it));
+        case 'metal_wt':
+            if (!window.__jwqPrefillLineWeights) {
+                return '';
+            }
+            return jwqNum3(jwqLineOrigMetalWt(it));
+        case 'diamond_wt': {
+            var dStored = NaN;
+            if (it.diamond_wt != null && it.diamond_wt !== '') {
+                dStored = parseFloat(it.diamond_wt);
+            }
+            if (!isFinite(dStored) || dStored <= 0) {
+                dStored = parseFloat(it.diamond_weight != null ? it.diamond_weight : NaN);
+            }
+            if (isFinite(dStored) && dStored > 0) {
+                return jwqNum3(dStored);
+            }
+            var tw0 = jwqLineOrigTotalWt(it);
+            var mw0 = jwqLineOrigMetalWt(it);
+            if (isFinite(tw0) && isFinite(mw0) && tw0 > mw0 + 0.0000001) {
+                return jwqNum3(tw0 - mw0);
+            }
+            return jwqNum3(0);
+        }
+        case 'total_purity':
+            return jwqNum3(it.purity);
+        case 'karat':
+            return it.carat != null ? String(it.carat) : '';
+        case 'total_qty':
+            var jqq = parseFloat(it.quantity);
+            if (isFinite(jqq) && jqq > 0) {
+                return jwqNum3(jqq);
+            }
+            return jwqNum3(jqq);
+        case 'price':
+            return jwqNumOptDash2(it.rate);
+        case 'dust_wastage_wt':
+            if (it.wastage_wt != null && it.wastage_wt !== '') {
+                return jwqNum3(it.wastage_wt);
+            }
+            return jwqNum3(0);
+        case 'loss':
+            return jwqNumOptDash3(it.loss_wt != null ? it.loss_wt : it.gold_loss_1);
+        case 'profit':
+            return jwqNumOptDash2(it.profit != null ? it.profit : it.net_amount);
+        case 'expected_wt':
+            return jwqNum3(it.expected_wt != null ? it.expected_wt : it.gross_weight);
+        case 'product':
+            return it.product_name != null ? String(it.product_name) : '';
+        case 'requested_wt':
+            return jwqNumOptDash3(it.requested_wt != null ? it.requested_wt : it.requested);
+        case 'requested_purity':
+            return jwqNumOptDash3(it.requested_purity);
+        case 'alloy_wt':
+            return jwqNumOptDash3(it.alloy_wt);
+        case 'damage_qty':
+            return jwqNumOptDash3(it.damage_qty != null ? it.damage_qty : it.damage_quantity);
+        case 'damage_wt':
+            return jwqNumOptDash3(it.damage_wt != null ? it.damage_wt : it.damage_weight);
+        default:
+            return '';
+    }
+}
+
+function jwqInputTypeByCol(key) {
+    var numeric3 = ['total_wt', 'metal_wt', 'diamond_wt', 'total_purity', 'total_qty', 'dust_wastage_wt', 'loss', 'expected_wt', 'requested_wt', 'requested_purity', 'alloy_wt', 'damage_qty', 'damage_wt'];
+    var numeric2 = ['price', 'profit'];
+    if (numeric3.indexOf(key) >= 0 || numeric2.indexOf(key) >= 0) return 'number';
+    return 'text';
+}
+
+function jwqKaratSelectHtml(raw) {
+    if (!window.mpCaratOptions || !Array.isArray(window.mpCaratOptions)) {
+        window.mpCaratOptions = [];
+    }
+    var sel = String(raw == null ? '' : raw).trim();
+    var opts = window.mpCaratOptions || [];
+    var parts = ['<select class="jwq-cell-input" data-col-input="karat" data-field="karat">'];
+    parts.push('<option value="">' + jwqEsc('-- Select --') + '</option>');
+    var found = false;
+    opts.forEach(function (c) {
+        if (!c) return;
+        var name = c.name != null ? String(c.name).trim() : '';
+        if (name === '') return;
+        var isSel = sel !== '' && name === sel;
+        if (isSel) found = true;
+        parts.push('<option value="' + jwqInputEsc(name) + '"' + (isSel ? ' selected' : '') + '>' + jwqEsc(name) + '</option>');
+    });
+    if (sel !== '' && !found) {
+        parts.push('<option value="' + jwqInputEsc(sel) + '" selected>' + jwqEsc(sel) + '</option>');
+    }
+    parts.push('</select>');
+    return parts.join('');
+}
+
+function jwqCellByKey(key, it, orderRef) {
+    var raw = jwqCellRawByKey(key, it, orderRef);
+    if (key === 'order_no') {
+        return jwqEsc(raw);
+    }
+    if (key === 'tag_no' || key === 'description') {
+        return '<input class="jwq-cell-input jwq-cell-input--readonly" data-col-input="' + jwqEsc(key) + '" data-field="' + jwqEsc(key) + '" type="text" value="' + jwqInputEsc(raw) + '" readonly tabindex="-1">';
+    }
+    if (key === 'karat') {
+        return jwqKaratSelectHtml(raw);
+    }
+    var type = jwqInputTypeByCol(key);
+    var step = 'any';
+    if (type === 'number') {
+        step = (key === 'price' || key === 'profit') ? '0.01' : '0.001';
+    }
+    return '<input class="jwq-cell-input" data-col-input="' + jwqEsc(key) + '" data-field="' + jwqEsc(key) + '" type="' + type + '" value="' + jwqInputEsc(raw) + '"' + (type === 'number' ? ' step="' + step + '"' : '') + '>';
+}
+
+function jwqBuildLineRowHtml(it, orderRef) {
+    var keys = window.JWQ_ORDER_LINE_COL_KEYS || [];
+    var trAttrs = '';
+    var iid = 0;
+    if (it) {
+        iid = parseInt(it.id != null ? it.id : (it.item_id != null ? it.item_id : 0), 10) || 0;
+    }
+    if (iid > 0) {
+        var ow = jwqLineOrigTotalWt(it);
+        var prefillWts = window.__jwqPrefillLineWeights === true;
+        trAttrs = ' data-item-id="' + iid + '"' + (prefillWts && ow > 0 ? ' data-orig-total-wt="' + String(ow) + '"' : '');
+    }
+    var tds = keys.map(function (k) {
+        return '<td data-col="' + k + '">' + jwqCellByKey(k, it, orderRef) + '</td>';
+    });
+    return '<tr' + trAttrs + '>' + tds.join('') + '</tr>';
+}
+
+function jwqDeptHasAutoLoss(deptId) {
+    var id = parseInt(deptId, 10) || 0;
+    if (id < 1) {
+        return false;
+    }
+    var list = window.mpDepartments || [];
+    for (var i = 0; i < list.length; i++) {
+        var d = list[i];
+        if (parseInt(d.id, 10) === id) {
+            var al = d.auto_loss;
+            return al === 1 || al === '1' || al === true;
+        }
+    }
+    return false;
+}
+
+function jwqLineColStorageKey() {
+    return window.JWQ_LINE_COL_STORAGE || 'jobwork_queue_page_jwq_order_lines_hidden_columns';
+}
+
+function jwqMaybeApplyAutoLoss(tr) {
+    if (!tr || !tr.getAttribute('data-item-id')) {
+        return;
+    }
+    var fromDept = document.getElementById('jwqFromDept');
+    var fd = fromDept ? parseInt(fromDept.value || '0', 10) : 0;
+    if (!jwqDeptHasAutoLoss(fd)) {
+        return;
+    }
+    var orig = parseFloat(tr.getAttribute('data-orig-total-wt') || '0');
+    if (!isFinite(orig) || orig <= 0) {
+        return;
+    }
+    var twEl = jwqLineFieldEl(tr, 'total_wt');
+    var lossEl = jwqLineFieldEl(tr, 'loss');
+    var nw = twEl ? parseFloat(twEl.value) : NaN;
+    if (!isFinite(nw)) {
+        return;
+    }
+    if (nw <= 0.0000001) {
+        return;
+    }
+    var loss = orig - nw;
+    if (loss < 0) {
+        loss = 0;
+    }
+    if (lossEl) {
+        lossEl.value = loss > 0 ? jwqNumOptDash3(loss) : jwqNumOptDash3(0);
+    }
+}
+
+function jwqRefreshAutoLossAllRows() {
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    if (!tbody) {
+        return;
+    }
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        jwqMaybeApplyAutoLoss(tr);
+    });
+}
+
+/** Per jobwork line item: sum of diamond material row weights (orphan item id 0 rolls to first line). */
+function jwqMaterialDiamondWeightByItem(matBody, tbody) {
+    var byItem = {};
+    if (!matBody || !tbody) {
+        return byItem;
+    }
+    matBody.querySelectorAll('.jwq-material-diamond-row').forEach(function (tr) {
+        var itemId = parseInt(tr.getAttribute('data-jobwork-item-id') || '0', 10);
+        if (itemId < 1) {
+            itemId = 0;
+        }
+        var wtTd = tr.querySelector('.jwq-mat-wt');
+        var tds = tr.querySelectorAll('td');
+        var wtTxt = wtTd ? wtTd.textContent : (tds[2] ? tds[2].textContent : '');
+        var wt = parseFloat(String(wtTxt || '').replace(/,/g, '')) || 0;
+        if (wt <= 0 && tr.dataset.weight) {
+            wt = parseFloat(String(tr.dataset.weight).replace(/,/g, '')) || 0;
+        }
+        if (wt <= 0) {
+            return;
+        }
+        byItem[itemId] = (byItem[itemId] || 0) + wt;
+    });
+
+    var firstRowId = null;
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        var rowItemId = parseInt(tr.getAttribute('data-item-id') || '0', 10);
+        if (firstRowId === null && rowItemId > 0) {
+            firstRowId = rowItemId;
+        }
+    });
+    if (firstRowId !== null && byItem[0] > 0) {
+        byItem[firstRowId] = (byItem[firstRowId] || 0) + byItem[0];
+        delete byItem[0];
+    }
+    if (firstRowId !== null) {
+        var visibleIds = {};
+        tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+            var rid = parseInt(tr.getAttribute('data-item-id') || '0', 10);
+            if (rid > 0) {
+                visibleIds[rid] = true;
+            }
+        });
+        var unmatched = 0;
+        Object.keys(byItem).forEach(function (k) {
+            var kid = parseInt(k || '0', 10);
+            if (kid > 0 && !visibleIds[kid]) {
+                unmatched += byItem[kid] || 0;
+                delete byItem[kid];
+            }
+        });
+        if (unmatched > 0) {
+            byItem[firstRowId] = (byItem[firstRowId] || 0) + unmatched;
+        }
+    }
+    return byItem;
+}
+
+function jwqInitLineBaseDiamondWt(tr, dInp, tInp, mInp, sumMat) {
+    var curD = parseFloat(String(dInp.value || '').replace(/,/g, '')) || 0;
+    var inferred = 0;
+    if (tInp && mInp) {
+        var tw0 = parseFloat(tInp.value);
+        var mw0 = parseFloat(mInp.value);
+        if (isFinite(tw0) && isFinite(mw0) && tw0 > mw0 + 0.0000001) {
+            inferred = tw0 - mw0;
+        }
+    }
+    var baseDiamond = 0;
+    if (curD > 0.0000001) {
+        if (sumMat <= curD + 0.0000001) {
+            baseDiamond = curD - sumMat;
+        } else {
+            baseDiamond = curD;
+        }
+    } else if (inferred > 0.0000001 && sumMat <= 0.0000001) {
+        baseDiamond = inferred;
+    }
+    if (baseDiamond < 0) {
+        baseDiamond = 0;
+    }
+    tr.setAttribute('data-jwq-base-diamond-wt', jwqNum3(baseDiamond));
+    return baseDiamond;
+}
+
+function jwqRefreshLineDiamondBaseFromUi(tr) {
+    var matBody = document.getElementById('jwqMaterialBody');
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    var dInp = typeof jwqLineFieldEl === 'function' ? jwqLineFieldEl(tr, 'diamond_wt') : null;
+    if (!matBody || !tbody || !dInp) {
+        return;
+    }
+    var byItem = jwqMaterialDiamondWeightByItem(matBody, tbody);
+    var itemId = parseInt(tr.getAttribute('data-item-id') || '0', 10);
+    var sumMat = byItem[itemId] || 0;
+    var D = parseFloat(String(dInp.value || '').replace(/,/g, '')) || 0;
+    tr.setAttribute('data-jwq-base-diamond-wt', jwqNum3(Math.max(0, D - sumMat)));
+}
+
+function jwqSyncOrderLineDiamondWtFromMaterialTable() {
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    var matBody = document.getElementById('jwqMaterialBody');
+    if (!tbody || !matBody) {
+        return;
+    }
+    var byItem = jwqMaterialDiamondWeightByItem(matBody, tbody);
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        var itemId = parseInt(tr.getAttribute('data-item-id') || '0', 10);
+        var dInp = jwqLineFieldEl(tr, 'diamond_wt');
+        if (!dInp) {
+            return;
+        }
+        var sumMat = byItem[itemId] || 0;
+        var tInp = jwqLineFieldEl(tr, 'total_wt');
+        var mInp = jwqLineFieldEl(tr, 'metal_wt');
+        var baseDiamond = parseFloat(tr.getAttribute('data-jwq-base-diamond-wt'));
+        if (!isFinite(baseDiamond)) {
+            baseDiamond = jwqInitLineBaseDiamondWt(tr, dInp, tInp, mInp, sumMat);
+        }
+        var dWt = baseDiamond + sumMat;
+        dInp.value = jwqNum3(dWt);
+
+        if (tInp && mInp) {
+            var baseMetal = parseFloat(tr.getAttribute('data-base-metal-wt') || '');
+            if (!isFinite(baseMetal) || baseMetal < 0) {
+                baseMetal = parseFloat(mInp.value);
+            }
+            if (!isFinite(baseMetal) || baseMetal < 0) {
+                baseMetal = 0;
+            }
+            tr.setAttribute('data-base-metal-wt', String(baseMetal));
+            var newTotal = baseMetal + dWt;
+            mInp.value = jwqNum3(baseMetal);
+            tInp.value = jwqNum3(newTotal);
+        }
+        if (typeof jwqMaybeApplyAutoLoss === 'function') {
+            jwqMaybeApplyAutoLoss(tr);
+        }
+    });
+}
+window.jwqSyncOrderLineDiamondWtFromMaterialTable = jwqSyncOrderLineDiamondWtFromMaterialTable;
+
+function jwqCollectQueueLinePayload() {
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    if (!tbody) {
+        return [];
+    }
+    var out = [];
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        var id = parseInt(tr.getAttribute('data-item-id'), 10);
+        if (!id) {
+            return;
+        }
+        var total_wt = jwqLineFieldNum(tr, 'total_wt');
+        var metal_wt = jwqLineFieldNum(tr, 'metal_wt');
+        var diamond_wt = jwqLineFieldNum(tr, 'diamond_wt');
+        var dust_wastage_wt = jwqLineFieldNum(tr, 'dust_wastage_wt');
+        var loss = jwqLineFieldNum(tr, 'loss');
+        if (!isFinite(total_wt)) {
+            return;
+        }
+        if (!isFinite(metal_wt)) {
+            metal_wt = total_wt;
+        }
+        if (!isFinite(diamond_wt) || diamond_wt < 0) {
+            diamond_wt = 0;
+        }
+        var line = { item_id: id, total_wt: total_wt, metal_wt: metal_wt, diamond_wt: diamond_wt };
+        if (isFinite(dust_wastage_wt) && dust_wastage_wt >= 0) {
+            line.dust_wastage_wt = dust_wastage_wt;
+        }
+        if (isFinite(loss) && loss >= 0) {
+            line.loss = loss;
+        }
+        out.push(line);
+    });
+    return out;
+}
+
+function jwqApplyStoredLineColumnVisibility() {
+    try {
+        var raw = localStorage.getItem(jwqLineColStorageKey());
+        var hidden = raw ? JSON.parse(raw) : [];
+        var table = document.getElementById('jwqOrderLinesTable');
+        if (!table) return;
+        table.querySelectorAll('th[data-col], td[data-col]').forEach(function (el) {
+            var col = el.getAttribute('data-col');
+            if (hidden.indexOf(col) >= 0) el.classList.add('col-hidden');
+            else el.classList.remove('col-hidden');
+        });
+    } catch (e) {}
+}
+
+function jwqFillDeptSelect(sel, placeholder) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    var o = document.createElement('option');
+    o.value = '';
+    o.textContent = placeholder || '-- Select --';
+    sel.appendChild(o);
+    (window.mpDepartments || []).forEach(function (d) {
+        var op = document.createElement('option');
+        op.value = String(d.id);
+        op.textContent = d.dept_name || d.name || '';
+        sel.appendChild(op);
+    });
+}
+
+function jwqFillUserSelectForDept(sel, deptId) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    var o = document.createElement('option');
+    o.value = '';
+    o.textContent = '-- Select --';
+    sel.appendChild(o);
+    var users = (window.mpDepartmentUsers && window.mpDepartmentUsers[deptId]) ? window.mpDepartmentUsers[deptId] : [];
+    if (!Array.isArray(users)) users = [];
+    users.forEach(function (u) {
+        var op = document.createElement('option');
+        op.value = String(u.id);
+        op.textContent = u.name || '';
+        sel.appendChild(op);
+    });
+}
+
+/** Load Jobwork Queue no. from server (Bill Series); updates title, hidden field, and boot button data attribute. */
+function jwqFetchQueueNoForDisplay(jwoId, queueEl, queueHid, bootBtn) {
+    if (!jwoId || jwoId < 1) return;
+    fetch('ajax/mp-get-jobwork-queue-no.php?jobwork_order_id=' + encodeURIComponent(String(jwoId)), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.ok) return;
+            var q = (data.jobwork_queue_no || '').trim();
+            if (!q) return;
+            if (queueEl) queueEl.textContent = q;
+            if (queueHid) queueHid.value = q;
+            if (bootBtn && bootBtn.setAttribute) {
+                bootBtn.setAttribute('data-jobwork-queue-no', q);
+            }
+            document.querySelectorAll('.jwq-order-boot[data-jwo-id="' + jwoId + '"]').forEach(function (b) {
+                b.setAttribute('data-jobwork-queue-no', q);
+            });
+        })
+        .catch(function () {});
+}
+
+function jwqGetOrderRefForLines() {
+    var boot = document.getElementById('jwqDynamicBoot');
+    var pb = document.getElementById('jwqPageBootstrapBtn');
+    var jn = boot ? (boot.getAttribute('data-jobwork-no') || '').trim() : '';
+    var sn = boot ? (boot.getAttribute('data-sale-order-no') || '').trim() : '';
+    if (!jn && pb) {
+        jn = (pb.getAttribute('data-jobwork-no') || '').trim();
+        sn = (pb.getAttribute('data-sale-order-no') || '').trim();
+    }
+    var ref = (jn || sn || '').trim();
+    return ref || '—';
+}
+
+function jwqGetFirstProductHint() {
+    var boot = document.getElementById('jwqDynamicBoot');
+    var pb = document.getElementById('jwqPageBootstrapBtn');
+    var fp = boot ? (boot.getAttribute('data-first-product') || '').trim() : '';
+    if (!fp && pb) {
+        fp = (pb.getAttribute('data-first-product') || '').trim();
+    }
+    return fp;
+}
+
+/** Only diamonds with added_by_dept_id matching From Dept. appear in the material grid; full history stays on the (i) modal. */
+function jwqDiamondIssueRowForMaterialGrid(r, ctxDeptId) {
+    if (!r || String(r.row_source || '') === 'line_fallback') {
+        return false;
+    }
+    if (ctxDeptId < 1) {
+        return true;
+    }
+    var abd = parseInt(String(r.added_by_dept_id != null ? r.added_by_dept_id : '0'), 10) || 0;
+    if (abd < 1) {
+        return false;
+    }
+    return abd === ctxDeptId;
+}
+
+/** From Dept. dropdown = department context for which diamond rows belong in the grid. */
+function jwqMaterialDiamondGridDeptContextId() {
+    var el = document.getElementById('jwqFromDept');
+    return el ? (parseInt(el.value || '0', 10) || 0) : 0;
+}
+
+function jwqRefreshServerLoadedMaterialDiamonds() {
+    var matBody = document.getElementById('jwqMaterialBody');
+    if (!matBody) {
+        return;
+    }
+    matBody.querySelectorAll('.jwq-material-diamond-row[data-jwq-mat-server-loaded="1"]').forEach(function (tr) {
+        tr.remove();
+    });
+    var jwoId = parseInt(String(window.__jwqCurrentJwoId != null ? window.__jwqCurrentJwoId : '0'), 10) || 0;
+    if (jwoId < 1) {
+        var hid = document.getElementById('jwqCurrentJwoId');
+        jwoId = hid ? (parseInt(hid.value || '0', 10) || 0) : 0;
+    }
+    if (jwoId > 0 && typeof jwqLoadSavedDiamondRowsForModal === 'function') {
+        jwqLoadSavedDiamondRowsForModal(jwoId);
+    }
+}
+
+/** Load saved diamond issue rows from DB into #jwqMaterialBody (after order lines exist). */
+function jwqLoadSavedDiamondRowsForModal(jobworkOrderId) {
+    var jwoId = parseInt(jobworkOrderId || '0', 10);
+    if (jwoId < 1) return;
+    var matBody = document.getElementById('jwqMaterialBody');
+    if (!matBody) return;
+    fetch('ajax/mp-get-jobwork-queue-diamonds.php?jobwork_order_id=' + encodeURIComponent(String(jwoId)), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            var rows = (d && d.ok && Array.isArray(d.items)) ? d.items : [];
+            matBody.querySelectorAll('.jwq-material-diamond-row[data-jwq-mat-server-loaded="1"]').forEach(function (tr) {
+                tr.remove();
+            });
+            var ctxDeptId = jwqMaterialDiamondGridDeptContextId();
+            if (rows.length) {
+                var existing = {};
+                matBody.querySelectorAll('tr[data-stock-id]').forEach(function (tr) {
+                    var sid = String(tr.getAttribute('data-stock-id') || '');
+                    if (sid) existing[sid] = true;
+                });
+                var empty = matBody.querySelector('.jwq-mat-empty');
+                if (empty) empty.remove();
+                var firstLineTr = document.querySelector('#jwqOrderLinesBody tr[data-item-id]');
+                var fallbackItemId = firstLineTr ? (parseInt(firstLineTr.getAttribute('data-item-id') || '0', 10) || 0) : 0;
+                var validLineIds = {};
+                document.querySelectorAll('#jwqOrderLinesBody tr[data-item-id]').forEach(function (tr) {
+                    var id = parseInt(tr.getAttribute('data-item-id') || '0', 10);
+                    if (id > 0) {
+                        validLineIds[id] = true;
+                    }
+                });
+                rows.forEach(function (r) {
+                    if (String(r.row_source || '') === 'line_fallback') {
+                        return;
+                    }
+                    if (!jwqDiamondIssueRowForMaterialGrid(r, ctxDeptId)) {
+                        return;
+                    }
+                    var sid = parseInt(r.stock_id || '0', 10) || 0;
+                    var bc = String(r.barcode || '').trim();
+                    if (sid < 1 || !bc) {
+                        return;
+                    }
+                    if (existing[String(sid)]) return;
+                    var rowItemId = parseInt(r.jobwork_order_item_id || '0', 10) || 0;
+                    if (rowItemId < 1 || !validLineIds[rowItemId]) {
+                        rowItemId = fallbackItemId;
+                    }
+                    var tr = document.createElement('tr');
+                    tr.className = 'jwq-material-diamond-row';
+                    tr.setAttribute('data-jwq-mat-from-diamond', '1');
+                    tr.setAttribute('data-jwq-mat-server-loaded', '1');
+                    tr.setAttribute('data-stock-id', String(sid));
+                    tr.setAttribute('data-id', String(sid));
+                    tr.setAttribute('data-diamond-stock-id', String(sid));
+                    tr.setAttribute('data-jobwork-item-id', String(rowItemId > 0 ? rowItemId : 0));
+                    tr.setAttribute('data-barcode', bc);
+                    var pnDisp = String(r.product_name || '').trim();
+                    if (pnDisp) {
+                        tr.setAttribute('data-product-name', pnDisp);
+                    }
+                    var wNum = parseFloat(r.weight_out != null ? r.weight_out : r.weight) || 0;
+                    var qNum = parseFloat(r.qty_out != null ? r.qty_out : r.qty) || 0;
+                    tr.setAttribute('data-weight', String(wNum));
+                    tr.setAttribute('data-qty', String(qNum));
+                    var abd = parseInt(String(r.added_by_dept_id != null ? r.added_by_dept_id : '0'), 10) || 0;
+                    var abu = parseInt(String(r.added_by_user_id != null ? r.added_by_user_id : '0'), 10) || 0;
+                    if (abd > 0) {
+                        tr.setAttribute('data-added-by-dept-id', String(abd));
+                    }
+                    if (abu > 0) {
+                        tr.setAttribute('data-added-by-user-id', String(abu));
+                    }
+                    var abdn = String(r.added_by_dept_name || '').trim();
+                    var abun = String(r.added_by_user_name || '').trim();
+                    if (abdn) {
+                        tr.setAttribute('data-added-by-dept-name', abdn);
+                    }
+                    if (abun) {
+                        tr.setAttribute('data-added-by-user-name', abun);
+                    }
+                    var prodCell = jwqEsc(bc) + ' — ' + jwqEsc(pnDisp || '—');
+                    tr.innerHTML = '<td>Diamond</td><td>' + prodCell + '</td><td class="jwq-mat-wt">' + jwqNum3(wNum) + '</td><td>Diamond</td><td>' + jwqNum3(qNum) + '</td><td>0</td><td></td>';
+                    matBody.appendChild(tr);
+                    existing[String(sid)] = true;
+                });
+            }
+            if (typeof window.jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
+                window.jwqSyncOrderLineDiamondWtFromMaterialTable();
+            }
+            var tot = document.getElementById('jwqMatTotalWt');
+            if (tot) {
+                var sum = 0;
+                matBody.querySelectorAll('tr .jwq-mat-wt').forEach(function (td) {
+                    sum += parseFloat(String(td.textContent || '').replace(/,/g, '')) || 0;
+                });
+                tot.textContent = sum.toFixed(2);
+            }
+        })
+        .catch(function () {});
+}
+
+/** Load order lines into #jwqOrderLinesBody (same source as Job Work Order). */
+function jwqLoadOrderLinesIntoTable(jwoId, orderRef, firstProduct) {
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    var colCount = (window.JWQ_ORDER_LINE_COL_KEYS && window.JWQ_ORDER_LINE_COL_KEYS.length) ? window.JWQ_ORDER_LINE_COL_KEYS.length : 21;
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;color:#94a3b8;padding:16px;">Loading…</td></tr>';
+    }
+    fetch('ajax/mp-jobwork-order-items.php?id=' + encodeURIComponent(String(jwoId)), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            var rows = (data && data.ok && data.items) ? data.items : [];
+            if (rows.length) {
+                rows.forEach(function (it) {
+                    tbody.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(it, orderRef));
+                });
+            } else {
+                var ph = {
+                    design_no: '—',
+                    barcode: '—',
+                    product_name: firstProduct || '—',
+                    carat: '—',
+                    final_weight: 0,
+                    net_weight: 0,
+                    purity: 0,
+                    quantity: 0,
+                    rate: null,
+                    less_weight: 0,
+                    diamond_weight: 0,
+                    gross_weight: 0
+                };
+                tbody.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(ph, orderRef));
+            }
+            jwqApplyStoredLineColumnVisibility();
+            if (typeof jwqRefreshAutoLossAllRows === 'function') {
+                jwqRefreshAutoLossAllRows();
+            }
+            if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
+                jwqSyncOrderLineDiamondWtFromMaterialTable();
+            }
+            if (typeof jwqLoadSavedDiamondRowsForModal === 'function') {
+                jwqLoadSavedDiamondRowsForModal(jwoId);
+            }
+        })
+        .catch(function () {
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;color:#dc2626;padding:12px;">Could not load lines</td></tr>';
+            }
+        });
+}
+
+/** After server creates a draft JWO for "Add row" on a blank queue, sync boot + header + search. */
+function jwqApplyDraftJwoFromServer(data) {
+    if (!data || !data.jobwork_order_id) return;
+    var boot = document.getElementById('jwqDynamicBoot');
+    if (boot) {
+        boot.setAttribute('data-jwo-id', String(data.jobwork_order_id));
+        boot.setAttribute('data-jobwork-no', String(data.jobwork_no || ''));
+        boot.setAttribute('data-jobwork-queue-no', String(data.jobwork_queue_no || ''));
+        boot.setAttribute('data-sale-order-no', '');
+        boot.setAttribute('data-dept-id', '0');
+        boot.setAttribute('data-dept-name', '');
+        boot.setAttribute('data-user-id', '0');
+        boot.setAttribute('data-worker-name', '');
+        boot.setAttribute('data-customer', '');
+        boot.setAttribute('data-first-product', '');
+        boot.setAttribute('data-manufacturing-seconds', '0');
+    }
+    var hid = document.getElementById('jwqCurrentJwoId');
+    if (hid) hid.value = String(data.jobwork_order_id);
+    var qel = document.getElementById('jwqModalQueueNo');
+    var qh = document.getElementById('jwqJobworkQueueNo');
+    var qn = (data.jobwork_queue_no || '').trim();
+    if (qel) qel.textContent = qn || '—';
+    if (qh) qh.value = qn;
+    var inp = document.getElementById('jwqSearchInput');
+    if (inp) {
+        inp.value = qn || (data.jobwork_no || '').trim() || ('#' + data.jobwork_order_id);
+    }
+}
+
+function jwqApplyItemToBootButton(btn, it) {
+    if (!btn || !it) return;
+    var id = parseInt(it.id, 10) || 0;
+    btn.setAttribute('data-jwo-id', String(id));
+    btn.setAttribute('data-jobwork-queue-no', String(it.jobwork_queue_no || '').trim());
+    btn.setAttribute('data-jobwork-no', String(it.jobwork_no || '').trim());
+    btn.setAttribute('data-sale-order-no', String(it.sale_order_no || '').trim());
+    btn.setAttribute('data-dept-id', String(it.department_id != null ? it.department_id : 0));
+    btn.setAttribute('data-dept-name', String(it.dept_name || '').trim());
+    btn.setAttribute('data-user-id', String(it.department_user_id != null ? it.department_user_id : 0));
+    btn.setAttribute('data-worker-name', String(it.worker_name || '').trim());
+    btn.setAttribute('data-customer', String(it.customer_name || '').trim());
+    btn.setAttribute('data-first-product', String(it.first_product || '').trim());
+    var mfg = parseInt(it.manufacturing_time_seconds, 10);
+    if (isNaN(mfg) || mfg < 0) mfg = 0;
+    btn.setAttribute('data-manufacturing-seconds', String(mfg));
+}
+
+function initJwqOrderSearch() {
+    if (!window.JWQ_PAGE_MODE) return;
+    var input = document.getElementById('jwqSearchInput');
+    var box = document.getElementById('jwqSearchSuggestions');
+    var boot = document.getElementById('jwqDynamicBoot');
+    if (!input || !box || !boot) return;
+    var tmr = null;
+    function hideSuggestions() {
+        box.classList.remove('show');
+        box.innerHTML = '';
+    }
+    function render(items) {
+        box.innerHTML = '';
+        if (!items.length) {
+            box.innerHTML = '<div class="jwq-suggestion-item" style="cursor:default;color:#94a3b8;">No job work orders found</div>';
+            box.classList.add('show');
+            return;
+        }
+        items.forEach(function (it) {
+            var div = document.createElement('div');
+            div.className = 'jwq-suggestion-item';
+            div.setAttribute('role', 'option');
+            var qn = (it.jobwork_queue_no || '').trim();
+            var jn = (it.jobwork_no || '').trim();
+            var cust = (it.customer_name || '').trim();
+            var line1 = qn || jn || ('#' + it.id);
+            var parts = [];
+            if (jn && qn && jn !== qn) parts.push(jn);
+            if (cust) parts.push(cust);
+            var line2 = parts.join(' · ');
+            div.innerHTML = '<div class="jwq-suggestion-primary">' + jwqEsc(line1) + '</div>' +
+                (line2 ? '<div class="jwq-suggestion-meta">' + jwqEsc(line2) + '</div>' : '');
+            div.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+            });
+            div.addEventListener('click', function () {
+                jwqApplyItemToBootButton(boot, it);
+                input.value = line1 + (cust ? (' · ' + cust) : '');
+                hideSuggestions();
+                jwqOpenModal(boot);
+            });
+            box.appendChild(div);
+        });
+        box.classList.add('show');
+    }
+    input.addEventListener('input', function () {
+        clearTimeout(tmr);
+        var q = (input.value || '').trim();
+        if (q.length < 1) {
+            hideSuggestions();
+            return;
+        }
+        tmr = setTimeout(function () {
+            fetch('ajax/mp-search-jobwork-orders.php?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.ok) {
+                        hideSuggestions();
+                        return;
+                    }
+                    render(data.items || []);
+                })
+                .catch(function () {
+                    hideSuggestions();
+                });
+        }, 280);
+    });
+    document.addEventListener('click', function (e) {
+        if (!input.contains(e.target) && !box.contains(e.target)) {
+            hideSuggestions();
+        }
+    });
+}
+
+function jwqSetNowDateTime() {
+    var now = new Date();
+    var dEl = document.getElementById('jwqDate');
+    var tEl = document.getElementById('jwqTime');
+    if (dEl) {
+        var y = now.getFullYear();
+        function pad2(n) { return (n < 10 ? '0' : '') + n; }
+        dEl.value = y + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
+    }
+    if (tEl) {
+        var hh = now.getHours();
+        var mm = now.getMinutes();
+        var ss = now.getSeconds();
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        tEl.value = pad(hh) + ':' + pad(mm) + ':' + pad(ss);
+    }
+}
+
+function jwqOpenModal(btn, opts) {
+    opts = opts || {};
+    window.__jwqPrefillLineWeights = true;
+    var overlay = document.getElementById('jwqModalOverlay');
+    if (!overlay) return;
+    var jwoId = parseInt(btn.getAttribute('data-jwo-id') || '0', 10);
+    var queueFromSeries = (btn.getAttribute('data-jobwork-queue-no') || '').trim();
+    var queueEl = document.getElementById('jwqModalQueueNo');
+    var queueHid = document.getElementById('jwqJobworkQueueNo');
+    if (queueEl) queueEl.textContent = queueFromSeries || '—';
+    if (queueHid) queueHid.value = queueFromSeries;
+    if (jwoId > 0 && !queueFromSeries) {
+        jwqFetchQueueNoForDisplay(jwoId, queueEl, queueHid, btn);
+    }
+    var hid = document.getElementById('jwqCurrentJwoId');
+    if (hid) hid.value = jwoId > 0 ? String(jwoId) : '';
+
+    var currentDept = parseInt(btn.getAttribute('data-dept-id') || '0', 10);
+    var currentUser = parseInt(btn.getAttribute('data-user-id') || '0', 10);
+
+    var fromDept = document.getElementById('jwqFromDept');
+    var fromUser = document.getElementById('jwqFromUser');
+    var toDeptSel = document.getElementById('jwqToDept');
+    var toUserSel = document.getElementById('jwqToUser');
+
+    jwqFillDeptSelect(fromDept);
+    jwqFillDeptSelect(toDeptSel);
+    if (fromDept) fromDept.value = currentDept > 0 ? String(currentDept) : '';
+    jwqFillUserSelectForDept(fromUser, currentDept);
+    if (fromUser) fromUser.value = currentUser > 0 ? String(currentUser) : '';
+
+    if (toDeptSel) toDeptSel.value = '';
+    jwqFillUserSelectForDept(toUserSel, 0);
+    if (toUserSel) toUserSel.value = '';
+
+    jwqSetNowDateTime();
+    var timerDisp = document.getElementById('jwqTotalTimeDisplay');
+    if (timerDisp) {
+        var tshow = '00:00:00';
+        var secAttr = btn.getAttribute('data-manufacturing-seconds');
+        if (secAttr !== null && secAttr !== '') {
+            var ts = parseInt(secAttr, 10);
+            if (!isNaN(ts) && ts >= 0) {
+                var h = Math.floor(ts / 3600);
+                var m = Math.floor((ts % 3600) / 60);
+                var s = ts % 60;
+                function z(n) { return (n < 10 ? '0' : '') + n; }
+                tshow = z(h) + ':' + z(m) + ':' + z(s);
+            }
+        }
+        timerDisp.textContent = tshow;
+    }
+
+    var jobNo = btn.getAttribute('data-jobwork-no') || '';
+    var saleNo = btn.getAttribute('data-sale-order-no') || '';
+    var orderRef = (jobNo || saleNo || '').trim() || '—';
+    var firstProduct = btn.getAttribute('data-first-product') || '';
+
+    jwqLoadOrderLinesIntoTable(jwoId, orderRef, firstProduct);
+
+    var matBody = document.getElementById('jwqMaterialBody');
+    if (matBody) {
+        matBody.innerHTML = '<tr><td colspan="7" class="jwq-mat-empty">No Rows To Show</td></tr>';
+    }
+    var matTot = document.getElementById('jwqMatTotalWt');
+    if (matTot) matTot.textContent = '0.00';
+
+    if (typeof window.jwqToggleWeightStrip === 'function') {
+        if (opts.forWeight) {
+            window.jwqToggleWeightStrip(true, opts.weightMode || 'reduce');
+        } else {
+            window.jwqToggleWeightStrip(false);
+        }
+    }
+
+    if (!window.JWQ_PAGE_MODE) {
+        overlay.classList.add('show');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function jwqResolveMatRowStockId(tr) {
+    var attrs = ['data-stock-id', 'data-id', 'data-diamond-stock-id'];
+    var i, n, v;
+    for (i = 0; i < attrs.length; i++) {
+        v = tr.getAttribute(attrs[i]);
+        if (v) {
+            n = parseInt(v, 10);
+            if (n > 0) {
+                return n;
+            }
+        }
+    }
+    var inps = tr.querySelectorAll('input[name="stock_id"],input[name*="stock_id"],input[name*="[stock_id]"],input[name="material_stock_id"]');
+    for (i = 0; i < inps.length; i++) {
+        n = parseInt(String(inps[i].value || '').trim(), 10);
+        if (n > 0) {
+            return n;
+        }
+    }
+    var cbs = tr.querySelectorAll('input[type="checkbox"]');
+    for (i = 0; i < cbs.length; i++) {
+        v = String(cbs[i].value || '').trim();
+        if (v) {
+            n = parseInt(v, 10);
+            if (n > 0) {
+                return n;
+            }
+        }
+    }
+    return 0;
+}
+
+function jwqResolveMatRowBarcode(tr, tds) {
+    var b = (tr.getAttribute('data-barcode') || '').trim();
+    if (b) {
+        return b;
+    }
+    var tdBc = tr.querySelector('td[data-col="barcode_no"],td[data-col="barcode"]');
+    if (tdBc) {
+        b = String(tdBc.textContent || '').trim();
+        if (b) {
+            return b;
+        }
+    }
+    var inp = tr.querySelector('input[name*="barcode"],input[name*="Barcode"],input.jwq-mat-barcode');
+    if (inp && inp.value) {
+        return String(inp.value).trim();
+    }
+    if (tds && tds.length > 1) {
+        var t1 = String(tds[1].textContent || '').trim();
+        var sepIdx = t1.indexOf(' — ');
+        if (sepIdx === -1) {
+            sepIdx = t1.indexOf('\u2014');
+        }
+        if (sepIdx === -1) {
+            sepIdx = t1.indexOf(' - ');
+        }
+        if (sepIdx > 0) {
+            var firstPart = t1.slice(0, sepIdx).trim();
+            if (firstPart && /^[A-Za-z0-9\-_.]{2,}$/.test(firstPart)) {
+                return firstPart;
+            }
+        }
+        if (/^[A-Za-z0-9\-_.]{3,}$/.test(t1) && t1.length < 80) {
+            return t1;
+        }
+    }
+    return '';
+}
+
+function jwqRenderDiamondUsedModalBody(rows) {
+    var tb = document.getElementById('jwqDiamondUsedModalBody');
+    if (!tb) return;
+    var list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+        tb.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-3">No diamonds used yet.</td></tr>';
+        return;
+    }
+    tb.innerHTML = list.map(function (r) {
+        var barcode = jwqEsc(r && r.barcode != null ? r.barcode : '');
+        var product = jwqEsc(r && r.product_name != null ? r.product_name : '');
+        var wRaw = r && r.weight_out != null ? r.weight_out : (r && r.weight != null ? r.weight : '');
+        var wNum = parseFloat(String(wRaw).replace(/,/g, ''));
+        var weight = (typeof jwqNum3 === 'function' && isFinite(wNum)) ? jwqEsc(jwqNum3(wNum)) : jwqEsc(wRaw);
+        var qRaw = r && r.qty_out != null ? r.qty_out : (r && r.qty != null ? r.qty : '');
+        var qNum = parseFloat(String(qRaw).replace(/,/g, ''));
+        var qty = (typeof jwqNum3 === 'function' && isFinite(qNum)) ? jwqEsc(jwqNum3(qNum)) : jwqEsc(qRaw);
+        var addDeptNm = String(r && r.added_by_dept_name != null ? r.added_by_dept_name : '').trim();
+        var addUserNm = String(r && r.added_by_user_name != null ? r.added_by_user_name : '').trim();
+        var addDeptCell = addDeptNm ? jwqEsc(addDeptNm) : (function () {
+            var id = parseInt(String(r && r.added_by_dept_id != null ? r.added_by_dept_id : '0'), 10) || 0;
+            return id > 0 ? jwqEsc('Dept #' + id) : '—';
+        }());
+        var addUserCell = addUserNm ? jwqEsc(addUserNm) : (function () {
+            var id = parseInt(String(r && r.added_by_user_id != null ? r.added_by_user_id : '0'), 10) || 0;
+            return id > 0 ? jwqEsc('User #' + id) : '—';
+        }());
+        var issued = jwqEsc(r && r.created_at != null ? r.created_at : '(pending save)');
+        return '<tr>'
+            + '<td>' + (barcode || '—') + '</td>'
+            + '<td>' + (product || '—') + '</td>'
+            + '<td class="text-right">' + (weight || '0') + '</td>'
+            + '<td class="text-right">' + (qty || '0') + '</td>'
+            + '<td>' + addDeptCell + '</td>'
+            + '<td>' + addUserCell + '</td>'
+            + '<td>' + (issued || '—') + '</td>'
+            + '</tr>';
+    }).join('');
+}
+
+function jwqOpenDiamondUsedModal() {
+    var jwoId = parseInt(window.__jwqCurrentJwoId || '0', 10) || 0;
+    if (jwoId < 1) {
+        var hidJwo = document.getElementById('jwqCurrentJwoId');
+        jwoId = hidJwo ? (parseInt(hidJwo.value || '0', 10) || 0) : 0;
+    }
+    var tb = document.getElementById('jwqDiamondUsedModalBody');
+    if (tb) {
+        tb.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-3">Loading…</td></tr>';
+    }
+    if (typeof window.jQuery !== 'undefined' && window.jQuery.fn.modal) {
+        window.jQuery('#jwqDiamondUsedModal').modal('show');
+    }
+
+    function mergeAndRender(serverRows) {
+        var srv = Array.isArray(serverRows) ? serverRows : [];
+        var serverHasIssueRows = srv.some(function (r) {
+            if (!r || String(r.row_source || '') === 'line_fallback') {
+                return false;
+            }
+            var sid = parseInt(String(r.stock_id != null ? r.stock_id : '0'), 10) || 0;
+            var bc = String(r.barcode || '').trim();
+            return sid > 0 && bc !== '';
+        });
+        var seen = {};
+        var all = [];
+
+        function srvDedupeKey(r) {
+            var issueId = (r && r.id != null) ? parseInt(r.id, 10) : 0;
+            if (issueId > 0) {
+                return 'issue:' + issueId;
+            }
+            var sid = String(r.stock_id != null ? r.stock_id : '0');
+            var bc = String(r.barcode || '').trim();
+            var w = String(r.weight_out != null ? r.weight_out : (r.weight != null ? r.weight : ''));
+            var iid = String((r && r.jobwork_order_item_id != null) ? r.jobwork_order_item_id : '');
+            return 'row:' + sid + ':' + bc + ':' + w + ':item:' + iid;
+        }
+
+        srv.forEach(function (r) {
+            var k = srvDedupeKey(r);
+            if (seen[k]) {
+                return;
+            }
+            seen[k] = true;
+            all.push(r);
+        });
+
+        function serverCoversMatRow(sidNum, barcode, wn) {
+            if (sidNum < 1) {
+                return false;
+            }
+            var bb = String(barcode || '').trim();
+            var i;
+            for (i = 0; i < srv.length; i++) {
+                var row = srv[i];
+                var rsid = parseInt(String(row && row.stock_id != null ? row.stock_id : '0'), 10) || 0;
+                if (rsid !== sidNum) {
+                    continue;
+                }
+                var rb = String(row.barcode || '').trim();
+                if (rb && bb && rb !== bb) {
+                    continue;
+                }
+                var rw = parseFloat(row.weight_out != null ? row.weight_out : (row.weight != null ? row.weight : '')) || 0;
+                if (Math.abs(rw - wn) < 0.0005) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        document.querySelectorAll('#jwqMaterialBody .jwq-material-diamond-row').forEach(function (tr) {
+            var tds = tr.querySelectorAll('td');
+            if (tds.length < 2) {
+                return;
+            }
+            var sidNum = parseInt(tr.dataset.stockId || '0', 10) || 0;
+            var weightEl = tr.querySelector('.jwq-mat-wt');
+            var wout = weightEl ? String(weightEl.textContent || '').trim() : (tds[2] ? String(tds[2].textContent || '').trim() : '');
+            var wn = parseFloat(String(wout || '').replace(/,/g, '')) || 0;
+            if (wn <= 0) {
+                return;
+            }
+            var barcode = String(tr.dataset.barcode || '').trim();
+            if (serverCoversMatRow(sidNum, barcode, wn)) {
+                return;
+            }
+            var sid = sidNum > 0 ? String(sidNum) : '';
+            var dedupe = sid !== '' ? ('mat:sid:' + sid + ':' + barcode + ':' + String(wout)) : ('mat:pending:' + barcode + ':' + String(wout));
+            if (seen[dedupe]) {
+                return;
+            }
+            seen[dedupe] = true;
+            all.push({
+                stock_id: sid || '0',
+                barcode: barcode,
+                product_name: String(tr.dataset.productName || '').trim() || (tds[1] ? String(tds[1].textContent || '').trim() : ''),
+                weight_out: wout,
+                qty_out: tds[4] ? String(tds[4].textContent || '').trim() : '',
+                added_by_dept_id: parseInt(String(tr.dataset.addedByDeptId || tr.getAttribute('data-added-by-dept-id') || '0'), 10) || 0,
+                added_by_user_id: parseInt(String(tr.dataset.addedByUserId || tr.getAttribute('data-added-by-user-id') || '0'), 10) || 0,
+                added_by_dept_name: String(tr.dataset.addedByDeptName || '').trim(),
+                added_by_user_name: String(tr.dataset.addedByUserName || '').trim(),
+                created_at: '(pending — save transfer to record in stock)'
+            });
+        });
+
+        if (all.length < 1 && !serverHasIssueRows) {
+            document.querySelectorAll('#jwqOrderLinesBody tr[data-item-id]').forEach(function (tr) {
+                var dInp = typeof jwqLineFieldEl === 'function' ? jwqLineFieldEl(tr, 'diamond_wt') : tr.querySelector('[data-field="diamond_wt"],[data-col-input="diamond_wt"]');
+                if (!dInp) {
+                    return;
+                }
+                var dw = parseFloat(String(dInp.value || '').replace(/,/g, '')) || 0;
+                if (dw <= 0.0000001) {
+                    return;
+                }
+                var tagInp = typeof jwqLineFieldEl === 'function' ? jwqLineFieldEl(tr, 'tag_no') : tr.querySelector('[data-field="tag_no"],[data-col-input="tag_no"]');
+                var tagNo = tagInp ? String(tagInp.value || '').trim() : '';
+                var descInp = typeof jwqLineFieldEl === 'function' ? jwqLineFieldEl(tr, 'description') : tr.querySelector('[data-field="description"],[data-col-input="description"]');
+                var desc = descInp ? String(descInp.value || '').trim() : '';
+                var lbl = (tagNo || desc || ('Item #' + (tr.getAttribute('data-item-id') || '?'))).trim();
+                all.push({
+                    stock_id: 0,
+                    barcode: '—',
+                    product_name: 'Diamond total on line (no per-piece rows yet): ' + lbl,
+                    weight_out: jwqNum3(dw),
+                    qty_out: '—',
+                    added_by_dept_id: 0,
+                    added_by_user_id: 0,
+                    added_by_dept_name: '',
+                    added_by_user_name: '',
+                    created_at: 'Add diamonds in the material grid and save to log each barcode in stock.'
+                });
+            });
+        }
+
+        jwqRenderDiamondUsedModalBody(all);
+    }
+
+    if (jwoId < 1) {
+        mergeAndRender([]);
+        return;
+    }
+    var url = 'ajax/mp-get-jobwork-queue-diamonds.php?jobwork_order_id=' + encodeURIComponent(String(jwoId));
+    fetch(url, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            mergeAndRender((d && d.ok && Array.isArray(d.items)) ? d.items : []);
+        })
+        .catch(function () {
+            mergeAndRender([]);
+        });
+}
+
+function jwqMaterialTableLooksLikeItHasDiamondRows() {
+    var body = document.getElementById('jwqMaterialBody');
+    if (!body) {
+        return false;
+    }
+    if (body.querySelector('.jwq-material-diamond-row')) {
+        return true;
+    }
+    var trs = body.querySelectorAll('tr');
+    var k;
+    for (k = 0; k < trs.length; k++) {
+        var tr = trs[k];
+        if (tr.classList.contains('jwq-mat-empty')) {
+            continue;
+        }
+        if (tr.querySelector('td[colspan]')) {
+            continue;
+        }
+        var tds = tr.querySelectorAll('td');
+        if (tds.length < 2) {
+            continue;
+        }
+        if (tr.getAttribute('data-jwq-mat-from-diamond') === '1') {
+            return true;
+        }
+        if (jwqResolveMatRowStockId(tr) > 0) {
+            return true;
+        }
+        var cat = String(tds[0].textContent || '').trim().toLowerCase();
+        if (cat.indexOf('diamond') !== -1) {
+            return true;
+        }
+        var wtEl = tr.querySelector('.jwq-mat-wt');
+        var w = wtEl ? (parseFloat(String(wtEl.textContent || '').replace(/,/g, '')) || 0) : 0;
+        if (w > 0.0000001) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function jwqMaterialBodyHasVisibleDataRows() {
+    var body = document.getElementById('jwqMaterialBody');
+    if (!body) {
+        return false;
+    }
+    var trs = body.querySelectorAll('tr');
+    var k;
+    for (k = 0; k < trs.length; k++) {
+        var tr = trs[k];
+        if (tr.classList.contains('jwq-mat-empty')) {
+            continue;
+        }
+        if (tr.querySelector('td[colspan]')) {
+            continue;
+        }
+        if (tr.querySelectorAll('td').length >= 2) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function jwqCollectMaterialDiamondStockForSave() {
+    var out = [];
+    var fallbackItemId = 0;
+    var firstLineTr = document.querySelector('#jwqOrderLinesBody tr[data-item-id]');
+    if (firstLineTr) {
+        fallbackItemId = parseInt(firstLineTr.getAttribute('data-item-id') || '0', 10) || 0;
+    }
+    if (fallbackItemId < 1) {
+        var qLines = typeof jwqCollectQueueLinePayload === 'function' ? jwqCollectQueueLinePayload() : [];
+        if (Array.isArray(qLines) && qLines.length > 0) {
+            fallbackItemId = parseInt(qLines[0].item_id || '0', 10) || 0;
+        }
+    }
+    var body = document.getElementById('jwqMaterialBody');
+    if (!body) {
+        return out;
+    }
+    var seen = new Set();
+    body.querySelectorAll('.jwq-material-diamond-row').forEach(function (row) {
+        var stockId = parseInt(row.dataset.stockId || '0', 10) || 0;
+        var barcode = String(row.dataset.barcode || '').trim();
+        if (!stockId || !barcode) {
+            return;
+        }
+        if (seen.has(stockId)) {
+            return;
+        }
+        seen.add(stockId);
+        var weight = parseFloat(row.dataset.weight || '0') || 0;
+        if (weight <= 0) {
+            var wtCell = row.querySelector('.jwq-mat-wt');
+            weight = parseFloat(String(wtCell ? wtCell.textContent : '0').replace(/,/g, '')) || 0;
+        }
+        var qty = parseFloat(row.dataset.qty || '0') || 0;
+        if (qty <= 0) {
+            var tds = row.querySelectorAll('td');
+            qty = parseFloat(String(tds[4] ? tds[4].textContent : '').replace(/,/g, '')) || 0;
+        }
+        if (weight <= 0) {
+            return;
+        }
+        var itemId = parseInt(row.getAttribute('data-jobwork-item-id') || '0', 10) || 0;
+        if (itemId < 1) {
+            itemId = fallbackItemId;
+        }
+        var addedByDept = parseInt(row.getAttribute('data-added-by-dept-id') || '0', 10) || 0;
+        var addedByUser = parseInt(row.getAttribute('data-added-by-user-id') || '0', 10) || 0;
+        var payload = {
+            stock_id: stockId,
+            jobwork_order_item_id: itemId > 0 ? itemId : 0,
+            barcode: barcode,
+            product_name: String(row.dataset.productName || '').trim(),
+            weight: weight,
+            qty: qty > 0 ? qty : 0,
+            added_by_dept_id: addedByDept,
+            added_by_user_id: addedByUser
+        };
+        if (window.console && typeof console.log === 'function') {
+            console.log('DIAMOND SAVE ROW', payload);
+        }
+        out.push(payload);
+    });
+    if (out.length < 1 && jwqMaterialTableLooksLikeItHasDiamondRows()) {
+        if (window.console && typeof console.error === 'function') {
+            console.error('JWQ_COLLECT_DIAMOND: add diamonds via Existing stock so rows get class jwq-material-diamond-row and data-stock-id / data-barcode.');
+        }
+    }
+    return out;
+}
+
+function jwqCloseModal() {
+    if (window.JWQ_PAGE_MODE) {
+        if (typeof window.jwqToggleWeightStrip === 'function') {
+            window.jwqToggleWeightStrip(false);
+        }
+        return;
+    }
+    var overlay = document.getElementById('jwqModalOverlay');
+    if (!overlay) return;
+    if (typeof window.jwqToggleWeightStrip === 'function') {
+        window.jwqToggleWeightStrip(false);
+    }
+    var jwqPanel = document.getElementById('jwqColumnsPanel');
+    if (jwqPanel) jwqPanel.classList.remove('show');
+    overlay.classList.remove('show');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+}
+
+/** After Jobwork Queue Save: optional print — jobwork slip only */
+function mpJwqPromptPrintAfterSave(jwoId) {
+    var idStr = String(jwoId || '');
+    var slipUrl = 'manufacturing-jobwork-slip-print.php?id=' + encodeURIComponent(idStr) + '&autoprint=1';
+
+    function openPrints() {
+        window.open(slipUrl, '_blank', 'noopener,noreferrer');
+    }
+
+    function finish() {
+        jwqCloseModal();
+    }
+
+    if (typeof swal === 'function') {
+        swal({
+            title: 'Print bill',
+            text: 'Do you want to print invoice?',
+            type: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Yes',
+            cancelButtonText: 'No',
+            confirmButtonClass: 'confirm',
+            cancelButtonClass: 'cancel',
+            customClass: 'mp-print-bill-swal'
+        }, function (isConfirm) {
+            if (isConfirm) {
+                openPrints();
+            }
+            finish();
+        });
+    } else {
+        if (confirm('Do you want to print invoice?')) {
+            openPrints();
+        }
+        finish();
+    }
+}
+
+function jwqInwardModalDateTimeStr() {
+    var now = new Date();
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    return pad(now.getDate()) + '-' + pad(now.getMonth() + 1) + '-' + now.getFullYear() + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+}
+
+function jwqInwardColStorageKey() {
+    return window.JWQ_INWARD_COL_STORAGE || 'jobwork_queue_page_jwq_inward_modal_hidden_columns';
+}
+
+function jwqApplyStoredInwardModalColumnVisibility() {
+    try {
+        var raw = localStorage.getItem(jwqInwardColStorageKey());
+        var hidden = raw ? JSON.parse(raw) : [];
+        var table = document.getElementById('jwqInwardStockTable');
+        if (!table) return;
+        table.querySelectorAll('th[data-col], td[data-col]').forEach(function (el) {
+            var col = el.getAttribute('data-col');
+            if (hidden.indexOf(col) >= 0) el.classList.add('col-hidden');
+            else el.classList.remove('col-hidden');
+        });
+    } catch (e) {}
+}
+
+function jwqInwardStockGetVisibleColumnThs() {
+    var table = document.getElementById('jwqInwardStockTable');
+    if (!table) return [];
+    var tr = table.querySelector('thead tr');
+    if (!tr) return [];
+    return Array.prototype.slice.call(tr.querySelectorAll('th[data-col]')).filter(function (th) {
+        return !th.classList.contains('col-hidden');
+    });
+}
+
+function jwqInwardStockExportExcel() {
+    var ths = jwqInwardStockGetVisibleColumnThs();
+    if (!ths.length) return;
+    var lines = [];
+    lines.push(ths.map(function (th) {
+        return '"' + String(th.textContent || '').replace(/"/g, '""') + '"';
+    }).join(','));
+    var table = document.getElementById('jwqInwardStockTable');
+    if (!table) return;
+    table.querySelectorAll('tbody tr').forEach(function (tr) {
+        var row = ths.map(function (th) {
+            var col = th.getAttribute('data-col');
+            var td = tr.querySelector('td[data-col="' + col + '"]');
+            var txt = td ? String(td.textContent || '') : '';
+            return '"' + txt.replace(/"/g, '""') + '"';
+        });
+        lines.push(row.join(','));
+    });
+    var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'inward-stock.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+function jwqInwardStockExportPdf() {
+    var ths = jwqInwardStockGetVisibleColumnThs();
+    if (!ths.length) return;
+    var table = document.getElementById('jwqInwardStockTable');
+    if (!table) return;
+    var theadHtml = '<tr>' + ths.map(function (th) {
+        return '<th>' + jwqEsc(th.textContent || '') + '</th>';
+    }).join('') + '</tr>';
+    var bodyHtml = '';
+    table.querySelectorAll('tbody tr').forEach(function (tr) {
+        bodyHtml += '<tr>';
+        ths.forEach(function (th) {
+            var col = th.getAttribute('data-col');
+            var td = tr.querySelector('td[data-col="' + col + '"]');
+            bodyHtml += '<td>' + (td ? jwqEsc(td.textContent || '') : '') + '</td>';
+        });
+        bodyHtml += '</tr>';
+    });
+    var title = (document.getElementById('jwqInwardStockModalTitle') || {}).textContent || 'Inward Stock';
+    var w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + jwqEsc(title) + '</title>');
+    w.document.write('<style>body{font-family:Segoe UI,Arial,sans-serif;padding:16px;} table{border-collapse:collapse;width:100%;font-size:12px;} th,td{border:1px solid #ccc;padding:6px;} th{background:#eef2f8;}</style>');
+    w.document.write('</head><body><h2 style="font-size:16px;margin:0 0 12px;">' + jwqEsc(title) + '</h2>');
+    w.document.write('<table><thead>' + theadHtml + '</thead><tbody>' + bodyHtml + '</tbody></table></body></html>');
+    w.document.close();
+    w.focus();
+    w.print();
+    w.close();
+}
+
+function jwqFillInwardStockDetailsModal(which) {
+    which = which || 'from';
+    var keys = window.JWQ_INWARD_STOCK_MODAL_KEYS || [];
+    var ctx = document.getElementById('jwqInwardStockModalContext');
+    if (ctx) ctx.textContent = which === 'to' ? '(To)' : '(From)';
+
+    var jwoId = (document.getElementById('jwqCurrentJwoId') || {}).value || '';
+    var qHidden = document.getElementById('jwqJobworkQueueNo');
+    var queueNo = (qHidden && qHidden.value) ? String(qHidden.value).trim() : '';
+    if (!queueNo && jwoId) {
+        queueNo = 'JWQ-' + jwoId;
+    }
+    if (!queueNo) {
+        queueNo = '—';
+    }
+
+    var jwqMap = {};
+    var tr = null;
+    document.querySelectorAll('#jwqOrderLinesBody tr').forEach(function (r) {
+        if (!tr && r.querySelector('td[data-col]')) tr = r;
+    });
+    if (tr) {
+        tr.querySelectorAll('td[data-col]').forEach(function (td) {
+            var k = td.getAttribute('data-col');
+            if (!k) return;
+            var inp = td.querySelector('[data-field="' + k + '"], [data-col-input="' + k + '"]');
+            if (inp && inp.value != null) {
+                jwqMap[k] = String(inp.value).trim();
+            } else {
+                jwqMap[k] = (td.textContent || '').trim();
+            }
+        });
+    }
+
+    var descCombined = ((jwqMap.description || '') + ' ' + (jwqMap.product || '')).trim();
+    var metal = '—';
+    if (/gold/i.test(descCombined)) metal = 'Gold';
+    else if (/silver/i.test(descCombined)) metal = 'Silver';
+    else if (/platinum/i.test(descCombined)) metal = 'Platinum';
+
+    var cellByKey = {};
+    keys.forEach(function (k) { cellByKey[k] = '—'; });
+
+    cellByKey.queue_no = queueNo;
+    cellByKey.comment = '';
+    cellByKey.product_name = jwqMap.product || jwqMap.description || '—';
+    cellByKey.active = '';
+    cellByKey.image_urls = '';
+    cellByKey.against_queue = '';
+    cellByKey.against_invoice = jwqMap.order_no || '—';
+    cellByKey.metal = metal;
+    cellByKey.description = jwqMap.description || '—';
+    cellByKey.dust_wastage_wt = jwqMap.dust_wastage_wt && jwqMap.dust_wastage_wt !== '—' ? jwqMap.dust_wastage_wt : '0';
+    cellByKey.loss_wt = jwqMap.loss && jwqMap.loss !== '—' ? jwqMap.loss : '0';
+    cellByKey.total_wt = jwqMap.total_wt || '—';
+    cellByKey.metal_wt = jwqMap.metal_wt || '—';
+    cellByKey.diamond_wt = jwqMap.diamond_wt || '—';
+    cellByKey.purity_wt = jwqMap.total_purity || '—';
+    cellByKey.carat_name = jwqMap.karat || '—';
+    cellByKey.profit_wt = jwqMap.profit && jwqMap.profit !== '—' ? jwqMap.profit : '0';
+    cellByKey.tag_no = jwqMap.tag_no || '—';
+    cellByKey.total_quantity = jwqMap.total_qty || '—';
+    cellByKey.date_time = jwqInwardModalDateTimeStr();
+
+    var html = '<tr>';
+    keys.forEach(function (k) {
+        var v = cellByKey[k] != null ? String(cellByKey[k]) : '—';
+        html += '<td data-col="' + k + '">' + jwqEsc(v) + '</td>';
+    });
+    html += '</tr>';
+
+    var tbody = document.getElementById('jwqInwardStockBody');
+    if (tbody) tbody.innerHTML = html;
+
+    jwqApplyStoredInwardModalColumnVisibility();
+
+    if (typeof window.jQuery !== 'undefined' && window.jQuery.fn.modal) {
+        window.jQuery('#jwqInwardStockModal').modal('show');
+    }
+}
+
+function initJobworkQueueModal() {
+    var grid = document.getElementById('mpJobCardsGrid');
+    var overlay = document.getElementById('jwqModalOverlay');
+    if (!overlay || overlay._jwqBound) return;
+    overlay._jwqBound = true;
+
+    document.addEventListener('click', function (e) {
+        var infoBtn = e.target && e.target.closest ? e.target.closest('.jwq-diamond-used-info-btn') : null;
+        if (!infoBtn || !overlay.contains(infoBtn)) return;
+        e.preventDefault();
+        jwqOpenDiamondUsedModal();
+    });
+
+    overlay.addEventListener('click', function (e) {
+        var folderBtn = e.target.closest('.jwq-inward-folder-btn');
+        if (folderBtn && overlay.contains(folderBtn)) {
+            e.preventDefault();
+            jwqFillInwardStockDetailsModal(folderBtn.getAttribute('data-which') || 'from');
+        }
+    });
+
+    if (grid) {
+        grid.addEventListener('click', function (e) {
+            var btn = e.target.closest('.mp-jwq-open-btn');
+            if (!btn || !grid.contains(btn)) return;
+            e.preventDefault();
+            jwqOpenModal(btn);
+        });
+    }
+
+    var closeBtn = document.getElementById('jwqModalClose');
+    if (closeBtn) closeBtn.addEventListener('click', jwqCloseModal);
+    if (!window.JWQ_PAGE_MODE) {
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) jwqCloseModal();
+        });
+    }
+
+    var jwqLinesTbodyInit = document.getElementById('jwqOrderLinesBody');
+    if (jwqLinesTbodyInit && !jwqLinesTbodyInit._jwqAutoLossBound) {
+        jwqLinesTbodyInit._jwqAutoLossBound = true;
+        jwqLinesTbodyInit.addEventListener('input', function (e) {
+            var inp = e.target.closest('.jwq-cell-input[data-field="total_wt"], .jwq-cell-input[data-field="metal_wt"], .jwq-cell-input[data-col-input="total_wt"], .jwq-cell-input[data-col-input="metal_wt"]');
+            if (inp && jwqLinesTbodyInit.contains(inp)) {
+                var tr = inp.closest('tr');
+                var f = inp.getAttribute('data-field') || inp.getAttribute('data-col-input');
+                if (tr && f === 'metal_wt') {
+                    var mv = parseFloat(inp.value);
+                    if (isFinite(mv) && mv >= 0) {
+                        tr.setAttribute('data-base-metal-wt', String(mv));
+                    }
+                }
+                if (tr && typeof jwqMaybeApplyAutoLoss === 'function') {
+                    jwqMaybeApplyAutoLoss(tr);
+                }
+            }
+            var inD = e.target.closest('.jwq-cell-input[data-field="diamond_wt"], .jwq-cell-input[data-col-input="diamond_wt"]');
+            if (inD && jwqLinesTbodyInit.contains(inD)) {
+                var trd = inD.closest('tr');
+                if (trd && typeof jwqRefreshLineDiamondBaseFromUi === 'function') {
+                    jwqRefreshLineDiamondBaseFromUi(trd);
+                }
+                if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
+                    jwqSyncOrderLineDiamondWtFromMaterialTable();
+                }
+            }
+        });
+    }
+    if (jwqLinesTbodyInit && !jwqLinesTbodyInit._jwqDiamondMaterialLineBound) {
+        jwqLinesTbodyInit._jwqDiamondMaterialLineBound = true;
+        jwqLinesTbodyInit.addEventListener('focusin', function (e) {
+            var tr = e.target && e.target.closest ? e.target.closest('tr[data-item-id]') : null;
+            if (!tr || !jwqLinesTbodyInit.contains(tr)) {
+                return;
+            }
+            var iid = parseInt(tr.getAttribute('data-item-id') || '0', 10) || 0;
+            if (iid > 0) {
+                window.__jwqDiamondMaterialItemId = iid;
+            }
+        });
+    }
+
+    var fromDept = document.getElementById('jwqFromDept');
+    var fromUser = document.getElementById('jwqFromUser');
+    var toDept = document.getElementById('jwqToDept');
+    var toUser = document.getElementById('jwqToUser');
+    if (fromDept && fromUser) {
+        fromDept.addEventListener('change', function () {
+            var id = parseInt(fromDept.value || '0', 10);
+            jwqFillUserSelectForDept(fromUser, id);
+            if (typeof jwqRefreshAutoLossAllRows === 'function') {
+                jwqRefreshAutoLossAllRows();
+            }
+            if (typeof jwqRefreshServerLoadedMaterialDiamonds === 'function') {
+                jwqRefreshServerLoadedMaterialDiamonds();
+            }
+        });
+    }
+    if (toDept && toUser) {
+        toDept.addEventListener('change', function () {
+            var id = parseInt(toDept.value || '0', 10);
+            jwqFillUserSelectForDept(toUser, id);
+        });
+    }
+
+    var btnSave = document.getElementById('jwqBtnSave');
+    if (btnSave) {
+        btnSave.addEventListener('click', function () {
+            var jwo = document.getElementById('jwqCurrentJwoId');
+            var id = jwo ? parseInt(jwo.value || '0', 10) : 0;
+            if (id < 1) {
+                alert('Select a job work order from the list above, or open this page with ?jwo_id=');
+                return;
+            }
+            var toD = document.getElementById('jwqToDept');
+            var toU = document.getElementById('jwqToUser');
+            var toDeptId = toD ? parseInt(toD.value || '0', 10) : 0;
+            if (toDeptId < 1) {
+                alert('Please select destination department (To Dept.). The job will move to that department after save.');
+                return;
+            }
+            var fd = new FormData();
+            fd.append('jobwork_order_id', String(id));
+            fd.append('to_dept_id', String(toDeptId));
+            if (toU && toU.value) {
+                fd.append('to_user_id', toU.value);
+            }
+            if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
+                jwqSyncOrderLineDiamondWtFromMaterialTable();
+            }
+            var lines = typeof jwqCollectQueueLinePayload === 'function' ? jwqCollectQueueLinePayload() : [];
+            fd.append('queue_lines', JSON.stringify(lines));
+            var dstock = typeof jwqCollectMaterialDiamondStockForSave === 'function' ? jwqCollectMaterialDiamondStockForSave() : [];
+            if (window.console && typeof console.log === 'function') {
+                console.log('JWQ_SAVE_LINES', lines);
+                console.log('JWQ_SAVE_DIAMONDS', dstock);
+            }
+            if ((!dstock || dstock.length === 0) && typeof jwqMaterialBodyHasVisibleDataRows === 'function' && jwqMaterialBodyHasVisibleDataRows()) {
+                alert('Jobwork Queue: diamond save payload is empty but the material table has rows. Check the console (JWQ_SAVE_DIAMONDS).');
+            }
+            // Per-piece diamond lines from .jwq-material-diamond-row only (see jwqCollectMaterialDiamondStockForSave).
+            fd.append('jwq_diamond_stock_lines', JSON.stringify(dstock));
+            fetch('ajax/mp-save-jobwork-queue.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) {
+                    return r.text().then(function (txt) {
+                        return { status: r.status, text: txt };
+                    });
+                })
+                .then(function (resp) {
+                    var data = null;
+                    try {
+                        data = JSON.parse(resp.text || '{}');
+                    } catch (e) {
+                        var raw = String(resp.text || '').trim();
+                        alert('Save failed (invalid server response): ' + (raw ? raw.slice(0, 320) : ('HTTP ' + resp.status)));
+                        return;
+                    }
+                    if (!data.ok) {
+                        alert(data.message || 'Save failed');
+                        return;
+                    }
+                    if (data.jobwork_queue_no) {
+                        var qel = document.getElementById('jwqModalQueueNo');
+                        var qh = document.getElementById('jwqJobworkQueueNo');
+                        if (qel) {
+                            qel.textContent = data.jobwork_queue_no;
+                        }
+                        if (qh) {
+                            qh.value = data.jobwork_queue_no;
+                        }
+                        document.querySelectorAll('.jwq-order-boot[data-jwo-id="' + id + '"]').forEach(function (b) {
+                            b.setAttribute('data-jobwork-queue-no', data.jobwork_queue_no);
+                        });
+                    }
+                    if (typeof window.mpReloadManufacturingQueueTable === 'function') {
+                        window.mpReloadManufacturingQueueTable();
+                    }
+                    if (typeof mpJwqPromptPrintAfterSave === 'function') {
+                        mpJwqPromptPrintAfterSave(id);
+                    } else if (window.JWQ_PAGE_MODE) {
+                        alert(data.message || 'Saved.');
+                    } else {
+                        jwqCloseModal();
+                    }
+                })
+                .catch(function () {
+                    alert('Save failed');
+                });
+        });
+    }
+
+    var btnCat = document.getElementById('jwqBtnCatalogue');
+    if (btnCat) {
+        btnCat.addEventListener('click', function () {
+            alert('Create Catalogue — link this to your catalogue flow when ready.');
+        });
+    }
+
+    var btnAddLine = document.getElementById('jwqBtnAddLine');
+    if (btnAddLine) {
+        btnAddLine.addEventListener('click', function () {
+            var jwo = document.getElementById('jwqCurrentJwoId');
+            var id = jwo ? parseInt(jwo.value || '0', 10) : 0;
+            var fd = new FormData();
+            fd.append('jobwork_order_id', id > 0 ? String(id) : '0');
+            btnAddLine.disabled = true;
+            fetch('ajax/mp-add-jobwork-order-line.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.ok) {
+                        alert((data && data.message) || 'Could not add row');
+                        return;
+                    }
+                    if (data.created_jobwork_order) {
+                        jwqApplyDraftJwoFromServer(data);
+                    }
+                    var loadId = parseInt(data.jobwork_order_id, 10) || id;
+                    jwqLoadOrderLinesIntoTable(loadId, jwqGetOrderRefForLines(), jwqGetFirstProductHint());
+                })
+                .catch(function () {
+                    alert('Could not add row');
+                })
+                .finally(function () {
+                    btnAddLine.disabled = false;
+                });
+        });
+    }
+
+    var btnNew = document.getElementById('jwqBtnNew');
+    if (btnNew && window.JWQ_PAGE_MODE) {
+        btnNew.addEventListener('click', function () {
+            window.location.href = 'jobwork-queue.php';
+        });
+    }
+
+    var btnBom = document.getElementById('jwqBtnBom');
+    var btnOrd = document.getElementById('jwqBtnOrder');
+    if (btnBom) btnBom.addEventListener('click', function () { alert('BOM — connect to bill of materials.'); });
+    if (btnOrd) btnOrd.addEventListener('click', function () { alert('Order — connect to order lookup.'); });
+
+    var imgBox = document.getElementById('jwqImagesBox');
+    var imgInput = document.getElementById('jwqImagesInput');
+    if (imgBox && imgInput) {
+        imgBox.addEventListener('click', function () { imgInput.click(); });
+        imgInput.addEventListener('change', function () { /* store or upload files */ });
+    }
+
+    var btnPrint = document.getElementById('jwqBtnPrint');
+    if (btnPrint) {
+        btnPrint.addEventListener('click', function () {
+            window.print();
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (window.JWQ_PAGE_MODE) return;
+        if (e.key === 'Escape' && overlay.classList.contains('show')) jwqCloseModal();
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    initColumnManager({
+        tableId: 'jwqOrderLinesTable',
+        panelId: 'jwqColumnsPanel',
+        toggleSelector: '.jwq-settings-toggle',
+        searchId: 'jwqColumnsSearch',
+        listId: 'jwqColumnsList',
+        storageKey: window.JWQ_LINE_COL_STORAGE || 'jobwork_queue_page_jwq_order_lines_hidden_columns',
+        panelLayout: 'inline'
+    });
+
+    initColumnManager({
+        tableId: 'jwqInwardStockTable',
+        panelId: 'jwqInwardStockColumnsPanel',
+        toggleSelector: '#jwqInwardStockBtnColumns',
+        searchId: 'jwqInwardStockColumnsSearch',
+        listId: 'jwqInwardStockColumnsList',
+        storageKey: window.JWQ_INWARD_COL_STORAGE || 'jobwork_queue_page_jwq_inward_modal_hidden_columns',
+        panelPosition: 'absolute'
+    });
+
+    var jwqInEx = document.getElementById('jwqInwardStockBtnExcel');
+    var jwqInPdf = document.getElementById('jwqInwardStockBtnPdf');
+    if (jwqInEx) jwqInEx.addEventListener('click', function (e) { e.preventDefault(); jwqInwardStockExportExcel(); });
+    if (jwqInPdf) jwqInPdf.addEventListener('click', function (e) { e.preventDefault(); jwqInwardStockExportPdf(); });
+
+    initJobworkQueueModal();
+    initJwqPaymentIcons();
+
+    initJwqOrderSearch();
+
+    var boot = document.getElementById('jwqPageBootstrapBtn');
+    if (boot && boot.getAttribute('data-jwo-id')) {
+        jwqOpenModal(boot);
+    } else if (window.JWQ_PAGE_MODE) {
+        var prev = (window.JWQ_PREVIEW_QUEUE_NO && String(window.JWQ_PREVIEW_QUEUE_NO).trim()) || '';
+        if (prev) {
+            var qel = document.getElementById('jwqModalQueueNo');
+            var qh = document.getElementById('jwqJobworkQueueNo');
+            if (qel) {
+                qel.textContent = prev;
+                qel.setAttribute('title', 'Next number in series; final number is saved with the job work order.');
+            }
+            if (qh) qh.value = prev;
+        }
+        var tbodyInit = document.getElementById('jwqOrderLinesBody');
+        if (tbodyInit && tbodyInit.children.length === 0) {
+            var ph0 = {
+                design_no: '—',
+                barcode: '—',
+                product_name: '—',
+                carat: '—',
+                final_weight: 0,
+                net_weight: 0,
+                purity: 0,
+                quantity: 0,
+                rate: null,
+                less_weight: 0,
+                diamond_weight: 0,
+                gross_weight: 0
+            };
+            tbodyInit.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(ph0, '—'));
+            jwqApplyStoredLineColumnVisibility();
+        }
+    }
+});
