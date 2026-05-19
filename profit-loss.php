@@ -180,6 +180,7 @@ $DASHBOARD_EXTRA_CSS = <<<'HTML'
 </style>
 HTML;
 
+$DASHBOARD_FS_PAGE = true;
 require __DIR__ . '/includes/dashboard_shell_top.php';
 
 $tz = new DateTimeZone('Asia/Kolkata');

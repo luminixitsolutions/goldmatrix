@@ -478,6 +478,7 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
     <?php include __DIR__ . '/header-script.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <link rel="stylesheet" href="assets/css/advance-filter-global.css">
+    <link rel="stylesheet" href="assets/css/mfg-pages-mobile.css">
     <style>
         :root {
             --lt-navy: #11294b;
@@ -644,7 +645,7 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
         }
     </style>
 </head>
-<body>
+<body class="mfg-page loss-tracking-page">
 <?php include __DIR__ . '/sidebar.php'; ?>
 <div class="layout-content">
     <div class="lt-wrap container-fluid flex-grow-1">

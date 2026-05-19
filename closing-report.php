@@ -222,6 +222,7 @@ function cr_cell_value(array $row, $key) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <?php include __DIR__ . '/header-script.php'; ?>
+    <link rel="stylesheet" href="assets/css/mfg-pages-mobile.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
         :root {
@@ -392,7 +393,7 @@ function cr_cell_value(array $row, $key) {
         .cr-empty { text-align: center; padding: 32px; color: #64748b; font-weight: 600; }
     </style>
 </head>
-<body>
+<body class="mfg-page closing-report-page">
 <?php include __DIR__ . '/sidebar.php'; ?>
 <div class="layout-content">
     <div class="cr-wrap container-fluid flex-grow-1">

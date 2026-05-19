@@ -30,6 +30,9 @@ require_once __DIR__ . '/includes/auragold_ui_font_settings.php';
     <link rel="stylesheet" href="assets/css/product-list-invoice-layout.css?v=5">
     <link rel="stylesheet" href="assets/css/column-drag-icons.css">
     <link rel="stylesheet" href="assets/css/fs-financial-toolbar.css">
+    <?php if (!empty($AURAGOLD_REPORT_PAGE)): ?>
+    <link rel="stylesheet" href="assets/css/report-pages-mobile.css">
+    <?php endif; ?>
     <!-- DataTables CSS -->
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
     <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">

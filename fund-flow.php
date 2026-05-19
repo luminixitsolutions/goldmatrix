@@ -286,6 +286,7 @@ if (!$groups_result['ok']) {
     ];
 }
 
+$DASHBOARD_FS_PAGE = true;
 require __DIR__ . '/includes/dashboard_shell_top.php';
 ?>
 <div class="tb-wrap">

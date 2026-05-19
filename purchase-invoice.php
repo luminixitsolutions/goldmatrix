@@ -3244,6 +3244,7 @@ include 'includes/common-modal.php';
     
     // Edit mode: skip deferred loadCustomerBalance so it doesn't overwrite saved Grand Total / Paid / Balance
     window.isPurchaseInvoiceEditMode = <?php echo (!empty($edit_order_id) && $edit_order_id > 0) ? 'true' : 'false'; ?>;
+    window.isPurchaseInvoicePage = true;
     window.piSaveBlockedBySaleFixing = <?php echo !empty($pi_save_blocked_by_sale_fixing) ? 'true' : 'false'; ?>;
 </script>
 <script>
@@ -5335,8 +5336,8 @@ window.PB_PAGE_CONFIG = {
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
-<td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
+            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount" selected>Tax of net amount</option><option value="no_tax">No tax</option></select></td>
             <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="0" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (read-only)"></td>
@@ -6244,8 +6245,8 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
-                                <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
+                                <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
                                 <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount" selected>Tax of net amount</option><option value="no_tax">No tax</option></select></td>
                                 <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="${(product.total_tax_percent != null && product.total_tax_percent !== '') ? product.total_tax_percent : ((product.vat_value != null && product.vat_value !== '') ? product.vat_value : 0)}" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (sum of all taxes, read-only)"></td>
@@ -6434,8 +6435,8 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                    <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
-                                    <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
+                                    <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                    <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
                                     <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount" selected>Tax of net amount</option><option value="no_tax">No tax</option></select></td>
                                     <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="${(product.total_tax_percent != null && product.total_tax_percent !== '') ? product.total_tax_percent : ((product.vat_value != null && product.vat_value !== '') ? product.vat_value : 0)}" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (sum of all taxes, read-only)"></td>
@@ -7330,8 +7331,7 @@ window.PB_PAGE_CONFIG = {
             merged.net_amt_tax = jNetAmtTax;
             merged.amount = jNetAmt;
             merged.purchase_amount = jNetAmt;
-            merged.sale_amount = jNetAmt;
-            merged.sale_amount_with = jNetAmtTax;
+            merged.purchase_amount_with = jNetAmtTax;
             merged.metal_value = parseFloat(jewelleryRow.metal_value) || 0;
             merged.other_amount = parseFloat(jewelleryRow.other_amount) || 0;
             merged.making_amount = parseFloat(jewelleryRow.making_amount) || 0;
@@ -7340,7 +7340,7 @@ window.PB_PAGE_CONFIG = {
             merged.diamond_amount = parseFloat(jewelleryRow.diamond_amount) || 0;
             merged.tax = parseFloat(jewelleryRow.tax) || 0;
         }
-        merged.purchase_amount_with = merged.sale_amount_with;
+        if (!merged.purchase_amount_with) merged.purchase_amount_with = merged.net_amt_tax || merged.sale_amount_with || 0;
         
         var normalizedGroupItems = modalRowsData.map(function(d) {
             var o = Object.assign({}, d);
@@ -7457,7 +7457,7 @@ window.PB_PAGE_CONFIG = {
                 net_wt: netWt, pure_wt: parseFloat(purityWt), rate: rate, metal_value: metalValue, amount: amount,
                 making_amount: makingAmount, stone_amount: stoneCharges, other_amount: otherCharges, diamond_amount: diamondValue,
                 tax: tax, net_amt: netAmt, net_amt_tax: netAmtWithTax,
-                purchase_amount: netAmt, sale_amount: netAmt, sale_amount_with: netAmtWithTax, purchase_amount_with: netAmtWithTax, reverse: 0
+                purchase_amount: netAmt, sale_amount: 0, sale_amount_with: 0, purchase_amount_with: netAmtWithTax, reverse: 0
             };
             var actionCell = '<td><div class="action-btns"><button type="button" class="btn-edit" onclick="editProductRow(\'' + rowId + '\')" title="Edit"><i class="feather icon-edit"></i></button><button type="button" class="btn-delete" onclick="deleteProductRow(\'' + rowId + '\')" title="Delete"><i class="feather icon-trash-2"></i></button></div></td>';
             row.innerHTML = (typeof getProductListRowCells === 'function' ? getProductListRowCells(rowData, { groupImage: '' }) : []).join('') + actionCell;
@@ -7693,8 +7693,7 @@ window.PB_PAGE_CONFIG = {
             merged.net_amt_tax = jNetAmtTaxEdit;
             merged.amount = jNetAmtEdit;
             merged.purchase_amount = jNetAmtEdit;
-            merged.sale_amount = jNetAmtEdit;
-            merged.sale_amount_with = jNetAmtTaxEdit;
+            merged.purchase_amount_with = jNetAmtTaxEdit;
             merged.metal_value = parseFloat(jewelleryRowEdit.metal_value) || 0;
             merged.other_amount = parseFloat(jewelleryRowEdit.other_amount) || 0;
             merged.making_amount = parseFloat(jewelleryRowEdit.making_amount) || 0;
@@ -7703,7 +7702,7 @@ window.PB_PAGE_CONFIG = {
             merged.diamond_amount = parseFloat(jewelleryRowEdit.diamond_amount) || 0;
             merged.tax = parseFloat(jewelleryRowEdit.tax) || 0;
         }
-        merged.purchase_amount_with = merged.sale_amount_with;
+        if (!merged.purchase_amount_with) merged.purchase_amount_with = merged.net_amt_tax || merged.sale_amount_with || 0;
         var normalizedEditItems = modalRowsData.map(function(d) {
             var o = Object.assign({}, d);
             var pq = purchaseInvoiceQuantityFromModalLine(d);
@@ -7914,8 +7913,8 @@ window.PB_PAGE_CONFIG = {
             const otherAmount = parseFloat(row.querySelector('[data-column="other-amount"]')?.textContent) || 0;
             const diamondAmount = parseFloat(row.querySelector('[data-column="diamond-amount"]')?.textContent) || 0;
             const purchaseAmount = parseFloat(row.querySelector('[data-column="purchase-amount"]')?.textContent) || 0;
-            const saleAmount = parseFloat(row.querySelector('[data-column="sale-amount"]')?.textContent) || 0;
-            const saleAmountWith = parseFloat(row.querySelector('[data-column="sale-amount-with"]')?.textContent) || 0;
+            const saleAmount = parseFloat(row.querySelector('[data-column="sale-amount"] input')?.value || row.querySelector('[data-column="sale-amount"]')?.textContent) || 0;
+            const saleAmountWith = parseFloat(row.querySelector('[data-column="sale-amount-with"] input')?.value || row.querySelector('[data-column="sale-amount-with"]')?.textContent) || 0;
             const reverse = parseFloat(row.querySelector('[data-column="reverse"]')?.textContent) || 0;
             
             totalQuantity += qty;
@@ -9870,8 +9869,8 @@ window.PB_PAGE_CONFIG = {
                 const otherAmount = parseFloat(row.querySelector('[data-column="other-amount"]')?.textContent) || 0;
                 const diamondAmount = parseFloat(row.querySelector('[data-column="diamond-amount"]')?.textContent) || 0;
                 const purchaseAmount = parseFloat(row.querySelector('[data-column="purchase-amount"]')?.textContent) || 0;
-                const saleAmount = parseFloat(row.querySelector('[data-column="sale-amount"]')?.textContent) || 0;
-                const saleAmountWith = parseFloat(row.querySelector('[data-column="sale-amount-with"]')?.textContent) || 0;
+                const saleAmount = parseFloat(row.querySelector('[data-column="sale-amount"] input')?.value || row.querySelector('[data-column="sale-amount"]')?.textContent) || 0;
+                const saleAmountWith = parseFloat(row.querySelector('[data-column="sale-amount-with"] input')?.value || row.querySelector('[data-column="sale-amount-with"]')?.textContent) || 0;
                 const reverse = parseFloat(row.querySelector('[data-column="reverse"]')?.textContent) || 0;
                 const metalQtyEl = row.querySelector('[data-column="metal-qty"] input');
                 const metalQty = metalQtyEl ? (parseFloat(metalQtyEl.value) || 1) : 1;
@@ -10355,8 +10354,8 @@ window.PB_PAGE_CONFIG = {
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_cost || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.diamond_amount || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.purchase_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount_with || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
+            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount_with || 0).toFixed(2)}" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount" selected>Tax of net amount</option><option value="no_tax">No tax</option></select></td>
             <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="${(product.total_tax_percent != null && product.total_tax_percent !== '') ? product.total_tax_percent : ((product.vat_value != null && product.vat_value !== '') ? product.vat_value : 0)}" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (sum of all taxes, read-only)"></td>

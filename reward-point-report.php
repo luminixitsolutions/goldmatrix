@@ -17,6 +17,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to_date)) {
 
 $lbl_title = function_exists('auragold_t') ? auragold_t('rep.reward_point') : 'Reward Point Report';
 
+$AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 include 'sidebar.php';
 ?>

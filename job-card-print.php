@@ -15,6 +15,7 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <?php include 'header-script.php'; ?>
+    <link rel="stylesheet" href="assets/css/mfg-pages-mobile.css">
 </head>
 
 <style>
@@ -645,7 +646,7 @@ body.job-card-print-page .jcp-page-wrap {
 }
 </style>
 
-<body class="default-style job-card-print-page">
+<body class="default-style mfg-page job-card-print-page">
 <?php include 'sidebar.php'; ?>
 
 <div class="layout-content">

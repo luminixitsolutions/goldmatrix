@@ -724,28 +724,72 @@ html, body{
         padding-bottom: 10px;
     }
 
-    /* Product characteristics: hide column header row; scroll value columns only */
+    /* Product characteristics: full-table horizontal scroll (no frozen columns on mobile) */
     body.page-product-opening .pc-table {
         border-collapse: separate;
         border-spacing: 0;
+        width: max-content;
+        min-width: 100%;
     }
+    /* Visible compact header (keep in layout — display:none breaks colspan widths) */
     body.page-product-opening .pc-table thead {
+        display: table-header-group;
+    }
+    body.page-product-opening .pc-table thead th {
+        position: sticky;
+        top: 0;
+        left: auto;
+        height: auto;
+        max-height: none;
+        padding: 7px 8px;
+        font-size: 0.68rem;
+        line-height: 1.2;
+        overflow: visible;
+        color: #ffffff;
+        background: #11294b;
+        border-color: #1e3a5f;
+        box-shadow: none;
+        white-space: nowrap;
+        vertical-align: middle;
+        cursor: default;
+    }
+    body.page-product-opening .pc-table thead tr#headerRow2 th {
+        top: var(--pc-thead-h1);
+        z-index: 8;
+        font-size: 0.62rem;
+        padding: 5px 6px;
+        background: #1a3560;
+    }
+    body.page-product-opening .pc-table thead tr#headerRow1 > th[rowspan="2"] {
+        z-index: 10;
+    }
+    body.page-product-opening .pc-table thead th .sort-arrows,
+    body.page-product-opening .pc-table thead th .pc-col-drag-handle,
+    body.page-product-opening .pc-table thead th .add-icon {
         display: none;
     }
+    body.page-product-opening .pc-table thead th[data-col="check"],
+    body.page-product-opening .pc-table thead th[data-col="metal"],
     body.page-product-opening .pc-table tbody td[data-col="check"],
     body.page-product-opening .pc-table tbody td[data-col="metal"] {
-        position: sticky;
-        z-index: 6;
-        background: #ffffff;
-        box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08);
+        position: static;
+        left: auto;
+        box-shadow: none;
+        z-index: auto;
     }
     body.page-product-opening .pc-table tbody tr:hover td[data-col="metal"],
     body.page-product-opening .pc-table tbody tr:hover td[data-col="check"] {
         background: #f8fafc;
     }
     body.page-product-opening .pc-wrapper {
-        overflow: hidden;
+        overflow: visible;
         min-width: 0;
+        max-width: 100%;
+    }
+    body.page-product-opening .pc-scroll {
+        width: 100%;
+        max-width: 100%;
+        touch-action: pan-x pan-y;
     }
 
     /* Page shell: use width on narrow viewports */
@@ -805,9 +849,9 @@ html, body{
     .product-details-actions .btn {
         width: 100%;
     }
-    /* Slightly narrower sticky metal column — table still scrolls horizontally */
-    .pc-table thead th[data-col="metal"],
-    .pc-table tbody td[data-col="metal"] {
+    /* Narrower metal label column on very small screens */
+    body.page-product-opening .pc-table thead th[data-col="metal"],
+    body.page-product-opening .pc-table tbody td[data-col="metal"] {
         min-width: 140px;
         width: 140px;
     }

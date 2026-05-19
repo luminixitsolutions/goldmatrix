@@ -55,10 +55,7 @@ $auragold_ss_menu_close = function_exists('auragold_t')
         <span><i class="feather icon-mail"></i> <?php echo $auragold_t_ss('set_software.mail_setting'); ?></span>
         <i class="feather icon-chevron-right"></i>
     </a>
-    <a href="mobile-menu-settings.php" class="set-software-nav-item<?php echo ($current_page === 'mobile-menu-settings.php') ? ' active' : ''; ?>">
-        <span><i class="feather icon-smartphone"></i> <?php echo $auragold_t_ss('set_software.mobile_menu_setting'); ?></span>
-        <i class="feather icon-chevron-right"></i>
-    </a>
+   
     <a href="masters.php" class="set-software-nav-item<?php echo ($current_page === 'masters.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-grid"></i> <?php echo $auragold_t_ss('set_software.masters'); ?></span>
         <i class="feather icon-chevron-right"></i>

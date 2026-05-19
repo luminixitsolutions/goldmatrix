@@ -340,6 +340,8 @@
         addListeners(makingRateInput, function() { calculateModalRowNetWeight(row); });
         addListeners(makingDiscountAmtInput, function() { calculateModalRowNetWeight(row); });
         addListeners(quantityInput, function() { calculateModalRowNetWeight(row); });
+        const settingChargeInput = row.querySelector('[data-column="setting-charge"] input');
+        addListeners(settingChargeInput, function() { calculateModalRowNetWeight(row); });
         addSelectListeners(caratSelect, function() {
             if (typeof window.applyDashboardMetalRateFromCaratSelect === 'function') {
                 window.applyDashboardMetalRateFromCaratSelect(row, function() {
@@ -376,6 +378,14 @@
         if (reverseInput) addListeners(reverseInput, function() { calculateModalRowNetWeight(row); });
         const netAmtTaxInputForRev = row.querySelector('[data-column="net-amt-tax"] input');
         if (netAmtTaxInputForRev) addListeners(netAmtTaxInputForRev, function() { calculateModalRowNetWeight(row); });
+        if (auragoldIsPurchaseInvoiceContext()) {
+            function piSaleAmountFieldsChanged() {
+                if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
+                if (typeof updateSummaryRow === 'function') updateSummaryRow();
+            }
+            addListeners(row.querySelector('[data-column="sale-amount"] input'), piSaleAmountFieldsChanged);
+            addListeners(row.querySelector('[data-column="sale-amount-with"] input'), piSaleAmountFieldsChanged);
+        }
         if (typeof applyCalculationSelectOptionsForRow === 'function') applyCalculationSelectOptionsForRow(calculationSelect, row, typeof isDiamondTabActive === 'function' && isDiamondTabActive());
     }
     window.addModalRowCalculationListeners = addModalRowCalculationListeners;
@@ -628,6 +638,49 @@
     }
     window.auragoldApplyGstTaxPercentFromRowScope = auragoldApplyGstTaxPercentFromRowScope;
 
+    /** Voucher setting wastage_wt_calculation for row metal (tbl_voucher_settings, branch + metal_wise): GoldWt | FinalWt */
+    function auragoldGetVoucherWastageWtCalculation(row) {
+        var mode = 'GoldWt';
+        if (typeof window.voucherSettingsByMetal !== 'object' || !window.voucherSettingsByMetal) return mode;
+        var metalWise = 'Gold';
+        var metalId = row && row.getAttribute ? row.getAttribute('data-metal-id') : null;
+        if ((!metalId || metalId === '') && typeof currentMetalId !== 'undefined' && currentMetalId != null && currentMetalId !== '') {
+            metalId = String(currentMetalId);
+        }
+        if (window.metals && metalId != null && metalId !== '') {
+            var metal = window.metals.find(function(m) { return String(m.id) === String(metalId); });
+            if (metal && (metal.display_name || metal.name)) metalWise = metal.display_name || metal.name;
+        } else if (typeof currentMetalName === 'string' && currentMetalName.trim()) {
+            metalWise = currentMetalName.trim();
+        }
+        var mwLower = String(metalWise).toLowerCase().trim();
+        var vs = window.voucherSettingsByMetal[metalWise];
+        if (!vs && window.voucherSettingsByMetal) {
+            for (var k in window.voucherSettingsByMetal) {
+                if (window.voucherSettingsByMetal.hasOwnProperty(k) && String(k).toLowerCase().trim() === mwLower) {
+                    vs = window.voucherSettingsByMetal[k];
+                    break;
+                }
+            }
+        }
+        if (!vs && mwLower.indexOf('diamond') !== -1) {
+            vs = window.voucherSettingsByMetal['Diamond & Stones'] || window.voucherSettingsByMetal['Diamond & Stone'];
+        }
+        if (vs && vs.wastage_wt_calculation === 'FinalWt') mode = 'FinalWt';
+        return mode;
+    }
+    window.auragoldGetVoucherWastageWtCalculation = auragoldGetVoucherWastageWtCalculation;
+
+    /** Purchase invoice: Sale Amount fields are manual (default 0), not copied from Net Amt. */
+    function auragoldIsPurchaseInvoiceContext() {
+        if (window.isPurchaseInvoicePage === true) return true;
+        if (typeof window.PRODUCT_MODAL_COLUMNS_PAGE === 'string' && window.PRODUCT_MODAL_COLUMNS_PAGE.indexOf('purchase-invoice') !== -1) return true;
+        try {
+            return !!(window.location && /purchase-invoice\.php/i.test(String(window.location.pathname || '')));
+        } catch (e) { return false; }
+    }
+    window.auragoldIsPurchaseInvoiceContext = auragoldIsPurchaseInvoiceContext;
+
     // Calculate ALL values for modal product rows - COMPREHENSIVE CALCULATION
     function calculateModalRowNetWeight(row) {
         if (row && row.jquery) row = row[0];
@@ -743,16 +796,34 @@
             if (netWt <= 0 && metalWtForCalc > 0) netWt = metalWtForCalc;
         }
         if (netWtInput) netWtInput.value = parseFloat(netWt.toFixed(3)).toString();
-        // For Jewellery, sync metal-weight from net weight only when netWt > 0; never overwrite with 0 (keep stock/product value)
-        if (!isDiamondOrGemStone && catVal === 'Jewellery' && netWt > 0 && metalWeightInput) metalWeightInput.value = parseFloat(netWt.toFixed(3)).toString();
-        const wastageWt = netWt * (wastagePer / 100);
-        if (wastageWtInput) wastageWtInput.value = wastageWt.toFixed(3);
+        var baseGoldWt = netWt > 0.00001 ? netWt : (metalWtForCalc > 0 ? metalWtForCalc : 0);
+        if (!isDiamondOrGemStone && catVal === 'Jewellery' && netWt > 0 && metalWeightInput) {
+            metalWeightInput.value = parseFloat(netWt.toFixed(3)).toString();
+            baseGoldWt = netWt;
+        }
         var purityVal = parseFloat(purityInput.value) || 0;
         var purityMult = (purityVal > 1) ? (purityVal / 100) : purityVal;
-        var weightForPurity = (metalWtForCalc > 0) ? metalWtForCalc : netWt;
-        var purityWt = isDiamondOrGemStone ? (netWt * purity) : (weightForPurity * purityMult);
-        if (purityWtInput) purityWtInput.value = purityWt.toFixed(3);
-        const finalWt = purityWt;
+        var wastageWtMode = auragoldGetVoucherWastageWtCalculation(row);
+        var wastageWt;
+        var purityWt;
+        var finalWt;
+        if (wastageWtMode === 'GoldWt' && !isDiamondOrGemStone) {
+            wastageWt = baseGoldWt * (wastagePer / 100);
+            if (wastageWtInput) wastageWtInput.value = wastageWt.toFixed(3);
+            var metalWithWastage = baseGoldWt + wastageWt;
+            if (metalWeightInput) metalWeightInput.value = parseFloat(metalWithWastage.toFixed(3)).toString();
+            purityWt = metalWithWastage * purityMult;
+            if (purityWtInput) purityWtInput.value = purityWt.toFixed(3);
+            finalWt = purityWt;
+        } else {
+            var weightForPurity = baseGoldWt > 0 ? baseGoldWt : (metalWtForCalc > 0 ? metalWtForCalc : netWt);
+            purityWt = isDiamondOrGemStone ? (netWt * purity) : (weightForPurity * purityMult);
+            if (purityWtInput) purityWtInput.value = purityWt.toFixed(3);
+            var wastageBase = (wastageWtMode === 'FinalWt') ? purityWt : baseGoldWt;
+            wastageWt = wastageBase * (wastagePer / 100);
+            if (wastageWtInput) wastageWtInput.value = wastageWt.toFixed(3);
+            finalWt = (wastageWtMode === 'FinalWt') ? (purityWt + wastageWt) : purityWt;
+        }
         if (finalWtInput) finalWtInput.value = finalWt.toFixed(3);
         if (alloyWtInput && (!alloyWtInput.value || alloyWtInput.value.trim() === '')) alloyWtInput.value = '0.000';
         const calculationSelect = row.querySelector('[data-column="calculation"] select');
@@ -818,7 +889,14 @@
             if (makingCostInput) makingCostInput.value = makingCost.toFixed(2);
         }
         let stoneAmount = 0;
-        if (stoneChargeTypeSelect && stoneRateInput) {
+        const settingChargeInput = row.querySelector('[data-column="setting-charge"] input');
+        const isDiamondCatForSetting = (categoryId === 'Diamonds' || categoryId === 'GemStones' || isDiamondOrGemStone);
+        if (settingChargeInput && isDiamondCatForSetting) {
+            const diamondQty = parseFloat(quantityInput?.value) || 1;
+            const settingCharge = parseFloat(settingChargeInput.value) || 0;
+            stoneAmount = diamondQty * settingCharge;
+            if (stoneAmountInput) stoneAmountInput.value = stoneAmount.toFixed(2);
+        } else if (stoneChargeTypeSelect && stoneRateInput) {
             const stoneChargeType = stoneChargeTypeSelect.value || 'Fix';
             const stoneRate = parseFloat(stoneRateInput.value) || 0;
             stoneAmount = (stoneChargeType === 'Fix') ? stoneRate : (parseFloat(stoneWeightInput?.value) || 0) * stoneRate;
@@ -880,8 +958,11 @@
         if (amountInput) amountInput.value = (categoryId === 'Jewellery' && diamondAmount > 0) ? diamondAmount.toFixed(2) : calculatedAmount.toFixed(2);
         if (netAmtInput) netAmtInput.value = netAmt.toFixed(2);
         if (purchaseAmountInput) purchaseAmountInput.value = netAmt.toFixed(2);
-        if (saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
-        if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
+        var isPurchasePiCtx = auragoldIsPurchaseInvoiceContext();
+        if (!isPurchasePiCtx) {
+            if (saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
+            if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
+        }
         const taxTypeSelect = row.querySelector('[data-column="tax-type"] select');
         const taxType = taxTypeSelect ? taxTypeSelect.value : 'no_tax';
         const taxPercentInput = row.querySelector('[data-column="tax-percent"] input');
@@ -919,7 +1000,7 @@
         if (taxInput) taxInput.value = tax.toFixed(2);
         let netAmtTax = tax + netAmt;
         if (netAmtTaxInput) netAmtTaxInput.value = netAmtTax.toFixed(2);
-        if (saleAmountWithInput) saleAmountWithInput.value = netAmtTax.toFixed(2);
+        if (!isPurchasePiCtx && saleAmountWithInput) saleAmountWithInput.value = netAmtTax.toFixed(2);
 
         // Reverse balance mode:
         // You enter `Reverse = Net Amt+Tax` (net-amt-tax).
@@ -958,7 +1039,7 @@
             if (amountInput) amountInput.value = (categoryId === 'Jewellery' && diamondAmount > 0) ? diamondAmount.toFixed(2) : amountBase2.toFixed(2);
             if (netAmtInput) netAmtInput.value = netAmt.toFixed(2);
             if (purchaseAmountInput) purchaseAmountInput.value = netAmt.toFixed(2);
-            if (saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
+            if (!isPurchasePiCtx && saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
 
             // Disc. base: 0 for Fix or 0% ; show base only when % discount Per. > 0
             if (discountAmountInput) {
@@ -988,7 +1069,7 @@
 
             if (taxInput) taxInput.value = tax.toFixed(2);
             if (netAmtTaxInput) netAmtTaxInput.value = revAmt.toFixed(2);
-            if (saleAmountWithInput) saleAmountWithInput.value = revAmt.toFixed(2);
+            if (!isPurchasePiCtx && saleAmountWithInput) saleAmountWithInput.value = revAmt.toFixed(2);
         }
 
         var rowTbody = row.closest('tbody');
@@ -1020,6 +1101,16 @@
         addCalcListener(row.querySelector('[data-field="purity"]'), function() { clearPreserveAndCalc(); });
         addCalcListener(row.querySelector('[data-column="metal-rate"] input'), function() { clearPreserveAndCalc(); });
         addCalcListener(row.querySelector('[data-column="metal-weight"] input'), function() { clearPreserveAndCalc(); });
+        addCalcListener(row.querySelector('[data-column="quantity"] input'), function() { clearPreserveAndCalc(); });
+        addCalcListener(row.querySelector('[data-column="setting-charge"] input'), function() { clearPreserveAndCalc(); });
+        if (auragoldIsPurchaseInvoiceContext()) {
+            function piSaleAmountPlChanged() {
+                if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
+                if (typeof updateSummaryRow === 'function') updateSummaryRow();
+            }
+            addCalcListener(row.querySelector('[data-column="sale-amount"] input'), piSaleAmountPlChanged);
+            addCalcListener(row.querySelector('[data-column="sale-amount-with"] input'), piSaleAmountPlChanged);
+        }
         const calculationSelect = row.querySelector('[data-column="calculation"] select');
         if (calculationSelect) {
             calculationSelect.addEventListener('change', function() {
@@ -1103,10 +1194,32 @@
         } else {
             weightForPurity = netWt;
         }
-        const pureWt = weightForPurity * purityDecimal;
-        const calculatedFinalWt = pureWt;
+        var baseGoldWtPl = netWt > 0.00001 ? netWt : (metalWt > 0 ? metalWt : 0);
+        const wastagePerPl = parseFloat(row.querySelector('[data-column="wastage-per"] input')?.value) || 0;
+        var wastageWtModePl = auragoldGetVoucherWastageWtCalculation(row);
+        var wastageWtPl;
+        var pureWt;
+        var calculatedFinalWt;
+        const metalWeightInputPl = row.querySelector('[data-column="metal-weight"] input');
+        if (wastageWtModePl === 'GoldWt') {
+            wastageWtPl = baseGoldWtPl * (wastagePerPl / 100);
+            const wastageWtFieldPl = row.querySelector('[data-column="wastage-wt"] input');
+            if (wastageWtFieldPl) wastageWtFieldPl.value = wastageWtPl.toFixed(3);
+            var metalWithWastagePl = baseGoldWtPl + wastageWtPl;
+            if (metalWeightInputPl) metalWeightInputPl.value = metalWithWastagePl.toFixed(3);
+            pureWt = metalWithWastagePl * purityDecimal;
+            calculatedFinalWt = pureWt;
+        } else {
+            pureWt = weightForPurity * purityDecimal;
+            var wastageBasePl = (wastageWtModePl === 'FinalWt') ? pureWt : baseGoldWtPl;
+            wastageWtPl = wastageBasePl * (wastagePerPl / 100);
+            const wastageWtFieldPl = row.querySelector('[data-column="wastage-wt"] input');
+            if (wastageWtFieldPl) wastageWtFieldPl.value = wastageWtPl.toFixed(3);
+            calculatedFinalWt = (wastageWtModePl === 'FinalWt') ? (pureWt + wastageWtPl) : pureWt;
+        }
         if (finalWtField) finalWtField.value = calculatedFinalWt.toFixed(3);
         const effectiveFinalWt = calculatedFinalWt;
+        if (metalWeightInputPl) metalWt = parseFloat(metalWeightInputPl.value) || metalWt;
         let metalValue = 0;
         const stoneWeightForCalc = parseFloat(row.querySelector('[data-column="stone-weight"] input')?.value) || 0;
         const quantityForCalc = parseFloat(row.querySelector('[data-column="quantity"] input')?.value) || 1;
@@ -1141,7 +1254,12 @@
         }
         const makingAmountCol = row.querySelector('[data-column="making-amount"]');
         const makingAmount = makingAmountCol ? readNumericCell('making-amount', making) : making;
-        const stoneAmount = readNumericCell('stone-amount', stoneCharges);
+        let stoneAmount = readNumericCell('stone-amount', stoneCharges);
+        const settingChargeInpPl = row.querySelector('[data-column="setting-charge"] input');
+        if (settingChargeInpPl && (categoryId === 'Diamonds' || categoryId === 'GemStones')) {
+            const diamondQtyPl = parseFloat(row.querySelector('[data-column="quantity"] input')?.value) || 1;
+            stoneAmount = diamondQtyPl * (parseFloat(settingChargeInpPl.value) || 0);
+        }
         const otherAmount = readNumericCell('other-amount', otherCharges);
         const diamondAmount = readNumericCell('diamond-amount', diamondValue);
         const discount = readNumericCell('discount', 0);
@@ -1192,8 +1310,9 @@
         if (taxFieldPl) taxFieldPl.value = tax.toFixed(2);
         const netAmtWithTax = netAmt + tax;
         const purchaseAmount = netAmt;
-        const saleAmount = netAmt;
-        const saleAmountWith = netAmtWithTax;
+        var isPurchasePiPl = auragoldIsPurchaseInvoiceContext();
+        const saleAmount = isPurchasePiPl ? readNumericCell('sale-amount', 0) : netAmt;
+        const saleAmountWith = isPurchasePiPl ? readNumericCell('sale-amount-with', 0) : netAmtWithTax;
         const netWtCell = row.querySelector('[data-column="net-wt"]');
         if (netWtCell) {
             // For modes where metal value uses fine/final weight, show that in Net Wt. so the column matches Rate × weight (avoids gross−less=10 while amount uses 5).
@@ -1257,10 +1376,12 @@
         const saleAmountWithCell = row.querySelector('[data-column="sale-amount-with"]');
         if (purchaseAmountInput) purchaseAmountInput.value = purchaseAmount.toFixed(2);
         else if (purchaseAmountCell) purchaseAmountCell.textContent = purchaseAmount.toFixed(2);
-        if (saleAmountInput) saleAmountInput.value = saleAmount.toFixed(2);
-        else if (saleAmountCell) saleAmountCell.textContent = saleAmount.toFixed(2);
-        if (saleAmountWithInput) saleAmountWithInput.value = saleAmountWith.toFixed(2);
-        else if (saleAmountWithCell) saleAmountWithCell.textContent = saleAmountWith.toFixed(2);
+        if (!isPurchasePiPl) {
+            if (saleAmountInput) saleAmountInput.value = saleAmount.toFixed(2);
+            else if (saleAmountCell) saleAmountCell.textContent = saleAmount.toFixed(2);
+            if (saleAmountWithInput) saleAmountWithInput.value = saleAmountWith.toFixed(2);
+            else if (saleAmountWithCell) saleAmountWithCell.textContent = saleAmountWith.toFixed(2);
+        }
         if (typeof window.afterRowAmountsCalculated === 'function') window.afterRowAmountsCalculated(row);
     }
     window.calculateRowAmounts = calculateRowAmounts;

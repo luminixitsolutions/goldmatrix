@@ -1673,17 +1673,21 @@ text-transform: uppercase;
             display: none !important;
         }
         /*
-         * Mobile header: row1 — menu | centered logo | notif | avatar
-         * row2 — identity title (GOLD MATRIX)
-         * row3 — FY | branch pill (start) + DB chip (end), same row / visually in line
+         * Mobile header: menu | centered logo | notif | avatar
+         * (identity title, FY/branch pill, and DB chip are hidden on small screens)
          */
+        .company-header .auragold-header-identity__title,
+        .company-header .auragold-header-identity__pill,
+        .company-header .user-info .auragold-header-db-name {
+            display: none !important;
+        }
         .company-header {
             display: grid;
             grid-template-columns: auto minmax(0, 1fr) auto auto;
             align-items: center;
             column-gap: 0.45rem;
-            row-gap: 0.5rem;
-            padding: 12px 12px 16px;
+            row-gap: 0.35rem;
+            padding: 12px 12px 10px;
             min-height: auto;
             background-color: #f8f6f1;
             /* Keep identity text above anything that stacks from the page below */
@@ -1782,30 +1786,6 @@ text-transform: uppercase;
             height: auto;
             object-fit: contain;
             margin: 0 auto;
-        }
-        /* Same grid row as FY pill (row 3): start / end in one band = visually in line */
-        .company-header .user-info .auragold-header-db-name {
-            grid-row: 3;
-            grid-column: 1 / -1;
-            justify-self: end;
-            align-self: center;
-            display: inline-flex !important;
-            flex-wrap: nowrap;
-            align-items: center;
-            justify-content: flex-end;
-            text-align: right;
-            gap: 0.15rem;
-            max-width: min(42%, 11.5rem);
-            min-width: 0;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            word-break: normal;
-            overflow-wrap: normal;
-            font-size: 0.68rem;
-            padding: 0.28rem 0.45rem;
-            line-height: 1.25;
-            margin: 0.15rem 0 0 0;
         }
         .company-header .auragold-notif-dropdown {
             grid-row: 1;

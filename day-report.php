@@ -6,11 +6,12 @@ require_once 'config.php';
 $report_date = isset($_GET['date']) ? esc($_GET['date']) : date('Y-m-d');
 $date_display = date('d-m-Y', strtotime($report_date));
 
+$AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 include 'sidebar.php';
 ?>
 
-<div class="layout-container">
+<div class="layout-container day-report-page">
     <div class="main-content">
         <div class="page-container">
             <!-- Page Header -->

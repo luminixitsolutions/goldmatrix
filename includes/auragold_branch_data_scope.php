@@ -497,6 +497,13 @@ if (!function_exists('auragold_ensure_branch_id_on_settings_tables')) {
                 @mysqli_query($conn, "ALTER TABLE `$t` ADD COLUMN `branch_id` INT NULL DEFAULT NULL COMMENT 'FK tbl_branches.id' AFTER `id`");
             }
             if (auragold_tbl_has_column($conn, $t, 'branch_id')) {
+                // Drop legacy NULL-branch rows when this branch already has a row for the same metal (avoids uk_branch_metal duplicate).
+                @mysqli_query(
+                    $conn,
+                    'DELETE v1 FROM `' . $t . '` v1
+                    INNER JOIN `' . $t . '` v2 ON v1.metal_wise = v2.metal_wise AND v2.branch_id = ' . (int) $mid . '
+                    WHERE v1.branch_id IS NULL'
+                );
                 @mysqli_query($conn, 'UPDATE `' . $t . '` SET branch_id = ' . (int) $mid . ' WHERE branch_id IS NULL');
                 if (auragold_index_exists_on_table($conn, $t, 'uk_metal_wise')) {
                     @mysqli_query($conn, 'ALTER TABLE `' . $t . '` DROP INDEX `uk_metal_wise`');

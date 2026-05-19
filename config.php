@@ -3155,6 +3155,7 @@ function getVoucherSettingsDefaults() {
         'default_discount_type' => 'Fix',
         'default_calculation_type' => 'Fix',
         'stock_availability_check_by' => 'Carat',
+        'wastage_wt_calculation' => 'GoldWt',
     ];
 }
 
@@ -3166,10 +3167,10 @@ function getVoucherSettingMetals() {
 /**
  * Fetch voucher settings from tbl_voucher_settings: one row per metal.
  * Returns associative array keyed by metal_wise: ['Gold' => [...], 'Silver' => [...], ...].
- * Each value has keys: minimum_amount_column, reverse_calculation_result_column, default_discount_type, default_calculation_type, stock_availability_check_by.
+ * Each value has keys: minimum_amount_column, reverse_calculation_result_column, default_discount_type, default_calculation_type, stock_availability_check_by, wastage_wt_calculation.
  * Missing metals get default values.
  */
-function getVoucherSettings() {
+function getVoucherSettings($branch_id = null) {
     global $conn;
     $table = 'tbl_voucher_settings';
     $metals = getVoucherSettingMetals();
@@ -3178,31 +3179,43 @@ function getVoucherSettings() {
     foreach ($metals as $m) {
         $out[$m] = $defaults;
     }
+    require_once __DIR__ . '/includes/auragold_voucher_settings_schema.php';
+    auragold_ensure_tbl_voucher_settings($conn);
     $exists = @mysqli_query($conn, "SHOW TABLES LIKE '$table'");
     if (!$exists || mysqli_num_rows($exists) === 0) {
-        if ($exists) mysqli_free_result($exists);
+        if ($exists) {
+            mysqli_free_result($exists);
+        }
         return $out;
     }
     mysqli_free_result($exists);
-    auragold_ensure_branch_id_on_settings_tables($conn);
-    $bid = auragold_settings_branch_id();
-    $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
-    $branchSql = ($hasBranch && $bid > 0) ? (' WHERE branch_id = ' . (int) $bid) : '';
-    $rows = getList("SELECT metal_wise, minimum_amount_column, reverse_calculation_result_column, default_discount_type, default_calculation_type, stock_availability_check_by FROM $table $branchSql");
-    if (is_array($rows)) {
-        foreach ($rows as $r) {
-            $m = $r['metal_wise'] ?? '';
-            if ($m !== '' && isset($out[$m])) {
-                $out[$m] = [
-                    'minimum_amount_column' => $r['minimum_amount_column'] ?? $defaults['minimum_amount_column'],
-                    'reverse_calculation_result_column' => $r['reverse_calculation_result_column'] ?? $defaults['reverse_calculation_result_column'],
-                    'default_discount_type' => $r['default_discount_type'] ?? $defaults['default_discount_type'],
-                    'default_calculation_type' => $r['default_calculation_type'] ?? $defaults['default_calculation_type'],
-                    'stock_availability_check_by' => $r['stock_availability_check_by'] ?? $defaults['stock_availability_check_by'],
-                ];
-            }
-        }
+
+    $bid = ($branch_id !== null && (int) $branch_id > 0)
+        ? (int) $branch_id
+        : auragold_resolve_voucher_settings_branch_id(null);
+    if ($bid <= 0 || !auragold_tbl_has_column($conn, $table, 'branch_id')) {
+        return $out;
     }
+
+    $hasWastageCol = auragold_tbl_has_column($conn, $table, 'wastage_wt_calculation');
+    $stmt = mysqli_prepare($conn, "SELECT * FROM `{$table}` WHERE branch_id = ? ORDER BY metal_wise ASC, id ASC");
+    if (!$stmt) {
+        return $out;
+    }
+    mysqli_stmt_bind_param($stmt, 'i', $bid);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    if ($res) {
+        while ($r = mysqli_fetch_assoc($res)) {
+            $m = trim((string) ($r['metal_wise'] ?? ''));
+            if ($m === '' || !isset($out[$m])) {
+                continue;
+            }
+            $out[$m] = auragold_voucher_settings_row_from_db($r, $defaults, $hasWastageCol);
+        }
+        mysqli_free_result($res);
+    }
+    mysqli_stmt_close($stmt);
     return $out;
 }
 

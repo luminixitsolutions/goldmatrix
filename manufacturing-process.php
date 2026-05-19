@@ -556,6 +556,7 @@ if ($mp_carat_json === false) {
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <?php include 'header-script.php'; ?>
+    <link rel="stylesheet" href="assets/css/mfg-pages-mobile.css">
 </head>
 
 <style>
@@ -3121,7 +3122,7 @@ html, body {
 }
 </style>
 
-<body class="manufacturing-process-page">
+<body class="mfg-page manufacturing-process-page">
 <?php include 'sidebar.php'; ?>
 
 <div class="layout-content">

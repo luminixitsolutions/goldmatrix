@@ -345,6 +345,7 @@ HTML;
 $default_range = date('d-m-Y', strtotime($start_date)) . ' - ' . date('d-m-Y', strtotime($end_date));
 $tab_q = 'start_date=' . urlencode($start_date) . '&end_date=' . urlencode($end_date);
 
+$DASHBOARD_FS_PAGE = true;
 require __DIR__ . '/includes/dashboard_shell_top.php';
 ?>
 <div class="tb-wrap">

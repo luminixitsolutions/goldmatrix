@@ -80,6 +80,7 @@ $widths = isset($prefs['widths']) && is_array($prefs['widths']) ? $prefs['widths
 
 $page_title = function_exists('auragold_t') ? auragold_t('rep.customer_kyc') : 'Customer / KYC Report';
 
+$AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 include 'sidebar.php';
 ?>

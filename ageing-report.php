@@ -9,6 +9,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $aging_date)) {
 
 $ageing_title = function_exists('auragold_t') ? auragold_t('rep.ageing') : 'Ageing Report';
 
+$AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 include 'sidebar.php';
 ?>

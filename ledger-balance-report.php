@@ -42,6 +42,7 @@ if ($raw_per_page === 'all' || $raw_per_page === '-1') {
     $lbr_ui_per_page = (string) max(1, (int) $raw_per_page);
 }
 
+$AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 include 'sidebar.php';
 

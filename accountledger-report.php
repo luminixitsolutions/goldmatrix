@@ -1095,7 +1095,10 @@ function al_build_query(array $overrides = []) {
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <link rel="icon" type="image/jpeg" href="favicon.jpeg">
-<?php include 'header-script.php';?>
+<?php
+$AURAGOLD_REPORT_PAGE = true;
+include 'header-script.php';
+?>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -1800,7 +1803,7 @@ html, body {
 .btn-reset-cols:hover { text-decoration: underline; }
 </style>
 
-<body>
+<body class="report-page">
 <?php include 'sidebar.php'; ?>
 
 <div class="layout-content">

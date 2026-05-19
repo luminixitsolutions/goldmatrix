@@ -3,6 +3,7 @@
  * Expects: $DASHBOARD_PAGE_TITLE (string), optional $DASHBOARD_EXTRA_CSS (string),
  * optional $DASHBOARD_AFTER_BODY (HTML right after <body>, e.g. full-page loader),
  * optional $DASHBOARD_SKIP_PAGE_LOADER (bool) — skip shared brand loader from includes/brand_page_loader.php
+ * optional $DASHBOARD_FS_PAGE (bool) — Financial Statement submenu: body.fs-page + fs-pages-mobile.css
  */
 if (!defined('AURAGOLD_DASHBOARD_SHELL')) {
     define('AURAGOLD_DASHBOARD_SHELL', true);
@@ -51,8 +52,11 @@ if (auragold_brand_page_loader_should_show()) {
         .dash-page-sub { color: #64748b; font-size: 13px; margin-bottom: 18px; }
     </style>
     <?php if (!empty($DASHBOARD_EXTRA_CSS)) { echo $DASHBOARD_EXTRA_CSS; } ?>
+    <?php if (!empty($DASHBOARD_FS_PAGE)): ?>
+    <link rel="stylesheet" href="assets/css/fs-pages-mobile.css">
+    <?php endif; ?>
 </head>
-<body>
+<body<?php echo !empty($DASHBOARD_FS_PAGE) ? ' class="fs-page"' : ''; ?>>
 <?php if (!empty($DASHBOARD_AFTER_BODY)) { echo $DASHBOARD_AFTER_BODY; } ?>
 <div class="layout-wrapper layout-2">
     <div class="layout-inner">

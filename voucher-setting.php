@@ -6,8 +6,15 @@ if (empty($_SESSION['Admin'])) {
     exit;
 }
 auragold_ensure_branch_id_on_settings_tables($conn);
-$settings_branch_id = auragold_settings_branch_id();
-$settings_by_metal = getVoucherSettings(); // keyed by metal: Gold, Silver, ...
+require_once __DIR__ . '/includes/auragold_voucher_settings_schema.php';
+$settings_branch_id = auragold_resolve_voucher_settings_branch_id(
+    isset($_GET['branch_id']) ? (int) $_GET['branch_id'] : null
+);
+if ($settings_branch_id <= 0) {
+    $settings_branch_id = auragold_settings_branch_id();
+}
+$settings_by_metal = getVoucherSettings($settings_branch_id); // keyed by metal: Gold, Silver, ...
+$voucher_save_ajax_url = 'ajax/save-voucher-settings.php';
 $metals = getVoucherSettingMetals();
 $current_metal = 'Gold';
 $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_metal] : getVoucherSettingsDefaults();
@@ -161,9 +168,20 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
                                     </div>
                                 </div>
 
+                                <!-- 7. Wastage Wt Calculation (metal-wise via tabs above) -->
+                                <div class="voucher-section">
+                                    <div class="voucher-section-title">Wastage Wt Calculation</div>
+                                    <div class="voucher-toggle-group" data-group="wastageWtCalculation">
+                                        <?php $val = isset($vs['wastage_wt_calculation']) ? $vs['wastage_wt_calculation'] : 'GoldWt'; ?>
+                                        <button type="button" class="voucher-toggle-btn<?php echo $val === 'GoldWt' ? ' active-btn' : ''; ?>" data-value="GoldWt">Metal Wt</button>
+                                        <button type="button" class="voucher-toggle-btn<?php echo $val === 'FinalWt' ? ' active-btn' : ''; ?>" data-value="FinalWt">Final Wt</button>
+                                    </div>
+                                </div>
+
                                 <div class="voucher-save-wrap">
                                     <button type="button" class="voucher-save-btn" id="voucherSaveBtn">Save Settings</button>
                                     <span class="voucher-save-msg" id="voucherSaveMsg" aria-live="polite"></span>
+                                    <span style="font-size:12px;color:#64748b;width:100%;">Saves all 6 metals. Switch the metal tab to edit each one, then click Save once.</span>
                                 </div>
                             </div>
                         </div>
@@ -175,17 +193,57 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
 
     <script>
     (function() {
+        var voucherSettingsBranchId = <?php echo (int) $settings_branch_id; ?>;
+        var voucherSaveUrl = <?php echo json_encode($voucher_save_ajax_url, JSON_UNESCAPED_SLASHES); ?>;
         // Settings per metal (from DB). Key = metal name, value = { minimum_amount_column, ... }
-        var settingsByMetal = <?php echo json_encode($settings_by_metal); ?>;
+        var settingsByMetal = <?php echo json_encode($settings_by_metal, JSON_UNESCAPED_UNICODE); ?>;
         var currentMetal = 'Gold';
 
+        console.log('Voucher settings branch_id:', voucherSettingsBranchId);
+        console.log('Loaded settingsByMetal from DB:', settingsByMetal);
+
+        function pickStored(s, key, fallback) {
+            if (!s || s[key] === undefined || s[key] === null || s[key] === '') {
+                return fallback;
+            }
+            return s[key];
+        }
+
+        function applyStoreRowToVoucherSettings(s) {
+            voucherSettings.minimumAmountColumn = pickStored(s, 'minimum_amount_column', 'Amount');
+            voucherSettings.reverseCalculationResultColumn = pickStored(s, 'reverse_calculation_result_column', 'MakingRate');
+            voucherSettings.defaultDiscountType = pickStored(s, 'default_discount_type', 'Fix');
+            voucherSettings.defaultCalculationType = pickStored(s, 'default_calculation_type', 'Fix');
+            voucherSettings.stockAvailabilityCheckBy = pickStored(s, 'stock_availability_check_by', 'Carat');
+            var w = pickStored(s, 'wastage_wt_calculation', 'GoldWt');
+            voucherSettings.wastageWtCalculation = (w === 'FinalWt' || w === 'GoldWt') ? w : 'GoldWt';
+        }
+
         var voucherSettings = {
-            minimumAmountColumn: settingsByMetal[currentMetal] ? settingsByMetal[currentMetal].minimum_amount_column : 'Amount',
-            reverseCalculationResultColumn: settingsByMetal[currentMetal] ? settingsByMetal[currentMetal].reverse_calculation_result_column : 'MakingRate',
-            defaultDiscountType: settingsByMetal[currentMetal] ? settingsByMetal[currentMetal].default_discount_type : 'Fix',
-            defaultCalculationType: settingsByMetal[currentMetal] ? settingsByMetal[currentMetal].default_calculation_type : 'Fix',
-            stockAvailabilityCheckBy: settingsByMetal[currentMetal] ? settingsByMetal[currentMetal].stock_availability_check_by : 'Carat'
+            minimumAmountColumn: 'Amount',
+            reverseCalculationResultColumn: 'MakingRate',
+            defaultDiscountType: 'Fix',
+            defaultCalculationType: 'Fix',
+            stockAvailabilityCheckBy: 'Carat',
+            wastageWtCalculation: 'GoldWt'
         };
+
+        function sanitizeSettingsByMetalForSave() {
+            var clean = {};
+            Object.keys(settingsByMetal).forEach(function(metal) {
+                var row = settingsByMetal[metal];
+                if (!row || typeof row !== 'object') return;
+                clean[metal] = {
+                    minimum_amount_column: row.minimum_amount_column,
+                    reverse_calculation_result_column: row.reverse_calculation_result_column,
+                    default_discount_type: row.default_discount_type,
+                    default_calculation_type: row.default_calculation_type,
+                    stock_availability_check_by: row.stock_availability_check_by,
+                    wastage_wt_calculation: row.wastage_wt_calculation
+                };
+            });
+            return clean;
+        }
 
         function getSelectedSettings() {
             return {
@@ -193,8 +251,25 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
                 reverseCalculationResultColumn: voucherSettings.reverseCalculationResultColumn,
                 defaultDiscountType: voucherSettings.defaultDiscountType,
                 defaultCalculationType: voucherSettings.defaultCalculationType,
-                stockAvailabilityCheckBy: voucherSettings.stockAvailabilityCheckBy
+                stockAvailabilityCheckBy: voucherSettings.stockAvailabilityCheckBy,
+                wastageWtCalculation: voucherSettings.wastageWtCalculation
             };
+        }
+
+        /** Keep in-memory store in sync when switching metal tabs or before save */
+        function syncCurrentMetalToStore() {
+            if (!currentMetal) return;
+            if (!settingsByMetal[currentMetal]) {
+                settingsByMetal[currentMetal] = {};
+            }
+            var o = settingsByMetal[currentMetal];
+            var opts = getSelectedSettings();
+            o.minimum_amount_column = opts.minimumAmountColumn;
+            o.reverse_calculation_result_column = opts.reverseCalculationResultColumn;
+            o.default_discount_type = opts.defaultDiscountType;
+            o.default_calculation_type = opts.defaultCalculationType;
+            o.stock_availability_check_by = opts.stockAvailabilityCheckBy;
+            o.wastage_wt_calculation = opts.wastageWtCalculation;
         }
 
         function applySettingsToUI() {
@@ -203,7 +278,8 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
                 reverseCalculationResultColumn: 'reverseCalculationResultColumn',
                 defaultDiscountType: 'defaultDiscountType',
                 defaultCalculationType: 'defaultCalculationType',
-                stockAvailabilityCheckBy: 'stockAvailabilityCheckBy'
+                stockAvailabilityCheckBy: 'stockAvailabilityCheckBy',
+                wastageWtCalculation: 'wastageWtCalculation'
             };
             document.querySelectorAll('.voucher-toggle-group').forEach(function(container) {
                 var group = container.getAttribute('data-group');
@@ -214,7 +290,7 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
                     return;
                 }
                 var key = groupMap[group];
-                if (!key || !voucherSettings[key]) return;
+                if (!key || !Object.prototype.hasOwnProperty.call(voucherSettings, key)) return;
                 var value = voucherSettings[key];
                 container.querySelectorAll('.voucher-toggle-btn').forEach(function(btn) {
                     btn.classList.toggle('active-btn', btn.getAttribute('data-value') === value);
@@ -223,15 +299,12 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
         }
 
         function loadMetal(metal) {
-            currentMetal = metal;
-            var s = settingsByMetal[metal];
-            if (s) {
-                voucherSettings.minimumAmountColumn = s.minimum_amount_column || 'Amount';
-                voucherSettings.reverseCalculationResultColumn = s.reverse_calculation_result_column || 'MakingRate';
-                voucherSettings.defaultDiscountType = s.default_discount_type || 'Fix';
-                voucherSettings.defaultCalculationType = s.default_calculation_type || 'Fix';
-                voucherSettings.stockAvailabilityCheckBy = s.stock_availability_check_by || 'Carat';
+            // Only sync when leaving another metal tab — never before initial Gold load (that overwrote DB values with defaults).
+            if (metal !== currentMetal) {
+                syncCurrentMetalToStore();
             }
+            currentMetal = metal;
+            applyStoreRowToVoucherSettings(settingsByMetal[metal] || {});
             applySettingsToUI();
             console.log('Voucher Setting – now editing:', currentMetal, getSelectedSettings());
         }
@@ -243,8 +316,19 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
                 loadMetal(value);
                 return;
             }
-            var key = { minimumAmountColumn: 1, reverseCalculationResultColumn: 1, defaultDiscountType: 1, defaultCalculationType: 1, stockAvailabilityCheckBy: 1 }[group];
-            if (key) voucherSettings[key] = value;
+            var groupKeyMap = {
+                minimumAmountColumn: 'minimumAmountColumn',
+                reverseCalculationResultColumn: 'reverseCalculationResultColumn',
+                defaultDiscountType: 'defaultDiscountType',
+                defaultCalculationType: 'defaultCalculationType',
+                stockAvailabilityCheckBy: 'stockAvailabilityCheckBy',
+                wastageWtCalculation: 'wastageWtCalculation'
+            };
+            var key = groupKeyMap[group];
+            if (key) {
+                voucherSettings[key] = value;
+                syncCurrentMetalToStore();
+            }
 
             var buttons = container.querySelectorAll('.voucher-toggle-btn');
             buttons.forEach(function(btn) {
@@ -267,35 +351,49 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
         var saveMsg = document.getElementById('voucherSaveMsg');
         if (saveBtn && saveMsg) {
             saveBtn.addEventListener('click', function() {
-                var opts = getSelectedSettings();
+                syncCurrentMetalToStore();
                 var formData = new FormData();
-                formData.append('metal_wise', currentMetal);
-                formData.append('minimum_amount_column', opts.minimumAmountColumn);
-                formData.append('reverse_calculation_result_column', opts.reverseCalculationResultColumn);
-                formData.append('default_discount_type', opts.defaultDiscountType);
-                formData.append('default_calculation_type', opts.defaultCalculationType);
-                formData.append('stock_availability_check_by', opts.stockAvailabilityCheckBy);
+                formData.append('save_all', '1');
+                formData.append('settings_by_metal_json', JSON.stringify(sanitizeSettingsByMetalForSave()));
+                var branchId = voucherSettingsBranchId;
                 var sb = document.getElementById('settingsBranchId');
-                if (sb) formData.append('settings_branch_id', sb.value);
+                if (sb && sb.value) {
+                    branchId = parseInt(sb.value, 10) || branchId;
+                }
+                formData.append('settings_branch_id', String(branchId));
 
                 saveBtn.disabled = true;
                 saveMsg.textContent = '';
                 saveMsg.className = 'voucher-save-msg';
 
-                fetch('ajax/save-voucher-settings.php', { method: 'POST', body: formData, credentials: 'same-origin' })
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        saveBtn.disabled = false;
-                        if (data.status === 'success') {
-                            saveMsg.textContent = data.message || 'Settings saved for ' + currentMetal + '.';
-                            saveMsg.className = 'voucher-save-msg success';
-                            if (settingsByMetal[currentMetal]) {
-                                settingsByMetal[currentMetal].minimum_amount_column = opts.minimumAmountColumn;
-                                settingsByMetal[currentMetal].reverse_calculation_result_column = opts.reverseCalculationResultColumn;
-                                settingsByMetal[currentMetal].default_discount_type = opts.defaultDiscountType;
-                                settingsByMetal[currentMetal].default_calculation_type = opts.defaultCalculationType;
-                                settingsByMetal[currentMetal].stock_availability_check_by = opts.stockAvailabilityCheckBy;
+                console.log('Saving voucher settings branch_id:', branchId, sanitizeSettingsByMetalForSave());
+
+                fetch(voucherSaveUrl, { method: 'POST', body: formData, credentials: 'same-origin' })
+                    .then(function(r) {
+                        return r.text().then(function(text) {
+                            try {
+                                return JSON.parse(text);
+                            } catch (e) {
+                                throw new Error(text && text.length < 200 ? text : 'Invalid server response');
                             }
+                        });
+                    })
+                    .then(function(data) {
+                        console.log('Save response:', data);
+                        if (data.reloaded_settings) {
+                            settingsByMetal = data.reloaded_settings;
+                            console.log('Reloaded settings from server after save:', settingsByMetal);
+                        }
+                        if (data.status === 'success') {
+                            saveMsg.textContent = data.message || 'Settings saved.';
+                            saveMsg.className = 'voucher-save-msg success';
+                            setTimeout(function() { location.reload(); }, 400);
+                            return;
+                        }
+                        saveBtn.disabled = false;
+                        if (data.status === 'partial') {
+                            saveMsg.textContent = data.message || 'Settings partially saved.';
+                            saveMsg.className = 'voucher-save-msg error';
                         } else {
                             saveMsg.textContent = data.message || 'Save failed.';
                             saveMsg.className = 'voucher-save-msg error';
@@ -309,7 +407,7 @@ $vs = isset($settings_by_metal[$current_metal]) ? $settings_by_metal[$current_me
             });
         }
 
-        applySettingsToUI();
+        loadMetal('Gold');
     })();
     </script>
 </body>
