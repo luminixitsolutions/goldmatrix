@@ -38,6 +38,7 @@ if (!function_exists('auragold_default_bill_series_prefix_for_voucher_name')) {
                 'purchase return'   => 'PR-',
                 'payment voucher'   => 'PV-',
                 'receipt voucher'   => 'RV-',
+                'sale receipt voucher' => 'SRV-',
                 'advance payment'   => 'AP-',
                 'advance'           => 'AP-',
             ];

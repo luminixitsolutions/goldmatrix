@@ -30,8 +30,9 @@ if (!is_array($data)) {
 }
 
 $metal = isset($data['metal']) ? strtolower(trim((string) $data['metal'])) : '';
-$allowed_metals = ['gold', 'silver', 'platinum', 'diamond'];
-if (!in_array($metal, $allowed_metals, true)) {
+$core_metals = ['gold', 'silver', 'platinum', 'diamond'];
+$metal_ok = in_array($metal, $core_metals, true) || preg_match('/^mext_\d+$/', $metal) === 1;
+if (!$metal_ok) {
     echo json_encode(['status' => 'error', 'message' => 'Invalid metal']);
     exit;
 }

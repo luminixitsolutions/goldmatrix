@@ -36,6 +36,32 @@ $categories = getList("SELECT id, name FROM tbl_categories WHERE status = 1 ORDE
 $branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
 $calculation_modes = getList("SELECT id, name, code FROM tbl_calculation_modes WHERE status = 1 ORDER BY sort_order ASC, name ASC");
 
+// Diamond / stone spec masters (product modal selects — same as sale invoice)
+$auragold_masters_cuts = getList("SELECT id, name FROM tbl_cut WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_cut') : '') . " ORDER BY name ASC");
+$auragold_masters_colors = getList("SELECT id, name FROM tbl_color WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_color') : '') . " ORDER BY name ASC");
+$auragold_masters_shapes = getList("SELECT id, name FROM tbl_shape WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_shape') : '') . " ORDER BY name ASC");
+$auragold_masters_clarities = getList("SELECT id, name FROM tbl_clarity WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_clarity') : '') . " ORDER BY name ASC");
+$auragold_masters_sieve_sizes = getList("SELECT id, name FROM tbl_sieve_size WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_sieve_size') : '') . " ORDER BY name ASC");
+$auragold_masters_sizes = getList("SELECT id, name FROM tbl_size WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_size') : '') . " ORDER BY name ASC");
+if (!is_array($auragold_masters_cuts)) {
+    $auragold_masters_cuts = [];
+}
+if (!is_array($auragold_masters_colors)) {
+    $auragold_masters_colors = [];
+}
+if (!is_array($auragold_masters_shapes)) {
+    $auragold_masters_shapes = [];
+}
+if (!is_array($auragold_masters_clarities)) {
+    $auragold_masters_clarities = [];
+}
+if (!is_array($auragold_masters_sieve_sizes)) {
+    $auragold_masters_sieve_sizes = [];
+}
+if (!is_array($auragold_masters_sizes)) {
+    $auragold_masters_sizes = [];
+}
+
 // Standard ledger groups for dropdown
 $ledger_groups = [
     ['id' => 1, 'name' => 'Sundry Debtors'],
@@ -87,6 +113,10 @@ $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
 $current_jwo_id = 0;
+/** Saved row id in tbl_jobwork_invoices (diamond/stone voucher_id when kind is jobwork_invoice). */
+$current_jobwork_invoice_id = 0;
+/** @see includes/voucher_diamond_stone_panels.php — must be set before payment-area markup. */
+$auragold_voucher_ds_kind = 'jobwork_invoice';
 $is_jobwork_from_repair_jwo = false;
 $current_rjwo_id = 0;
 $jwi_repair_order_id = 0;
@@ -296,9 +326,12 @@ if (!empty($is_jobwork_invoice_page)) {
         $tc = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_invoices'");
         if ($tc && mysqli_num_rows($tc) > 0) {
             mysqli_free_result($tc);
-            $savedInv = getRecord("SELECT invoice_no FROM tbl_jobwork_invoices WHERE jobwork_order_id = " . (int)$current_jwo_id . " ORDER BY id DESC LIMIT 1");
-            if ($savedInv && !empty($savedInv['invoice_no'])) {
-                $invNo = $savedInv['invoice_no'];
+            $savedInv = getRecord("SELECT id, invoice_no FROM tbl_jobwork_invoices WHERE jobwork_order_id = " . (int)$current_jwo_id . " ORDER BY id DESC LIMIT 1");
+            if ($savedInv) {
+                if (!empty($savedInv['invoice_no'])) {
+                    $invNo = $savedInv['invoice_no'];
+                }
+                $current_jobwork_invoice_id = (int) ($savedInv['id'] ?? 0);
             }
         } elseif ($tc) {
             mysqli_free_result($tc);
@@ -310,9 +343,12 @@ if (!empty($is_jobwork_invoice_page)) {
             $colChk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_invoices LIKE 'repair_jobwork_order_id'");
             if ($colChk && mysqli_num_rows($colChk) > 0) {
                 mysqli_free_result($colChk);
-                $savedInv = getRecord('SELECT invoice_no FROM tbl_jobwork_invoices WHERE repair_jobwork_order_id = ' . (int) $current_rjwo_id . ' ORDER BY id DESC LIMIT 1');
-                if ($savedInv && !empty($savedInv['invoice_no'])) {
-                    $invNo = $savedInv['invoice_no'];
+                $savedInv = getRecord('SELECT id, invoice_no FROM tbl_jobwork_invoices WHERE repair_jobwork_order_id = ' . (int) $current_rjwo_id . ' ORDER BY id DESC LIMIT 1');
+                if ($savedInv) {
+                    if (!empty($savedInv['invoice_no'])) {
+                        $invNo = $savedInv['invoice_no'];
+                    }
+                    $current_jobwork_invoice_id = (int) ($savedInv['id'] ?? 0);
                 }
             } elseif ($colChk) {
                 mysqli_free_result($colChk);
@@ -3341,7 +3377,8 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
-                                    
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
+
                                     <!-- Comments: add multiple with date/time, edit, delete -->
                                     <div class="mt-3">
                                         <label class="mb-2" style="font-size: 0.85rem; color: #475569;">Comments</label>
@@ -3368,6 +3405,9 @@ text-transform: uppercase;
                                     <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
                                         <i class="feather icon-printer" id="printInvoiceIcon" style="font-size: 12px; color: #94a3b8; opacity: 0.5; cursor: not-allowed; pointer-events: none;" title="Save order first to print"></i>
                                         <h5 class="mb-0" style="font-size: 0.9rem;"><?php echo !empty($is_jobwork_invoice_page) ? 'Jobwork Invoice No:' : ($is_jobwork_from_sale_order ? 'Jobwork Order No:' : 'Sale Order No:'); ?> <span id="currentOrderNo"><?php echo htmlspecialchars($next_order_no); ?></span></h5>
+                                        <?php if (!empty($is_jobwork_invoice_page)): ?>
+                                        <span id="jwiCurrentId" data-jwi-id="<?php echo (int) $current_jobwork_invoice_id; ?>"></span>
+                                        <?php endif; ?>
                                         <?php if (!empty($is_jobwork_from_sale_order) && $is_jobwork_from_sale_order): ?>
                                         <span id="jwoSaleOrderId" data-sale-order-id="<?php echo (int)$jwo_sale_order_id_param; ?>"<?php if (!empty($is_jobwork_from_repair_jwo)): ?> data-repair-order-id="<?php echo (int)$jwi_repair_order_id; ?>" data-rjwo-id="<?php echo (int)$current_rjwo_id; ?>"<?php endif; ?>></span>
                                         <span id="jwoCurrentId" data-jwo-id="<?php echo (int)$current_jwo_id; ?>"></span>
@@ -3560,7 +3600,10 @@ text-transform: uppercase;
 </div>
 
 <?php include 'includes/common-modal.php'; ?>
-
+<?php
+$auragold_voucher_ds_db_id = (int) ($current_jobwork_invoice_id ?? 0);
+require __DIR__ . '/includes/voucher_diamond_stone_assets.php';
+?>
 <!-- Print Job Work Invoice Confirmation Modal (same style as Sale Order print popup) -->
 <div id="printJWOModal" class="print-invoice-modal" style="display: none;">
     <div class="print-invoice-modal-content">
@@ -3624,6 +3667,13 @@ text-transform: uppercase;
     const carats = <?php echo json_encode(isset($carats) && is_array($carats) ? $carats : []); ?>;
     const locations = <?php echo json_encode(isset($locations) && is_array($locations) ? $locations : []); ?>;
     const categories = <?php echo json_encode(isset($categories) && is_array($categories) ? $categories : []); ?>;
+    window.AURAGOLD_CALCULATION_MODES = <?php echo json_encode(isset($calculation_modes) && is_array($calculation_modes) ? $calculation_modes : []); ?>;
+    window.AURAGOLD_MASTERS_CUTS = <?php echo json_encode(isset($auragold_masters_cuts) && is_array($auragold_masters_cuts) ? $auragold_masters_cuts : []); ?>;
+    window.AURAGOLD_MASTERS_COLORS = <?php echo json_encode(isset($auragold_masters_colors) && is_array($auragold_masters_colors) ? $auragold_masters_colors : []); ?>;
+    window.AURAGOLD_MASTERS_SHAPES = <?php echo json_encode(isset($auragold_masters_shapes) && is_array($auragold_masters_shapes) ? $auragold_masters_shapes : []); ?>;
+    window.AURAGOLD_MASTERS_CLARITIES = <?php echo json_encode(isset($auragold_masters_clarities) && is_array($auragold_masters_clarities) ? $auragold_masters_clarities : []); ?>;
+    window.AURAGOLD_MASTERS_SIEVE_SIZES = <?php echo json_encode(isset($auragold_masters_sieve_sizes) && is_array($auragold_masters_sieve_sizes) ? $auragold_masters_sieve_sizes : []); ?>;
+    window.AURAGOLD_MASTERS_SIZES = <?php echo json_encode(isset($auragold_masters_sizes) && is_array($auragold_masters_sizes) ? $auragold_masters_sizes : []); ?>;
     const metals = <?php echo json_encode(isset($metals) && is_array($metals) ? $metals : []); ?>;
     window.metals = metals;
     window.AURAGOLD_WORKING_BRANCH_ID = <?php echo (int) (isset($auragold_working_branch_id) ? $auragold_working_branch_id : 0); ?>;
@@ -3753,6 +3803,38 @@ window.PB_PAGE_CONFIG = {
             }
         }
         unset($emb_it);
+        // Sale order diamond/stone allocations (tbl_sale_order_*_stock_issue) — show as extra Product List rows on jobwork invoice
+        $embed_order['diamond_issues'] = [];
+        $embed_order['stone_issues'] = [];
+        $soid_for_stock_issues = (int) ($jwo_sale_order_id_param ?? 0);
+        if ($soid_for_stock_issues <= 0 && !empty($is_jobwork_from_sale_order) && !empty($edit_order['sale_order_id'])) {
+            $soid_for_stock_issues = (int) $edit_order['sale_order_id'];
+        }
+        $embed_order['sale_order_id_for_stock_issues'] = $soid_for_stock_issues;
+        if ($soid_for_stock_issues > 0 && isset($conn) && $conn instanceof mysqli) {
+            $tDiamondIssEmb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_diamond_stock_issue'");
+            if ($tDiamondIssEmb && mysqli_num_rows($tDiamondIssEmb) > 0) {
+                mysqli_free_result($tDiamondIssEmb);
+                $tmp_di_emb = getList(
+                    'SELECT id, order_id, stock_id, barcode, product_name, diamond_category, weight, qty, created_at '
+                    . 'FROM tbl_sale_order_diamond_stock_issue WHERE order_id = ' . $soid_for_stock_issues . ' ORDER BY id ASC'
+                );
+                $embed_order['diamond_issues'] = is_array($tmp_di_emb) ? $tmp_di_emb : [];
+            } elseif ($tDiamondIssEmb) {
+                mysqli_free_result($tDiamondIssEmb);
+            }
+            $tStoneIssEmb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_stone_stock_issue'");
+            if ($tStoneIssEmb && mysqli_num_rows($tStoneIssEmb) > 0) {
+                mysqli_free_result($tStoneIssEmb);
+                $tmp_si_emb = getList(
+                    'SELECT id, order_id, stock_id, barcode, product_name, stone_category, weight, qty, created_at '
+                    . 'FROM tbl_sale_order_stone_stock_issue WHERE order_id = ' . $soid_for_stock_issues . ' ORDER BY id ASC'
+                );
+                $embed_order['stone_issues'] = is_array($tmp_si_emb) ? $tmp_si_emb : [];
+            } elseif ($tStoneIssEmb) {
+                mysqli_free_result($tStoneIssEmb);
+            }
+        }
     }
     $edit_data_obj = $embed_order !== null ? ['order' => $embed_order, 'items' => $embed_items, 'payments' => $embed_payments] : null;
     $json_flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
@@ -4382,7 +4464,10 @@ window.PB_PAGE_CONFIG = {
                     productTableBody.innerHTML = '';
                     if (items.length > 0 && typeof savedItemToModalRowData === 'function') {
                         var modalRowsData = items.map(function(item) { return savedItemToModalRowData(item); });
-                        if (typeof addMergedProductsToTable === 'function') {
+                        var splitAgainstRows = !!window.isJobworkInvoicePage && items.length > 1;
+                        if (splitAgainstRows && typeof addProductToTableFromModalRow === 'function') {
+                            modalRowsData.forEach(function(rowData) { addProductToTableFromModalRow(rowData); });
+                        } else if (typeof addMergedProductsToTable === 'function') {
                             addMergedProductsToTable(modalRowsData);
                         } else if (typeof addProductToTableFromModalRow === 'function') {
                             modalRowsData.forEach(function(rowData) { addProductToTableFromModalRow(rowData); });
@@ -5762,7 +5847,9 @@ window.PB_PAGE_CONFIG = {
             <td data-column="barcode"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="design-no"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="huid"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="item-code"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="category"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
+            <td data-column="product-category"><select class="form-control form-control-sm product-category-select" style="width: 120px; font-size: 0.7rem;"><option value="">Select Category</option></select></td>
             <td data-column="calculation"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="Carat X Rate">Carat X Rate</option><option value="Rate X Gross Wt" selected>Rate X Gross Wt</option><option value="Rate X Purity Wt">Rate X Purity Wt</option><option value="Rate X Net Wt">Rate X Net Wt</option><option value="Rate X Final Wt">Rate X Final Wt</option><option value="Fix">Fix</option><option value="Stone Charge">Stone Charge</option><option value="Attach Image Type">Attach Image Type</option></select></td>
             <td data-column="product"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="location"><select class="form-control form-control-sm location-select" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
@@ -5774,6 +5861,13 @@ window.PB_PAGE_CONFIG = {
             <td data-column="net-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" readonly style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="quantity"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="fc-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="diamond-line-metal-value"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="rapnet-valuation"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+            <td data-column="mark-up-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="mark-up-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="metal-qty"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="metal-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
@@ -5790,9 +5884,16 @@ window.PB_PAGE_CONFIG = {
             <td data-column="metal-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem; color: #7b1fa2;"></td>
             <td data-column="requested-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="requested"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
-            <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="final-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="alloy-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-karat"><input type="text" class="form-control form-control-sm" value="" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-purity-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-wastage-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-wastage-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="discount-type"><select class="form-control form-control-sm" style="width: 150px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="On Amount">On Amount</option><option value="On Making Amount">On Making Amount</option><option value="On Diamond Amount">On Diamond Amount</option><option value="On Stone Amount">On Stone Amount</option><option value="On Net Amount">On Net Amount</option></select></td>
             <td data-column="discount-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="discount-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
@@ -5807,7 +5908,6 @@ window.PB_PAGE_CONFIG = {
             <td data-column="minimum"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="stone-charge-type"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="Per Gram">Per Gram</option></select></td>
             <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
-            <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
@@ -5822,6 +5922,17 @@ window.PB_PAGE_CONFIG = {
             <td data-column="other-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="other-info"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="other-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-no"><input type="text" class="form-control form-control-sm" value="" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+            <td data-column="video-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+            <td data-column="cut"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="cut" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Cut</option></select></td>
+            <td data-column="color"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="color" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Color</option></select></td>
+            <td data-column="seive-size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="seive" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Seive</option></select></td>
+            <td data-column="size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="size" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Size</option></select></td>
+            <td data-column="shape"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="shape" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Shape</option></select></td>
+            <td data-column="clarity"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="clarity" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Clarity</option></select></td>
+            <td data-column="unit-price"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
             <td data-column="hallmark-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="hallmark-rate"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="net-amt-tax"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
@@ -5856,6 +5967,13 @@ window.PB_PAGE_CONFIG = {
         const locationSelect = row.querySelector('.location-select');
         if (locationSelect) {
             populateSelect(locationSelect, locations, 'id', 'name', 'Select Location');
+        }
+        const productCategorySelect = row.querySelector('.product-category-select');
+        if (productCategorySelect && typeof categories !== 'undefined') {
+            populateSelect(productCategorySelect, categories, 'id', 'name', 'Select Category');
+        }
+        if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
+            auragoldPopulateModalSpecSelectsForRow(row);
         }
         
         // Populate category dropdown: Diamond tab = Diamond Category (Diamonds/GemStones/Jewellery), else Select Category
@@ -6566,7 +6684,9 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="barcode"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.barcode || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="design-no"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.article || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="huid"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="item-code"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.short_code || product.item_code || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="category"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
+                                <td data-column="product-category"><select class="form-control form-control-sm product-category-select" style="width: 120px; font-size: 0.7rem;"><option value="">Select Category</option></select></td>
                                 <td data-column="calculation"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="Carat X Rate">Carat X Rate</option><option value="Rate X Gross Wt" selected>Rate X Gross Wt</option><option value="Rate X Purity Wt">Rate X Purity Wt</option><option value="Rate X Net Wt">Rate X Net Wt</option><option value="Rate X Final Wt">Rate X Final Wt</option><option value="Fix">Fix</option><option value="Stone Charge">Stone Charge</option><option value="Attach Image Type">Attach Image Type</option></select></td>
                                 <td data-column="product"><input type="text" class="form-control form-control-sm" value="${escapeHtml(productName)}" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="location"><select class="form-control form-control-sm location-select" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
@@ -6578,6 +6698,13 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="net-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" readonly style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="quantity"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="rate"><input type="text" class="form-control form-control-sm" value="${product.rate || 0}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+                                <td data-column="fc-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+                                <td data-column="diamond-line-metal-value"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="rapnet-valuation"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+                                <td data-column="mark-up-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="mark-up-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="metal-qty"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="metal-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
@@ -6594,9 +6721,16 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="metal-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem; color: #7b1fa2;"></td>
                                 <td data-column="requested-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="requested"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
-                                <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
                                 <td data-column="final-wt"><input type="text" class="form-control form-control-sm" value="${product.final_weight || product.opening_weight || 0}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="alloy-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-karat"><input type="text" class="form-control form-control-sm" value="" style="width: 80px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-purity-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 90px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-wastage-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-wastage-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
+                                <td data-column="platinum-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="discount-type"><select class="form-control form-control-sm" style="width: 150px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="On Amount">On Amount</option><option value="On Making Amount">On Making Amount</option><option value="On Diamond Amount">On Diamond Amount</option><option value="On Stone Amount">On Stone Amount</option><option value="On Net Amount">On Net Amount</option></select></td>
                                 <td data-column="discount-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                 <td data-column="discount-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
@@ -6611,7 +6745,6 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="minimum"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="stone-charge-type"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="Per Gram">Per Gram</option></select></td>
                                 <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
-                                <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
@@ -6626,6 +6759,17 @@ window.PB_PAGE_CONFIG = {
                                 <td data-column="other-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="other-info"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="other-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+                                <td data-column="certificate-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="certificate-no"><input type="text" class="form-control form-control-sm" value="" style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="certificate-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+                                <td data-column="video-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+                                <td data-column="cut"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="cut" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Cut</option></select></td>
+                                <td data-column="color"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="color" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Color</option></select></td>
+                                <td data-column="seive-size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="seive" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Seive</option></select></td>
+                                <td data-column="size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="size" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Size</option></select></td>
+                                <td data-column="shape"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="shape" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Shape</option></select></td>
+                                <td data-column="clarity"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="clarity" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Clarity</option></select></td>
+                                <td data-column="unit-price"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
                                 <td data-column="hallmark-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
                                 <td data-column="hallmark-rate"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="net-amt-tax"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
@@ -6651,6 +6795,14 @@ window.PB_PAGE_CONFIG = {
                     tbody.querySelectorAll('.location-select').forEach(function(select) {
                         populateSelect(select, locations, 'id', 'name', 'Select Location');
                     });
+                    tbody.querySelectorAll('.product-category-select').forEach(function(select) {
+                        if (typeof categories !== 'undefined' && typeof populateSelect === 'function') {
+                            populateSelect(select, categories, 'id', 'name', 'Select Category');
+                        }
+                    });
+                    if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
+                        tbody.querySelectorAll('tr.product-row').forEach(function(r) { auragoldPopulateModalSpecSelectsForRow(r); });
+                    }
                     
                     // Populate category dropdowns (Diamond tab = Diamond Category options)
                     tbody.querySelectorAll('[data-column="category"] select').forEach(function(select) {
@@ -6756,7 +6908,9 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="barcode"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.barcode || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="design-no"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.article || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="huid"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="item-code"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.short_code || product.item_code || '')}" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="category"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
+                                    <td data-column="product-category"><select class="form-control form-control-sm product-category-select" style="width: 120px; font-size: 0.7rem;"><option value="">Select Category</option></select></td>
                                     <td data-column="calculation"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="Carat X Rate">Carat X Rate</option><option value="Rate X Gross Wt" selected>Rate X Gross Wt</option><option value="Rate X Purity Wt">Rate X Purity Wt</option><option value="Rate X Net Wt">Rate X Net Wt</option><option value="Rate X Final Wt">Rate X Final Wt</option><option value="Fix">Fix</option><option value="Stone Charge">Stone Charge</option><option value="Attach Image Type">Attach Image Type</option></select></td>
                                     <td data-column="product"><input type="text" class="form-control form-control-sm" value="${escapeHtml(productName)}" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="location"><select class="form-control form-control-sm location-select" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
@@ -6768,6 +6922,13 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="net-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" readonly style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="quantity"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="rate"><input type="text" class="form-control form-control-sm" value="${product.rate || 0}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+                                    <td data-column="fc-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+                                    <td data-column="diamond-line-metal-value"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="rapnet-valuation"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                    <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+                                    <td data-column="mark-up-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="mark-up-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="metal-qty"><input type="text" class="form-control form-control-sm" value="1" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="metal-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
@@ -6784,9 +6945,16 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="metal-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem; color: #7b1fa2;"></td>
                                     <td data-column="requested-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="requested"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
-                                    <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
                                     <td data-column="final-wt"><input type="text" class="form-control form-control-sm" value="${product.final_weight || product.opening_weight || 0}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="alloy-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-weight"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-karat"><input type="text" class="form-control form-control-sm" value="" style="width: 80px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-purity"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-purity-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 90px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-wastage-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-wastage-wt"><input type="text" class="form-control form-control-sm" value="0" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
+                                    <td data-column="platinum-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="discount-type"><select class="form-control form-control-sm" style="width: 150px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="On Amount">On Amount</option><option value="On Making Amount">On Making Amount</option><option value="On Diamond Amount">On Diamond Amount</option><option value="On Stone Amount">On Stone Amount</option><option value="On Net Amount">On Net Amount</option></select></td>
                                     <td data-column="discount-per"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
                                     <td data-column="discount-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
@@ -6801,7 +6969,6 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="minimum"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="stone-charge-type"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="Fix" selected>Fix</option><option value="Per Gram">Per Gram</option></select></td>
                                     <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
-                                    <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
@@ -6816,6 +6983,17 @@ window.PB_PAGE_CONFIG = {
                                     <td data-column="other-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="other-info"><input type="text" class="form-control form-control-sm" value="" style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="other-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+                                    <td data-column="certificate-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+                                    <td data-column="certificate-no"><input type="text" class="form-control form-control-sm" value="" style="width: 110px; font-size: 0.7rem;"></td>
+                                    <td data-column="certificate-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+                                    <td data-column="video-link"><input type="text" class="form-control form-control-sm" value="" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+                                    <td data-column="cut"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="cut" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Cut</option></select></td>
+                                    <td data-column="color"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="color" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Color</option></select></td>
+                                    <td data-column="seive-size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="seive" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Seive</option></select></td>
+                                    <td data-column="size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="size" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Size</option></select></td>
+                                    <td data-column="shape"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="shape" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Shape</option></select></td>
+                                    <td data-column="clarity"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="clarity" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Clarity</option></select></td>
+                                    <td data-column="unit-price"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
                                     <td data-column="hallmark-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
                                     <td data-column="hallmark-rate"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="net-amt-tax"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
@@ -6841,6 +7019,14 @@ window.PB_PAGE_CONFIG = {
                         tbody.querySelectorAll('.location-select').forEach(function(select) {
                             populateSelect(select, locations, 'id', 'name', 'Select Location');
                         });
+                        tbody.querySelectorAll('.product-category-select').forEach(function(select) {
+                            if (typeof categories !== 'undefined' && typeof populateSelect === 'function') {
+                                populateSelect(select, categories, 'id', 'name', 'Select Category');
+                            }
+                        });
+                        if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
+                            tbody.querySelectorAll('tr.product-row').forEach(function(r) { auragoldPopulateModalSpecSelectsForRow(r); });
+                        }
                         
                         // Add click handler and calculation listeners to product rows
                         tbody.querySelectorAll('.product-row').forEach(function(row) {
@@ -7552,6 +7738,12 @@ window.PB_PAGE_CONFIG = {
             row.setAttribute('data-source-against-item-id', String(modalRowData.source_against_item_id).trim());
         }
         row.setAttribute('data-group-items', JSON.stringify([modalRowData]));
+        if (modalRowData.sale_order_stock_issue) {
+            row.setAttribute('data-sale-order-stock-issue', String(modalRowData.sale_order_stock_issue_kind || '').trim() || '1');
+            if (modalRowData.sale_order_stock_issue_id != null && modalRowData.sale_order_stock_issue_id !== '') {
+                row.setAttribute('data-sale-order-stock-issue-id', String(modalRowData.sale_order_stock_issue_id));
+            }
+        }
         
         // Ensure barcode is not empty - if still empty, use a placeholder
         if (!barcode || barcode.trim() === '') {
@@ -8457,6 +8649,10 @@ window.PB_PAGE_CONFIG = {
             alert('Product row not found');
             return;
         }
+        if (row.getAttribute('data-sale-order-stock-issue')) {
+            alert('This row is a sale order diamond/stone allocation from stock. Edit it on the Sale Order screen, or remove it here if it should not appear on the jobwork invoice.');
+            return;
+        }
         
         // Merged row: restore all N records in modal for editing
         const groupItemsJson = row.getAttribute('data-group-items');
@@ -9222,6 +9418,26 @@ window.PB_PAGE_CONFIG = {
             }
         });
     }
+
+    function auragoldPopulateModalSpecSelectsForRow(row) {
+        if (!row || !row.querySelector) return;
+        var map = [
+            { attr: 'cut', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_CUTS) || [], ph: 'Select Cut' },
+            { attr: 'color', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_COLORS) || [], ph: 'Select Color' },
+            { attr: 'shape', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SHAPES) || [], ph: 'Select Shape' },
+            { attr: 'clarity', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_CLARITIES) || [], ph: 'Select Clarity' },
+            { attr: 'seive', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SIEVE_SIZES) || [], ph: 'Select Seive' },
+            { attr: 'size', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SIZES) || [], ph: 'Select Size' }
+        ];
+        for (var i = 0; i < map.length; i++) {
+            var m = map[i];
+            var sel = row.querySelector('select.auragold-spec-select[data-auragold-spec="' + m.attr + '"]');
+            if (!sel || !m.list || !m.list.length) continue;
+            if (sel.options.length > 1) continue;
+            populateSelect(sel, m.list, 'id', 'name', m.ph);
+        }
+    }
+    window.auragoldPopulateModalSpecSelectsForRow = auragoldPopulateModalSpecSelectsForRow;
 
     // Product Selection modal table (Basic Information) – column drag, mouse-based, order saved to DB
     (function() {
@@ -10377,6 +10593,15 @@ window.PB_PAGE_CONFIG = {
                 jwiFd.append('invoice_no', invNo);
                 jwiFd.append('grand_total', String(grandTotal));
                 jwiFd.append('customer_name', custName);
+                var pendingDiamondJsonR = JSON.stringify(Array.isArray(window.__pendingSaleOrderDiamondLines) ? window.__pendingSaleOrderDiamondLines.slice() : []);
+                var pendingStoneJsonR = JSON.stringify(Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines.slice() : []);
+                jwiFd.append('pending_diamond_allocations', pendingDiamondJsonR);
+                jwiFd.append('pending_stone_allocations', pendingStoneJsonR);
+                if (typeof collectPosPaymentsForSave === 'function') {
+                    try {
+                        jwiFd.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                    } catch (ePayJwiR) { /* ignore */ }
+                }
                 return fetch('ajax/save-jobwork-invoice.php', { method: 'POST', body: jwiFd, credentials: 'same-origin' })
                     .then(function(r) { return r.json(); })
                     .then(function(jwi) {
@@ -10388,6 +10613,15 @@ window.PB_PAGE_CONFIG = {
                         } else if (jwi.status !== 'success') {
                             alert(jwi.message || 'Jobwork invoice could not be saved.');
                             return;
+                        }
+                        if (jwi.id) {
+                            var jwiElR = document.getElementById('jwiCurrentId');
+                            if (jwiElR) {
+                                jwiElR.setAttribute('data-jwi-id', String(jwi.id));
+                            }
+                            if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                                window.auragoldVoucherDiamondStoneOnSaveSuccess(jwi.id);
+                            }
                         }
                         showPrintJWOModal(rjwoId, 0);
                     })
@@ -10553,6 +10787,15 @@ window.PB_PAGE_CONFIG = {
                 jwiFd.append('invoice_no', invNo);
                 jwiFd.append('grand_total', String(grandTotal));
                 jwiFd.append('customer_name', custName);
+                var pendingDiamondJson = JSON.stringify(Array.isArray(window.__pendingSaleOrderDiamondLines) ? window.__pendingSaleOrderDiamondLines.slice() : []);
+                var pendingStoneJson = JSON.stringify(Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines.slice() : []);
+                jwiFd.append('pending_diamond_allocations', pendingDiamondJson);
+                jwiFd.append('pending_stone_allocations', pendingStoneJson);
+                if (typeof collectPosPaymentsForSave === 'function') {
+                    try {
+                        jwiFd.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                    } catch (ePayJwi) { /* ignore */ }
+                }
                 return fetch('ajax/save-jobwork-invoice.php', { method: 'POST', body: jwiFd, credentials: 'same-origin' })
                     .then(function(r) { return r.json(); })
                     .then(function(jwi) {
@@ -10564,6 +10807,15 @@ window.PB_PAGE_CONFIG = {
                         } else if (jwi.status !== 'success') {
                             alert(jwi.message || 'Jobwork invoice header could not be saved. Run admin/sql/create_tbl_jobwork_invoices.sql if needed.');
                             return;
+                        }
+                        if (jwi.id) {
+                            var jwiEl = document.getElementById('jwiCurrentId');
+                            if (jwiEl) {
+                                jwiEl.setAttribute('data-jwi-id', String(jwi.id));
+                            }
+                            if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                                window.auragoldVoucherDiamondStoneOnSaveSuccess(jwi.id);
+                            }
                         }
                         var dEl = document.getElementById('jwoDepartment');
                         var wEl = document.getElementById('jwoDepartmentUser');
@@ -11400,7 +11652,9 @@ window.PB_PAGE_CONFIG = {
             <td data-column="barcode"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.barcode_no || '')}" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="design-no"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.design_no || '')}" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="huid"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.huid_no || '')}" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="item-code"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.item_code != null && item.item_code !== '' ? item.item_code : (item.short_code || ''))}" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="category"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
+            <td data-column="product-category"><select class="form-control form-control-sm product-category-select" style="width: 120px; font-size: 0.7rem;"><option value="">Select Category</option></select></td>
             <td data-column="calculation"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="Carat X Rate" ${item.calculation === 'Carat X Rate' ? 'selected' : ''}>Carat X Rate</option><option value="Rate X Gross Wt" ${(item.calculation || 'Rate X Gross Wt') === 'Rate X Gross Wt' ? 'selected' : ''}>Rate X Gross Wt</option><option value="Rate X Purity Wt" ${item.calculation === 'Rate X Purity Wt' ? 'selected' : ''}>Rate X Purity Wt</option><option value="Rate X Net Wt" ${item.calculation === 'Rate X Net Wt' ? 'selected' : ''}>Rate X Net Wt</option><option value="Rate X Final Wt" ${item.calculation === 'Rate X Final Wt' ? 'selected' : ''}>Rate X Final Wt</option><option value="Fix" ${item.calculation === 'Fix' ? 'selected' : ''}>Fix</option><option value="Stone Charge" ${item.calculation === 'Stone Charge' ? 'selected' : ''}>Stone Charge</option><option value="Attach Image Type" ${item.calculation === 'Attach Image Type' ? 'selected' : ''}>Attach Image Type</option></select></td>
             <td data-column="product"><input type="text" class="form-control form-control-sm" value="${escapeHtml(product.name || '')}" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="location"><select class="form-control form-control-sm location-select" style="width: 100px; font-size: 0.7rem;"><option value="">Select</option></select></td>
@@ -11412,6 +11666,13 @@ window.PB_PAGE_CONFIG = {
             <td data-column="net-wt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_weight || 0).toFixed(3)}" step="0.001" readonly style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="quantity"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.quantity || 1).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.rate || 0).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="fc-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.fc_amount != null && item.fc_amount !== '' ? item.fc_amount : 0).toFixed(2)}" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="diamond-line-metal-value"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.diamond_line_metal_value != null && item.diamond_line_metal_value !== '' ? item.diamond_line_metal_value : 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="rapnet-valuation"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.rapnet_valuation != null && item.rapnet_valuation !== '' ? item.rapnet_valuation : 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.setting_charge || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+            <td data-column="mark-up-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.mark_up_amount != null && item.mark_up_amount !== '' ? item.mark_up_amount : 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="mark-up-per"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.mark_up_per != null && item.mark_up_per !== '' ? item.mark_up_per : 0).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="metal-qty"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.metal_qty != null && item.metal_qty !== '' ? item.metal_qty : 1).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="metal-weight"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.metal_weight || 0).toFixed(3)}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
@@ -11428,9 +11689,16 @@ window.PB_PAGE_CONFIG = {
             <td data-column="metal-cost"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.metal_cost || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem; color: #7b1fa2;"></td>
             <td data-column="requested-purity"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.requested_purity || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="requested"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.requested || 0).toFixed(3)}" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
-            <td data-column="setting-charge"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.setting_charge || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="final-wt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.final_weight || 0).toFixed(3)}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="alloy-wt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.alloy_weight || 0).toFixed(3)}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-weight"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_weight || 0).toFixed(3)}" step="0.001" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-karat"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.platinum_karat || '')}" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-purity"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_purity || 0).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-purity-wt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_purity_wt || 0).toFixed(3)}" step="0.001" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_rate || 0).toFixed(2)}" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-wastage-per"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_wastage_per || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-wastage-wt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_wastage_wt || 0).toFixed(3)}" step="0.001" style="width: 100px; font-size: 0.7rem;"></td>
+            <td data-column="platinum-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.platinum_amount || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="discount-type"><select class="form-control form-control-sm" style="width: 150px; font-size: 0.7rem;">${buildDiscountTypeSelectOptions(item.discount_type)}</select></td>
             <td data-column="discount-per"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.discount_per || 0).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="discount-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.discount_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
@@ -11445,7 +11713,6 @@ window.PB_PAGE_CONFIG = {
             <td data-column="minimum"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.minimum || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="stone-charge-type"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="Fix" ${(item.stone_charge_type || 'Fix') === 'Fix' ? 'selected' : ''}>Fix</option><option value="Per Gram" ${item.stone_charge_type === 'Per Gram' ? 'selected' : ''}>Per Gram</option></select></td>
             <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_rate || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
-            <td data-column="stone-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_cost || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.diamond_amount || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.purchase_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
@@ -11453,13 +11720,24 @@ window.PB_PAGE_CONFIG = {
             <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount_with || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount" selected>Tax of net amount</option><option value="no_tax">No tax</option></select></td>
-            <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="${(product.total_tax_percent != null && product.total_tax_percent !== '') ? product.total_tax_percent : ((product.vat_value != null && product.vat_value !== '') ? product.vat_value : 0)}" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (sum of all taxes, read-only)"></td>
+            <td data-column="tax-percent"><input type="text" class="form-control form-control-sm" value="${(item.total_tax_percent != null && item.total_tax_percent !== '') ? item.total_tax_percent : ((product && product.total_tax_percent != null && product.total_tax_percent !== '') ? product.total_tax_percent : ((item.vat_value != null && item.vat_value !== '') ? item.vat_value : ((product && product.vat_value != null && product.vat_value !== '') ? product.vat_value : 0)))}" min="0" max="100" step="0.01" readonly style="width: 70px; font-size: 0.7rem; background: #f1f5f9; cursor: not-allowed;" title="From product opening (sum of all taxes, read-only)"></td>
             <td data-column="tax"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.tax_amount || 0).toFixed(2)}" step="0.01" style="width: 80px; font-size: 0.7rem;"></td>
             <td data-column="other-charge-type"><select class="form-control form-control-sm" style="width: 100px; font-size: 0.7rem;"><option value="Fix" ${(item.other_charge_type || 'Fix') === 'Fix' ? 'selected' : ''}>Fix</option><option value="Percentage" ${item.other_charge_type === 'Percentage' ? 'selected' : ''}>Percentage</option></select></td>
             <td data-column="other-weight"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.other_weight || 0).toFixed(3)}" step="0.001" style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="other-rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.other_rate || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="other-info"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.other_info || '')}" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="other-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.other_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.certificate_amount || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-no"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.certificate_no || '')}" style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="certificate-link"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.certificate_link || '')}" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+            <td data-column="video-link"><input type="text" class="form-control form-control-sm" value="${escapeHtml(item.video_link || '')}" style="width: 120px; font-size: 0.7rem;" placeholder="https://"></td>
+            <td data-column="cut"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="cut" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Cut</option></select></td>
+            <td data-column="color"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="color" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Color</option></select></td>
+            <td data-column="seive-size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="seive" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Seive</option></select></td>
+            <td data-column="size"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="size" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Size</option></select></td>
+            <td data-column="shape"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="shape" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Shape</option></select></td>
+            <td data-column="clarity"><select class="form-control form-control-sm auragold-spec-select" data-auragold-spec="clarity" style="min-width: 100px; font-size: 0.7rem;"><option value="">Select Clarity</option></select></td>
+            <td data-column="unit-price"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.unit_price != null && item.unit_price !== '' ? item.unit_price : 0).toFixed(2)}" step="0.01" style="width: 90px; font-size: 0.7rem;"></td>
             <td data-column="hallmark-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.hallmark_amount || 0).toFixed(2)}" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="hallmark-rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.hallmark_rate || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="net-amt-tax"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_amount_tax || 0).toFixed(2)}" step="0.01" readonly style="width: 120px; font-size: 0.7rem;"></td>
@@ -11483,11 +11761,12 @@ window.PB_PAGE_CONFIG = {
         }
         
         // Restore saved values for category, tax-type, and calculation (edit mode load)
+        var useDiamondOptions = false;
         var categorySelectEl = row.querySelector('[data-column="category"] select');
         if (categorySelectEl) {
             // If item has diamond category (Jewellery/Diamonds/GemStones), use Diamond options regardless of active tab
             var isDiamondCat = (item.category || '').toString().trim();
-            var useDiamondOptions = (isDiamondCat === 'Jewellery' || isDiamondCat === 'Diamonds' || isDiamondCat === 'GemStones');
+            useDiamondOptions = (isDiamondCat === 'Jewellery' || isDiamondCat === 'Diamonds' || isDiamondCat === 'GemStones');
             var isDiamondTab = useDiamondOptions || (typeof isDiamondTabActive === 'function' && isDiamondTabActive());
             if (typeof populateCategorySelectForModal === 'function') {
                 populateCategorySelectForModal(categorySelectEl, isDiamondTab);
@@ -11527,6 +11806,28 @@ window.PB_PAGE_CONFIG = {
                 locationSelect.value = item.location_id;
             }
         }
+        const productCategorySelect = row.querySelector('.product-category-select');
+        if (productCategorySelect && typeof populateSelect === 'function' && typeof categories !== 'undefined') {
+            populateSelect(productCategorySelect, categories, 'id', 'name', 'Select Category');
+            var pcid = item.product_category_id != null && item.product_category_id !== '' ? item.product_category_id : (item.category_id != null && item.category_id !== '' && !item.diamond_category ? item.category_id : '');
+            if (pcid) {
+                try { productCategorySelect.value = String(pcid); } catch (e) {}
+            }
+        }
+        if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
+            auragoldPopulateModalSpecSelectsForRow(row);
+            var specSet = function(col, id) {
+                if (id == null || id === '') return;
+                var c = row.querySelector('[data-column="' + col + '"] select');
+                if (c) try { c.value = String(id); } catch (e2) {}
+            };
+            specSet('cut', item.cut_id);
+            specSet('color', item.color_id);
+            specSet('shape', item.shape_id);
+            specSet('clarity', item.clarity_id);
+            specSet('seive-size', item.sieve_size_id);
+            specSet('size', item.size_id);
+        }
         
         // Add event handlers (same as addEmptyProductRow)
         const checkbox = row.querySelector('.product-checkbox');
@@ -11560,8 +11861,10 @@ window.PB_PAGE_CONFIG = {
                 }
                 return;
             }
-            checkbox.checked = !checkbox.checked;
-            updateRowSelection(row, checkbox.checked);
+            if (checkbox) {
+                checkbox.checked = !checkbox.checked;
+                updateRowSelection(row, checkbox.checked);
+            }
         });
         row.style.cursor = 'pointer';
         
@@ -11584,6 +11887,12 @@ window.PB_PAGE_CONFIG = {
         // Calculate initial values
         if (typeof calculateModalRowNetWeight === 'function') {
             calculateModalRowNetWeight(row);
+        }
+        if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') {
+            updateJewelleryDiamondCaratFromDiamondAndGemstone();
+        }
+        if (typeof syncDiamondTabSharedBarcodes === 'function') {
+            syncDiamondTabSharedBarcodes();
         }
         
         function updateRowSelection(row, isSelected) {
@@ -11620,6 +11929,99 @@ window.PB_PAGE_CONFIG = {
                 b.title = tip;
             }
         });
+    }
+
+    /** Build a Product List modal row from sale order diamond/stone stock issue (for jobwork invoice display). */
+    function saleOrderStockIssueToModalRowData(issue, kind) {
+        var w = parseFloat(issue.weight);
+        if (isNaN(w)) w = 0;
+        var qty = parseFloat(issue.qty);
+        if (isNaN(qty) || qty <= 0) qty = 1;
+        var cat = (kind === 'diamond')
+            ? (String(issue.diamond_category || '').trim() || 'Diamonds')
+            : (String(issue.stone_category || '').trim() || 'GemStones');
+        var name = (String(issue.product_name || '').trim()) || (kind === 'diamond' ? 'Diamond (sale order)' : 'Stone (sale order)');
+        var bc = String(issue.barcode || '').trim();
+        return {
+            sale_order_stock_issue: true,
+            sale_order_stock_issue_kind: kind,
+            sale_order_stock_issue_id: issue.id,
+            id: '',
+            product_id: '',
+            characteristic_id: '',
+            metal_id: '',
+            product_name: name,
+            barcode: bc,
+            short_code: '',
+            rfid: '',
+            voucher_type: kind === 'diamond' ? 'Diamond' : 'Stone',
+            huid: '',
+            category: cat,
+            diamond_category: cat,
+            location: '',
+            carat: w,
+            stone_weight: w,
+            pkt_wt: 0,
+            pkt_less_wt: 0,
+            quantity: qty,
+            gross_wt: w,
+            less_wt: 0,
+            purity: 0,
+            final_wt: w,
+            net_wt: w,
+            pure_wt: 0,
+            metal_qty: 1,
+            metal_weight: 0,
+            metal_rate: 0,
+            rate: 0,
+            metal_value: 0,
+            amount: 0,
+            discount: 0,
+            making_amount: 0,
+            stone_amount: 0,
+            other_amount: 0,
+            diamond_amount: 0,
+            tax: 0,
+            net_amt: 0,
+            net_amt_tax: 0,
+            purchase_amount: 0,
+            sale_amount: 0,
+            sale_amount_with: 0,
+            reverse: 0,
+            design_no: '',
+            calculation_type: 'Carat X Rate',
+            group_image: ''
+        };
+    }
+
+    /** Append diamond/stone stock issue lines to the main Product List (jobwork invoice from sale order). */
+    function appendJobworkInvoiceSaleOrderStockIssueRows(order) {
+        if (!window.isJobworkInvoicePage || !order) return;
+        var di = order.diamond_issues;
+        var si = order.stone_issues;
+        if ((!di || !di.length) && (!si || !si.length)) return;
+        if (typeof addProductToTableFromModalRow !== 'function') return;
+        var tbody = document.getElementById('productTableBody');
+        if (!tbody) return;
+        var hasDataRows = tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
+        var emptyRow = tbody.querySelector('tr.no-drag');
+        if (hasDataRows && emptyRow) emptyRow.remove();
+        (di || []).forEach(function(issue) {
+            if (!issue) return;
+            var hasAny = (issue.barcode && String(issue.barcode).trim()) || (issue.product_name && String(issue.product_name).trim())
+                || (parseFloat(issue.weight) > 0) || (parseFloat(issue.qty) > 0);
+            if (!hasAny) return;
+            addProductToTableFromModalRow(saleOrderStockIssueToModalRowData(issue, 'diamond'));
+        });
+        (si || []).forEach(function(issue) {
+            if (!issue) return;
+            var hasAny = (issue.barcode && String(issue.barcode).trim()) || (issue.product_name && String(issue.product_name).trim())
+                || (parseFloat(issue.weight) > 0) || (parseFloat(issue.qty) > 0);
+            if (!hasAny) return;
+            addProductToTableFromModalRow(saleOrderStockIssueToModalRowData(issue, 'stone'));
+        });
+        if (typeof updateSummaryRow === 'function') updateSummaryRow();
+        if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
     }
 
     // Populate form with order data (param loadedPayments to avoid shadowing global payments)
@@ -11830,14 +12232,18 @@ window.PB_PAGE_CONFIG = {
             productListBody.innerHTML = '';
         }
         
-        // Load items as one merged Product List row with data-group-items (so Edit shows all products)
+        // Load items into Product List: jobwork invoice keeps each metal / diamond / stone line separate (no merge)
         var itemList = (items && Array.isArray(items)) ? items.filter(Boolean) : [];
         if (itemList.length > 0) {
             console.log('Found ' + itemList.length + ' items to load');
             try {
                 const modalRowsData = itemList.map(function(item) { return savedItemToModalRowData(item); });
                 var added = false;
-                if (typeof addMergedProductsToTable === 'function') {
+                var splitJobworkRows = !!window.isJobworkInvoicePage && itemList.length > 1;
+                if (splitJobworkRows && typeof addProductToTableFromModalRow === 'function') {
+                    modalRowsData.forEach(function(rowData) { addProductToTableFromModalRow(rowData); });
+                    added = productTableBody && productTableBody.querySelectorAll('tr:not(.no-drag)').length > 0;
+                } else if (typeof addMergedProductsToTable === 'function') {
                     addMergedProductsToTable(modalRowsData);
                     added = productTableBody && productTableBody.querySelectorAll('tr:not(.no-drag)').length > 0;
                 }
@@ -11908,6 +12314,9 @@ window.PB_PAGE_CONFIG = {
                         }
                     }
                 }
+                if (window.isJobworkInvoicePage && typeof appendJobworkInvoiceSaleOrderStockIssueRows === 'function') {
+                    appendJobworkInvoiceSaleOrderStockIssueRows(order);
+                }
             } catch (e) {
                 console.error('Error loading invoice items into form:', e);
                 if (productTableBody) {
@@ -11921,6 +12330,9 @@ window.PB_PAGE_CONFIG = {
             }
             if (productListBody) {
                 productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
+            }
+            if (window.isJobworkInvoicePage && typeof appendJobworkInvoiceSaleOrderStockIssueRows === 'function') {
+                appendJobworkInvoiceSaleOrderStockIssueRows(order);
             }
         }
         
@@ -12181,10 +12593,8 @@ window.PB_PAGE_CONFIG = {
         // Retry: if items/totals still empty after 1.2s, run again
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -12478,7 +12888,7 @@ window.PB_PAGE_CONFIG = {
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }

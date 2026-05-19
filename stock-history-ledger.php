@@ -17,190 +17,30 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
     }
 }
 
-$adv_branch = isset($_GET['adv_branch']) ? (int) $_GET['adv_branch'] : 0;
-$adv_category = isset($_GET['adv_category']) ? (int) $_GET['adv_category'] : 0;
-$adv_barcode = isset($_GET['adv_barcode']) ? trim((string) $_GET['adv_barcode']) : '';
-$adv_rfid = isset($_GET['adv_rfid']) ? trim((string) $_GET['adv_rfid']) : '';
-$adv_date_from = isset($_GET['adv_date_from']) ? trim((string) $_GET['adv_date_from']) : '';
-$adv_date_to = isset($_GET['adv_date_to']) ? trim((string) $_GET['adv_date_to']) : '';
-$adv_metal = isset($_GET['adv_metal']) ? (int) $_GET['adv_metal'] : 0;
-$adv_product = isset($_GET['adv_product']) && is_array($_GET['adv_product']) ? array_filter(array_map('intval', $_GET['adv_product'])) : [];
-$adv_article = isset($_GET['adv_article']) ? trim((string) $_GET['adv_article']) : '';
-$adv_voucher_type = isset($_GET['adv_voucher_type']) ? trim((string) $_GET['adv_voucher_type']) : '';
-$adv_against_voucher = isset($_GET['adv_against_voucher']) ? trim((string) $_GET['adv_against_voucher']) : '';
-$adv_invoice_no = isset($_GET['adv_invoice_no']) ? trim((string) $_GET['adv_invoice_no']) : '';
-$adv_gross_wt = isset($_GET['adv_gross_wt']) ? trim((string) $_GET['adv_gross_wt']) : '';
-$adv_against_invoice_no = isset($_GET['adv_against_invoice_no']) ? trim((string) $_GET['adv_against_invoice_no']) : '';
+require_once __DIR__ . '/includes/stock_history_ledger_fetch.php';
 
-$filter_count = 0;
-if ($adv_branch > 0) {
-    $filter_count++;
-}
-if ($adv_category > 0) {
-    $filter_count++;
-}
-if ($adv_barcode !== '') {
-    $filter_count++;
-}
-if ($adv_rfid !== '') {
-    $filter_count++;
-}
-if ($adv_date_from !== '') {
-    $filter_count++;
-}
-if ($adv_date_to !== '') {
-    $filter_count++;
-}
-if ($adv_metal > 0) {
-    $filter_count++;
-}
-if (!empty($adv_product)) {
-    $filter_count++;
-}
-if ($adv_article !== '') {
-    $filter_count++;
-}
-if ($adv_voucher_type !== '') {
-    $filter_count++;
-}
-if ($adv_against_voucher !== '') {
-    $filter_count++;
-}
-if ($adv_invoice_no !== '') {
-    $filter_count++;
-}
-if ($adv_gross_wt !== '' && is_numeric(str_replace(',', '', $adv_gross_wt))) {
-    $filter_count++;
-}
-if ($adv_against_invoice_no !== '') {
-    $filter_count++;
-}
-
-$extra_where = '';
-if ($adv_branch > 0) {
-    $extra_where .= ' AND b.id = ' . $adv_branch;
-}
-if ($adv_category > 0) {
-    $extra_where .= ' AND cat.id = ' . $adv_category;
-}
-if ($adv_barcode !== '') {
-    $bc_like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_barcode) . '%';
-    $bc_esc = mysqli_real_escape_string($conn, $bc_like);
-    $extra_where .= " AND sj.barcode LIKE '$bc_esc' ";
-}
-if ($adv_rfid !== '') {
-    $rf_like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_rfid) . '%';
-    $rf_esc = mysqli_real_escape_string($conn, $rf_like);
-    $extra_where .= " AND IFNULL(sj.rfid_code,'') LIKE '$rf_esc' ";
-}
-if ($adv_date_from !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $adv_date_from)) {
-    $df = mysqli_real_escape_string($conn, $adv_date_from);
-    $extra_where .= " AND sj.sj_date >= '$df' ";
-}
-if ($adv_date_to !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $adv_date_to)) {
-    $dt = mysqli_real_escape_string($conn, $adv_date_to);
-    $extra_where .= " AND sj.sj_date <= '$dt' ";
-}
-if ($adv_metal > 0) {
-    $extra_where .= ' AND sj.metal_id = ' . $adv_metal;
-}
-if (!empty($adv_product)) {
-    $ids = implode(',', array_map('intval', $adv_product));
-    if ($ids !== '') {
-        $extra_where .= " AND sj.product_id IN ($ids) ";
-    }
-}
-if ($adv_article !== '') {
-    $al = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_article) . '%';
-    $al_esc = mysqli_real_escape_string($conn, $al);
-    $extra_where .= " AND IFNULL(p.article,'') LIKE '$al_esc' ";
-}
-if ($adv_voucher_type !== '') {
-    $vt = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_voucher_type) . '%';
-    $vt_esc = mysqli_real_escape_string($conn, $vt);
-    $extra_where .= " AND IFNULL(sj.voucher_type,'') LIKE '$vt_esc' ";
-}
-if ($adv_against_voucher !== '') {
-    $av = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_against_voucher) . '%';
-    $av_esc = mysqli_real_escape_string($conn, $av);
-    $extra_where .= " AND IFNULL(jwo.jobwork_no,'') LIKE '$av_esc' ";
-}
-if ($adv_invoice_no !== '') {
-    $inv = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_invoice_no) . '%';
-    $inv_esc = mysqli_real_escape_string($conn, $inv);
-    $extra_where .= " AND (IFNULL(sj.invoice_no,'') LIKE '$inv_esc' OR IFNULL(sj.sj_invoice_no,'') LIKE '$inv_esc') ";
-}
-if ($adv_gross_wt !== '') {
-    $gw = str_replace(',', '', $adv_gross_wt);
-    if (is_numeric($gw)) {
-        $gwn = (float) $gw;
-        $extra_where .= ' AND ABS(sj.gross_weight - ' . $gwn . ') < 0.0005 ';
-    }
-}
-if ($adv_against_invoice_no !== '') {
-    $ain = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $adv_against_invoice_no) . '%';
-    $ain_esc = mysqli_real_escape_string($conn, $ain);
-    $extra_where .= " AND IFNULL(jwo.sale_order_no,'') LIKE '$ain_esc' ";
-}
-
-// Full movement ledger by barcode: do not exclude non–stock-item products (e.g. is_stock_item=0),
-// or product-opening / SJ rows disappear from Stock History despite tbl_stock_journal records.
-$sql = "
-SELECT
-    sj.id AS sj_id,
-    sj.sj_date,
-    sj.barcode,
-    IFNULL(sj.rfid_code, '') AS rfid,
-    sj.voucher_type,
-    IFNULL(sj.location, '') AS location,
-    IFNULL(NULLIF(TRIM(sj.invoice_no), ''), sj.sj_invoice_no) AS doc_invoice_no,
-    sj.sj_invoice_no,
-    sj.quantity AS qty,
-    sj.gross_weight AS gross_wt,
-    IFNULL(sj.pure_weight, 0) AS pure_wt,
-    COALESCE(NULLIF(TRIM(sj.product_name), ''), p.name, '') AS product_name,
-    IFNULL(m.display_name, '') AS metal_name,
-    IFNULL(cat.name, '') AS category_name,
-    IFNULL(p.article, '') AS article,
-    IFNULL(jwo.sale_order_no, '') AS sale_order_no,
-    IFNULL(jwo.sale_order_id, 0) AS sale_order_id,
-    IFNULL(jwo.id, 0) AS jobwork_order_id,
-    IFNULL(jwo.jobwork_no, '') AS jobwork_no,
-    COALESCE(b.name, '') AS branch_name
-FROM tbl_stock_journal sj
-LEFT JOIN tbl_products p ON p.id = sj.product_id
-LEFT JOIN tbl_metal m ON m.id = sj.metal_id
-LEFT JOIN tbl_categories cat ON cat.id = p.category_id
-LEFT JOIN tbl_jobwork_invoices jwi ON sj.comment LIKE CONCAT('auragold_jwi|jwi_id=', jwi.id, '|%')
-LEFT JOIN tbl_jobwork_orders jwo ON jwo.id = jwi.jobwork_order_id
-LEFT JOIN tbl_product_characteristics pc ON pc.id = sj.product_characteristic_id AND pc.status = 1
-LEFT JOIN tbl_branches b ON b.id = pc.branch_id
-WHERE sj.status = 'active'
-$extra_where
-ORDER BY (DATE(sj.sj_date) = CURDATE()) DESC, sj.sj_date DESC, sj.id DESC
-LIMIT 5000
-";
-
-$rows = [];
-$err = '';
-$q = @mysqli_query($conn, $sql);
-if ($q) {
-    while ($r = mysqli_fetch_assoc($q)) {
-        $rows[] = $r;
-    }
-    mysqli_free_result($q);
-} else {
-    $err = mysqli_error($conn);
-}
-
-$tot_qty = 0.0;
-$tot_gross = 0.0;
-$tot_pure = 0.0;
-foreach ($rows as $r) {
-    $tot_qty += (float) ($r['qty'] ?? 0);
-    $tot_gross += (float) ($r['gross_wt'] ?? 0);
-    $tot_pure += (float) ($r['pure_wt'] ?? 0);
-}
+$__shl = auragold_stock_history_ledger_fetch($conn, $_GET);
+$rows = $__shl['rows'];
+$err = $__shl['err'];
+$tot_qty = $__shl['tot_qty'];
+$tot_gross = $__shl['tot_gross'];
+$tot_pure = $__shl['tot_pure'];
+$filter_count = $__shl['filter_count'];
+$adv_branch = $__shl['adv_branch'];
+$adv_category = $__shl['adv_category'];
+$adv_barcode = $__shl['adv_barcode'];
+$adv_rfid = $__shl['adv_rfid'];
+$adv_date_from = $__shl['adv_date_from'];
+$adv_date_to = $__shl['adv_date_to'];
+$adv_metal = $__shl['adv_metal'];
+$adv_product = $__shl['adv_product'];
+$adv_article = $__shl['adv_article'];
+$adv_voucher_type = $__shl['adv_voucher_type'];
+$adv_against_voucher = $__shl['adv_against_voucher'];
+$adv_invoice_no = $__shl['adv_invoice_no'];
+$adv_gross_wt = $__shl['adv_gross_wt'];
+$adv_against_invoice_no = $__shl['adv_against_invoice_no'];
+unset($__shl);
 
 $filter_branches = getList("SELECT id, name FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
 if (!is_array($filter_branches)) {
@@ -306,7 +146,8 @@ $shl_clear_url = !empty($_GET['ledger']) ? 'stock-history.php?ledger=1' : 'stock
         opacity: 0.75;
         pointer-events: none;
     }
-    .shl-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .shl-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; z-index: 20; }
+    .shl-toolbar-right .dropdown-menu { z-index: 2000; min-width: 11rem; }
     .shl-btn-icon {
         background: var(--shl-gold-pale);
         border: 1px solid rgba(212, 175, 55, 0.55);
@@ -459,7 +300,8 @@ $shl_clear_url = !empty($_GET['ledger']) ? 'stock-history.php?ledger=1' : 'stock
             <div class="dropdown">
                 <button class="btn btn-sm dropdown-toggle shl-btn-export" type="button" data-toggle="dropdown" aria-expanded="false">Export</button>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a class="dropdown-item" href="#" id="shlExportCsv">Export CSV</a>
+                    <a class="dropdown-item" href="#" id="shlExportExcel"><i class="feather icon-file-text text-success mr-2"></i>Excel</a>
+                    <a class="dropdown-item" href="#" id="shlExportPdf"><i class="feather icon-file text-danger mr-2"></i>PDF</a>
                 </div>
             </div>
             <div class="shl-gear-wrap">
@@ -639,13 +481,14 @@ $shl_clear_url = !empty($_GET['ledger']) ? 'stock-history.php?ledger=1' : 'stock
                     $againstVoucherHtml = $jwn !== '' && $jwoId > 0
                         ? '<a class="shl-link" href="jobwork-order.php?id=' . $jwoId . '">' . htmlspecialchars($jwn) . '</a>'
                         : '—';
+                    $voucherTypeDisplay = auragold_stock_history_ledger_voucher_display((string) ($row['voucher_type'] ?? ''));
                 ?>
                     <tr>
                         <td data-col="date"><?php echo htmlspecialchars($dShow); ?></td>
                         <td data-col="barcode"><?php echo htmlspecialchars((string) ($row['barcode'] ?? '')); ?></td>
                         <td data-col="rfid"><?php echo htmlspecialchars((string) ($row['rfid'] ?? '')); ?></td>
                         <td data-col="against_invoice"><?php echo $againstInvHtml; ?></td>
-                        <td data-col="voucher_type"><?php echo htmlspecialchars((string) ($row['voucher_type'] ?? '')); ?></td>
+                        <td data-col="voucher_type"><?php echo htmlspecialchars($voucherTypeDisplay); ?></td>
                         <td data-col="location"><?php echo htmlspecialchars((string) ($row['location'] ?? '')); ?></td>
                         <td data-col="invoice_no"><?php echo $invoiceHtml; ?></td>
                         <td data-col="against_voucher"><?php echo $againstVoucherHtml; ?></td>
@@ -691,6 +534,7 @@ $shl_clear_url = !empty($_GET['ledger']) ? 'stock-history.php?ledger=1' : 'stock
     </div>
 </div>
 
+<?php include __DIR__ . '/footer-script.php'; ?>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script>
 (function () {
@@ -997,30 +841,24 @@ $shl_clear_url = !empty($_GET['ledger']) ? 'stock-history.php?ledger=1' : 'stock
         });
     });
 
-    document.getElementById('shlExportCsv').addEventListener('click', function (e) {
+    function shlExportQueryString() {
+        var qs = window.location.search || '';
+        if (!qs || qs === '?') {
+            return '?ledger=1';
+        }
+        if (qs.indexOf('ledger=') === -1) {
+            return qs + (qs.charAt(qs.length - 1) === '&' ? '' : '&') + 'ledger=1';
+        }
+        return qs;
+    }
+
+    document.getElementById('shlExportExcel').addEventListener('click', function (e) {
         e.preventDefault();
-        var rows = [];
-        var headers = [];
-        document.querySelectorAll('#shlTable thead th').forEach(function (th) {
-            if (th.offsetParent === null) return;
-            headers.push('"' + th.textContent.replace(/"/g, '""').trim() + '"');
-        });
-        rows.push(headers.join(','));
-        document.querySelectorAll('#shlTable tbody tr').forEach(function (tr) {
-            if (tr.style.display === 'none') return;
-            var line = [];
-            tr.querySelectorAll('td').forEach(function (td) {
-                if (td.offsetParent === null) return;
-                line.push('"' + td.textContent.replace(/"/g, '""').trim() + '"');
-            });
-            if (line.length) rows.push(line.join(','));
-        });
-        var blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        var link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'stock-history.csv';
-        link.click();
-        URL.revokeObjectURL(link.href);
+        window.location.href = 'ajax/export-stock-history-ledger-excel.php' + shlExportQueryString();
+    });
+    document.getElementById('shlExportPdf').addEventListener('click', function (e) {
+        e.preventDefault();
+        window.location.href = 'ajax/export-stock-history-ledger-pdf.php' + shlExportQueryString();
     });
 
     applySavedColumnOrder();

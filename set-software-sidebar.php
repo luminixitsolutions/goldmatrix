@@ -22,10 +22,23 @@ $auragold_t_ss = static function ($key) {
 };
 $auragold_collapse_show = $auragold_t_ss('set_software.collapse_show');
 $auragold_collapse_hide = $auragold_t_ss('set_software.collapse_hide');
+$auragold_ss_menu_open = function_exists('auragold_t')
+    ? htmlspecialchars(auragold_t('set_software.open_menu'), ENT_QUOTES, 'UTF-8')
+    : 'Open Set Software menu';
+$auragold_ss_menu_close = function_exists('auragold_t')
+    ? htmlspecialchars(auragold_t('set_software.close_menu'), ENT_QUOTES, 'UTF-8')
+    : 'Close menu';
 ?>
+<div class="set-software-drawer-backdrop" id="setSoftwareDrawerBackdrop" aria-hidden="true"></div>
 <!-- Left Set Software sidebar (common include) -->
-<aside class="set-software-sidebar" id="set-software-nav-aside">
-    <div class="set-software-sidebar-title"><?php echo $auragold_set_ss_title; ?></div>
+<aside class="set-software-sidebar" id="set-software-nav-aside" aria-label="<?php echo $auragold_set_ss_title; ?>">
+    <div class="set-software-sidebar-mobile-head d-lg-none">
+        <div class="set-software-sidebar-title"><?php echo $auragold_set_ss_title; ?></div>
+        <button type="button" class="set-software-drawer-close" id="setSoftwareDrawerClose" aria-label="<?php echo $auragold_ss_menu_close; ?>">
+            <i class="feather icon-x" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div class="set-software-sidebar-title d-none d-lg-block"><?php echo $auragold_set_ss_title; ?></div>
     <a href="set-software.php" class="set-software-nav-item<?php echo ($current_page === 'set-software.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-hash"></i> <?php echo $auragold_t_ss('set_software.barcode_setting'); ?></span>
         <i class="feather icon-chevron-right"></i>
@@ -36,6 +49,14 @@ $auragold_collapse_hide = $auragold_t_ss('set_software.collapse_hide');
     </a>
     <a href="language-settings.php" class="set-software-nav-item<?php echo ($current_page === 'language-settings.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-globe"></i> <?php echo $auragold_t_ss('set_software.language_setting'); ?></span>
+        <i class="feather icon-chevron-right"></i>
+    </a>
+    <a href="mail-settings.php" class="set-software-nav-item<?php echo ($current_page === 'mail-settings.php') ? ' active' : ''; ?>">
+        <span><i class="feather icon-mail"></i> <?php echo $auragold_t_ss('set_software.mail_setting'); ?></span>
+        <i class="feather icon-chevron-right"></i>
+    </a>
+    <a href="mobile-menu-settings.php" class="set-software-nav-item<?php echo ($current_page === 'mobile-menu-settings.php') ? ' active' : ''; ?>">
+        <span><i class="feather icon-smartphone"></i> <?php echo $auragold_t_ss('set_software.mobile_menu_setting'); ?></span>
         <i class="feather icon-chevron-right"></i>
     </a>
     <a href="masters.php" class="set-software-nav-item<?php echo ($current_page === 'masters.php') ? ' active' : ''; ?>">
@@ -93,6 +114,13 @@ $auragold_collapse_hide = $auragold_t_ss('set_software.collapse_hide');
 <button type="button" class="set-software-collapse-tab" title="<?php echo $auragold_collapse_hide; ?>" aria-expanded="true" aria-controls="set-software-nav-aside" data-auragold-title-show="<?php echo $auragold_collapse_show; ?>" data-auragold-title-hide="<?php echo $auragold_collapse_hide; ?>"><i class="feather icon-chevron-left"></i></button>
 <script>
 (function () {
+    var ssMenuOpenLabel = <?php echo json_encode($auragold_ss_menu_open, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var ssMenuTitle = <?php echo json_encode($auragold_set_ss_title, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+    function ssIsMobile() {
+        return window.matchMedia('(max-width: 991.98px)').matches;
+    }
+
     function initSetSoftwareCollapse(wrap) {
         var tab = wrap.querySelector('.set-software-collapse-tab');
         if (!tab || tab.dataset.ssCollapseBound) return;
@@ -102,6 +130,9 @@ $auragold_collapse_hide = $auragold_t_ss('set_software.collapse_hide');
         var titleShow = tab.getAttribute('data-auragold-title-show') || 'Show menu';
         var titleHide = tab.getAttribute('data-auragold-title-hide') || 'Hide menu';
         function apply(collapsed) {
+            if (ssIsMobile()) {
+                collapsed = false;
+            }
             wrap.classList.toggle('set-software-sidebar-collapsed', collapsed);
             tab.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             tab.title = collapsed ? titleShow : titleHide;
@@ -109,15 +140,101 @@ $auragold_collapse_hide = $auragold_t_ss('set_software.collapse_hide');
             if (icon) {
                 icon.className = 'feather ' + (collapsed ? 'icon-chevron-right' : 'icon-chevron-left');
             }
-            try { localStorage.setItem('setSoftwareSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+            if (!ssIsMobile()) {
+                try { localStorage.setItem('setSoftwareSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+            }
         }
         var stored = null;
         try { stored = localStorage.getItem('setSoftwareSidebarCollapsed'); } catch (e) {}
-        if (stored === '1') apply(true);
+        if (stored === '1' && !ssIsMobile()) apply(true);
         tab.addEventListener('click', function () {
+            if (ssIsMobile()) return;
             apply(!wrap.classList.contains('set-software-sidebar-collapsed'));
         });
     }
-    document.querySelectorAll('.set-software-wrapper').forEach(initSetSoftwareCollapse);
+
+    function initSetSoftwareMobileDrawer(wrap) {
+        if (wrap.dataset.ssMobileBound) return;
+        wrap.dataset.ssMobileBound = '1';
+        var backdrop = document.getElementById('setSoftwareDrawerBackdrop');
+        var aside = document.getElementById('set-software-nav-aside');
+        var closeBtn = document.getElementById('setSoftwareDrawerClose');
+        var openBtn = document.getElementById('setSoftwareMobileMenuBtn');
+
+        if (!openBtn) {
+            var main = wrap.querySelector('.set-software-main');
+            if (main) {
+                var bar = document.createElement('div');
+                bar.className = 'set-software-mobile-toolbar d-lg-none';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'set-software-mobile-menu-btn';
+                btn.id = 'setSoftwareMobileMenuBtn';
+                btn.setAttribute('aria-label', ssMenuOpenLabel);
+                btn.setAttribute('aria-expanded', 'false');
+                btn.setAttribute('aria-controls', 'set-software-nav-aside');
+                btn.innerHTML = '<i class="feather icon-menu" aria-hidden="true"></i><span></span>';
+                btn.querySelector('span').textContent = ssMenuTitle;
+                bar.appendChild(btn);
+                main.insertBefore(bar, main.firstChild);
+                openBtn = btn;
+            }
+        }
+
+        function openDrawer() {
+            if (!ssIsMobile()) return;
+            document.body.classList.add('set-software-drawer-open');
+            wrap.classList.remove('set-software-sidebar-collapsed');
+            if (openBtn) openBtn.setAttribute('aria-expanded', 'true');
+            if (backdrop) backdrop.setAttribute('aria-hidden', 'false');
+            if (aside) aside.setAttribute('aria-hidden', 'false');
+        }
+        function closeDrawer() {
+            document.body.classList.remove('set-software-drawer-open');
+            if (openBtn) openBtn.setAttribute('aria-expanded', 'false');
+            if (backdrop) backdrop.setAttribute('aria-hidden', 'true');
+        }
+
+        if (openBtn) {
+            openBtn.addEventListener('click', function () {
+                if (document.body.classList.contains('set-software-drawer-open')) closeDrawer();
+                else openDrawer();
+            });
+        }
+        if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+        if (backdrop) backdrop.addEventListener('click', closeDrawer);
+        if (aside) {
+            aside.addEventListener('click', function (e) {
+                var link = e.target.closest('a.set-software-nav-item, a.set-software-nav-sub-item');
+                if (link && ssIsMobile()) closeDrawer();
+            });
+        }
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && document.body.classList.contains('set-software-drawer-open')) {
+                closeDrawer();
+            }
+        });
+        var mq = window.matchMedia('(max-width: 991.98px)');
+        var onMq = function () {
+            if (!ssIsMobile()) closeDrawer();
+        };
+        if (typeof mq.addEventListener === 'function') {
+            mq.addEventListener('change', onMq);
+        } else if (typeof mq.addListener === 'function') {
+            mq.addListener(onMq);
+        }
+    }
+
+    function bootSetSoftwareNav() {
+        document.querySelectorAll('.set-software-wrapper').forEach(function (wrap) {
+            initSetSoftwareCollapse(wrap);
+            initSetSoftwareMobileDrawer(wrap);
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootSetSoftwareNav);
+    } else {
+        bootSetSoftwareNav();
+    }
 })();
 </script>

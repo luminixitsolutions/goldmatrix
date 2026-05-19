@@ -138,6 +138,7 @@ if ($chk_jwo && mysqli_num_rows($chk_jwo) > 0) {
         }
         mysqli_free_result($item_colq);
     }
+    require_once __DIR__ . '/includes/auragold_mfg_jobwork_queue_line_weights.php';
     $issue_tbl_name = 'tbl_jobwork_queue_diamond_stock_issue';
     $issue_tbl_chk = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $issue_tbl_name) . "'");
     $has_issue_tbl = ($issue_tbl_chk && mysqli_num_rows($issue_tbl_chk) > 0);
@@ -155,19 +156,31 @@ if ($chk_jwo && mysqli_num_rows($chk_jwo) > 0) {
     $sel .= ', (SELECT ji.product_name FROM tbl_jobwork_order_items ji WHERE ji.jobwork_order_id = j.id ORDER BY ji.id ASC LIMIT 1) AS first_product';
     $sel .= ", (SELECT GROUP_CONCAT(TRIM(ji.product_name) ORDER BY ji.id ASC SEPARATOR ', ') FROM tbl_jobwork_order_items ji WHERE ji.jobwork_order_id = j.id AND TRIM(COALESCE(ji.product_name,'')) <> '') AS all_products";
     $sel .= ", (SELECT {$first_item_barcode_expr} FROM tbl_jobwork_order_items ji WHERE ji.jobwork_order_id = j.id ORDER BY ji.id ASC LIMIT 1) AS first_item_barcode";
-    // Card / totals: prefer final (set on transfer / floor), then net (metal), then gross (original order) so updated wt is not hidden by stale gross.
-    $mp_wt_nullif_parts = [];
-    if (!empty($jwo_item_cols['final_weight'])) {
-        $mp_wt_nullif_parts[] = 'NULLIF(ji2.final_weight,0)';
+    // Card / list aggregate: final_weight when > 0, else metal − loss + diamond per line.
+    $mp_ji2_dwt = '0';
+    if (!empty($jwo_item_cols['diamond_weight']) && !empty($jwo_item_cols['diamond_wt'])) {
+        $mp_ji2_dwt = 'COALESCE(ji2.diamond_weight, ji2.diamond_wt, 0)';
+    } elseif (!empty($jwo_item_cols['diamond_weight'])) {
+        $mp_ji2_dwt = 'COALESCE(ji2.diamond_weight, 0)';
+    } elseif (!empty($jwo_item_cols['diamond_wt'])) {
+        $mp_ji2_dwt = 'COALESCE(ji2.diamond_wt, 0)';
     }
-    if (!empty($jwo_item_cols['net_weight'])) {
-        $mp_wt_nullif_parts[] = 'NULLIF(ji2.net_weight,0)';
+    $mp_ji2_loss = '0';
+    if (!empty($jwo_item_cols['gold_loss_1']) && !empty($jwo_item_cols['loss_wt'])) {
+        $mp_ji2_loss = 'COALESCE(NULLIF(ji2.gold_loss_1, 0), ji2.loss_wt, 0)';
+    } elseif (!empty($jwo_item_cols['gold_loss_1'])) {
+        $mp_ji2_loss = 'COALESCE(ji2.gold_loss_1, 0)';
+    } elseif (!empty($jwo_item_cols['loss_wt'])) {
+        $mp_ji2_loss = 'COALESCE(ji2.loss_wt, 0)';
     }
-    if (!empty($jwo_item_cols['gross_weight'])) {
-        $mp_wt_nullif_parts[] = 'NULLIF(ji2.gross_weight,0)';
-    }
-    if (!empty($mp_wt_nullif_parts)) {
-        $mp_wt_sum_inner = 'COALESCE(' . implode(', ', $mp_wt_nullif_parts) . ', 0)';
+    $mp_ji2_metal = '(CASE WHEN COALESCE(ji2.net_weight,0) > 0.0000001 THEN ji2.net_weight ELSE COALESCE(ji2.gross_weight, 0) END)';
+    $mp_ji2_fb = 'GREATEST(0, (' . $mp_ji2_metal . ') - (' . $mp_ji2_loss . ') + (' . $mp_ji2_dwt . '))';
+    if (!empty($jwo_item_cols['final_weight']) || !empty($jwo_item_cols['net_weight']) || !empty($jwo_item_cols['gross_weight'])) {
+        if (!empty($jwo_item_cols['final_weight'])) {
+            $mp_wt_sum_inner = '(CASE WHEN COALESCE(ji2.final_weight,0) > 0.0000001 THEN ji2.final_weight ELSE (' . $mp_ji2_fb . ') END)';
+        } else {
+            $mp_wt_sum_inner = $mp_ji2_fb;
+        }
         $sel .= ", (SELECT COALESCE(SUM({$mp_wt_sum_inner}), 0) FROM tbl_jobwork_order_items ji2 WHERE ji2.jobwork_order_id = j.id) AS jwo_total_wt_num";
     } else {
         $sel .= ', 0 AS jwo_total_wt_num';
@@ -254,6 +267,24 @@ if ($chk_jwo && mysqli_num_rows($chk_jwo) > 0) {
     } else {
         $extra_item_cols .= ', NULL AS line_gross_wt';
     }
+    if (!empty($jwo_item_cols['diamond_weight']) && !empty($jwo_item_cols['diamond_wt'])) {
+        $extra_item_cols .= ', COALESCE(ji.diamond_weight, ji.diamond_wt, 0) AS line_diamond_wt';
+    } elseif (!empty($jwo_item_cols['diamond_weight'])) {
+        $extra_item_cols .= ', COALESCE(ji.diamond_weight, 0) AS line_diamond_wt';
+    } elseif (!empty($jwo_item_cols['diamond_wt'])) {
+        $extra_item_cols .= ', COALESCE(ji.diamond_wt, 0) AS line_diamond_wt';
+    } else {
+        $extra_item_cols .= ', 0 AS line_diamond_wt';
+    }
+    if (!empty($jwo_item_cols['gold_loss_1']) && !empty($jwo_item_cols['loss_wt'])) {
+        $extra_item_cols .= ', COALESCE(NULLIF(ji.gold_loss_1, 0), ji.loss_wt, 0) AS line_saved_loss_wt';
+    } elseif (!empty($jwo_item_cols['gold_loss_1'])) {
+        $extra_item_cols .= ', COALESCE(ji.gold_loss_1, 0) AS line_saved_loss_wt';
+    } elseif (!empty($jwo_item_cols['loss_wt'])) {
+        $extra_item_cols .= ', COALESCE(ji.loss_wt, 0) AS line_saved_loss_wt';
+    } else {
+        $extra_item_cols .= ', 0 AS line_saved_loss_wt';
+    }
     if (!empty($jwo_item_cols['purity'])) {
         $extra_item_cols .= ', ji.purity AS line_purity';
     } else {
@@ -313,6 +344,8 @@ if ($chk_jwo && mysqli_num_rows($chk_jwo) > 0) {
                 'line_final_wt' => null,
                 'line_net_wt' => null,
                 'line_gross_wt' => null,
+                'line_diamond_wt' => 0,
+                'line_saved_loss_wt' => 0,
                 'line_purity' => null,
                 'line_carat' => null,
             ];
@@ -328,6 +361,16 @@ if ($chk_jwo && mysqli_num_rows($chk_jwo) > 0) {
             $row['line_gross_wt'] = $ir['line_gross_wt'] ?? null;
             $row['line_purity'] = $ir['line_purity'] ?? null;
             $row['line_carat'] = $ir['line_carat'] ?? null;
+            $itemSynth = [
+                'final_weight' => $ir['line_final_wt'] ?? null,
+                'net_weight' => $ir['line_net_wt'] ?? null,
+                'gross_weight' => $ir['line_gross_wt'] ?? null,
+                'diamond_weight' => $ir['line_diamond_wt'] ?? 0,
+                'diamond_wt' => $ir['line_diamond_wt'] ?? 0,
+                'gold_loss_1' => $ir['line_saved_loss_wt'] ?? 0,
+                'loss_wt' => $ir['line_saved_loss_wt'] ?? 0,
+            ];
+            $row['jwo_total_wt_num'] = auragold_mfg_jobwork_line_calculated_total_wt($itemSynth, $jwo_item_cols);
             $row['item_image_url'] = '';
             $img_raw = isset($ir['sale_item_images']) ? trim((string)$ir['sale_item_images']) : '';
             if ($img_raw !== '') {
@@ -1101,6 +1144,62 @@ html, body {
     overflow-y: hidden;
     min-width: 0;
     min-height: 0;
+}
+
+/* Inward / Outward: body scrolls; grand total pinned below */
+.stock-box .table-wrap.mp-stock-table-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.stock-box .mp-stock-table-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.stock-box .mp-stock-grand-total-bar {
+    flex-shrink: 0;
+    display: none;
+    border-top: 2px solid #b8c4d8;
+    background: linear-gradient(180deg, #eef2f8 0%, #e4eaf3 100%);
+    z-index: 2;
+}
+.stock-box .mp-stock-grand-total-bar.is-visible {
+    display: block;
+}
+.stock-box .mp-stock-grand-total-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+.stock-box .mp-stock-grand-total-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+    margin: 0;
+    font-size: 12px;
+}
+.stock-box .mp-stock-grand-total-table td {
+    padding: 8px 10px;
+    white-space: nowrap;
+    border-right: 1px solid #e8ecf4;
+    color: var(--gm-navy);
+    background: transparent;
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.stock-box .mp-stock-grand-total-table td[data-col="queue_no"] {
+    font-weight: 700;
+}
+.stock-box .mp-stock-grand-total-table td:last-child {
+    border-right: 0;
+}
+.stock-box .mp-stock-grand-total-table td.num {
+    text-align: right;
 }
 
 .table {
@@ -2218,10 +2317,17 @@ html, body {
     color: #334155;
     font-weight: 700;
     text-align: left;
-    padding: 8px 10px;
+    padding: 8px 10px 8px 10px;
+    padding-right: 18px;
     border-bottom: 1px solid #d8deeb;
     border-right: 1px solid #c8d4e8;
     white-space: nowrap;
+}
+#jwqOrderLinesTable.acr-col-table thead th .acr-th-drag {
+    color: #64748b;
+}
+#jwqOrderLinesTable.acr-col-table thead th .acr-th-drag:hover {
+    color: #c9a962;
 }
 
 .jwq-table th[data-col="tag_no"],
@@ -2247,14 +2353,29 @@ html, body {
 
 .jwq-table td .jwq-cell-input {
     width: 100%;
-    min-width: 56px;
+    min-width: 88px;
+    max-width: 140px;
     border: 1px solid #cfd8e3;
     border-radius: 4px;
-    padding: 3px 6px;
+    padding: 4px 8px;
     font-size: 12px;
     line-height: 1.25;
     background: #fff;
     color: #0f172a;
+    box-sizing: border-box;
+}
+.jwq-table td .jwq-cell-input--decimal {
+    min-width: 96px;
+    max-width: 150px;
+}
+.jwq-table td[data-col="total_wt"],
+.jwq-table td[data-col="metal_wt"],
+.jwq-table td[data-col="diamond_wt"],
+.jwq-table td[data-col="total_purity"],
+.jwq-table td[data-col="total_qty"],
+.jwq-table td[data-col="loss"],
+.jwq-table td[data-col="price"] {
+    min-width: 108px;
 }
 
 .jwq-table td .jwq-cell-input:focus {
@@ -3259,6 +3380,9 @@ html, body {
                                                 <button type="button" class="mp-act-outline mp-order-tracking-btn" title="Order Tracking" aria-label="Order Tracking"
                                                     data-jwo-id="<?php echo (int)$jid; ?>"
                                                 ><i class="feather icon-file-text"></i></button>
+                                                <button type="button" class="mp-act-red mp-job-delete-btn" title="Remove from this department (back to previous)" aria-label="Remove from this department"
+                                                    data-jwo-id="<?php echo (int)$jid; ?>"
+                                                ><i class="feather icon-trash-2"></i></button>
                                                 <button type="button" class="mp-act-blue mp-jwq-open-btn" title="Transfer" aria-label="Transfer"
                                                     data-jwo-id="<?php echo (int)$jid; ?>"
                                                     data-jobwork-queue-no="<?php echo htmlspecialchars($jq_no, ENT_QUOTES, 'UTF-8'); ?>"
@@ -3299,7 +3423,7 @@ html, body {
                                     <i class="feather icon-settings mini-gear"></i>
                                 </button>
                             </div>
-                            <div class="table-wrap">
+                            <div class="table-wrap mp-stock-table-panel">
                                 <div class="columns-panel" id="inwardColumnsPanel">
                                     <div class="columns-panel-header">
                                         <span class="icons"><span class="tag">X</span><span class="tag">P</span><i class="feather icon-settings"></i> Columns</span>
@@ -3317,6 +3441,7 @@ html, body {
                                         <?php endforeach; ?>
                                     </div>
                                 </div>
+                                <div class="mp-stock-table-scroll" data-stock-scroll-for="inwardTable">
                                 <table class="table" id="inwardTable">
                                     <thead>
                                         <tr>
@@ -3327,8 +3452,15 @@ html, body {
                                     </thead>
                                 </table>
                                 <div class="empty-center">No Rows To Show</div>
+                                </div>
                             </div>
-                            <div class="table-footer-bar"><div class="scroll-mock"></div></div>
+                            <div class="mp-stock-grand-total-bar" id="inwardGrandTotalBar" aria-label="Inward stock grand total">
+                                <div class="mp-stock-grand-total-scroll" data-stock-scroll-sync="inwardTable">
+                                    <table class="table mp-stock-grand-total-table" id="inwardGrandTotalTable">
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="stock-box">
@@ -3338,7 +3470,7 @@ html, body {
                                     <i class="feather icon-settings mini-gear"></i>
                                 </button>
                             </div>
-                            <div class="table-wrap">
+                            <div class="table-wrap mp-stock-table-panel">
                                 <div class="columns-panel" id="outwardColumnsPanel">
                                     <div class="columns-panel-header">
                                         <span class="icons"><span class="tag">X</span><span class="tag">P</span><i class="feather icon-settings"></i> Columns</span>
@@ -3356,6 +3488,7 @@ html, body {
                                         <?php endforeach; ?>
                                     </div>
                                 </div>
+                                <div class="mp-stock-table-scroll" data-stock-scroll-for="outwardTable">
                                 <table class="table" id="outwardTable">
                                     <thead>
                                         <tr>
@@ -3366,8 +3499,15 @@ html, body {
                                     </thead>
                                 </table>
                                 <div class="empty-center">No Rows To Show</div>
+                                </div>
                             </div>
-                            <div class="table-footer-bar"><div class="scroll-mock"></div></div>
+                            <div class="mp-stock-grand-total-bar" id="outwardGrandTotalBar" aria-label="Outward stock grand total">
+                                <div class="mp-stock-grand-total-scroll" data-stock-scroll-sync="outwardTable">
+                                    <table class="table mp-stock-grand-total-table" id="outwardGrandTotalTable">
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     </div>
@@ -3774,7 +3914,10 @@ window.MP_JCP_SUMMARY_COLUMNS = [
 </script>
 
 <?php include 'footer-script.php'; ?>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="assets/js/auragold-col-reorder.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<?php include 'includes/mp-job-delete-swal.php'; ?>
 <?php include 'includes/mp-manufacturing-print-swal.php'; ?>
 <?php include 'includes/mp-order-tracking-modal.php'; ?>
 <script>
@@ -4350,6 +4493,11 @@ function initColumnManager(config) {
             if (hiddenCols.indexOf(col) >= 0) el.classList.add('col-hidden');
             else el.classList.remove('col-hidden');
         });
+        if (config.tableId === 'inwardTable' || config.tableId === 'outwardTable') {
+            if (typeof mpApplyInwardOutwardStockHidden === 'function') {
+                mpApplyInwardOutwardStockHidden();
+            }
+        }
     }
 
     function readHiddenFromStorage() {
@@ -4529,6 +4677,14 @@ document.addEventListener('DOMContentLoaded', function () {
         panelPosition: 'absolute'
     });
 
+    if (typeof AuragoldColReorder !== 'undefined') {
+        AuragoldColReorder.init('#jwqOrderLinesTable', {
+            storageKey: 'manufacturing_process_jwq_order_lines_column_order',
+            widthsStorageKey: 'manufacturing_process_jwq_order_lines_column_widths',
+            minWidth: 72
+        });
+    }
+
     initColumnManager({
         tableId: 'jwqInwardStockTable',
         panelId: 'jwqInwardStockColumnsPanel',
@@ -4566,7 +4722,12 @@ document.addEventListener('DOMContentLoaded', function () {
         initMpJwqAddImageModal();
     }
     initMpTagSearchFilter();
+    initJwqDecimalInputGuards();
     initJobworkQueueModal();
+    mpInitStockGrandTotalScrollSync();
+    if (typeof mpSyncAllStockGrandTotalWidths === 'function') {
+        window.addEventListener('resize', mpSyncAllStockGrandTotalWidths);
+    }
     mpJcpPopulateColumnPanelLists();
     initColumnManager({
         tableId: 'mpJcpHistoryTable',
@@ -4590,32 +4751,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var jwqLinesTbody = document.getElementById('jwqOrderLinesBody');
     if (jwqLinesTbody && !jwqLinesTbody._jwqAutoLossBound) {
         jwqLinesTbody._jwqAutoLossBound = true;
-        jwqLinesTbody.addEventListener('input', function (e) {
-            var inp = e.target.closest('.jwq-cell-input[data-field="total_wt"], .jwq-cell-input[data-field="metal_wt"], .jwq-cell-input[data-col-input="total_wt"], .jwq-cell-input[data-col-input="metal_wt"]');
-            if (inp && jwqLinesTbody.contains(inp)) {
-                var tr = inp.closest('tr');
-                var f = inp.getAttribute('data-field') || inp.getAttribute('data-col-input');
-                if (tr && f === 'metal_wt') {
-                    var mv = parseFloat(inp.value);
-                    if (isFinite(mv) && mv >= 0) {
-                        tr.setAttribute('data-base-metal-wt', String(mv));
-                    }
-                }
-                if (tr && typeof jwqMaybeApplyAutoLoss === 'function') {
-                    jwqMaybeApplyAutoLoss(tr);
-                }
-            }
-            var inD = e.target.closest('.jwq-cell-input[data-field="diamond_wt"], .jwq-cell-input[data-col-input="diamond_wt"]');
-            if (inD && jwqLinesTbody.contains(inD)) {
-                var trd = inD.closest('tr');
-                if (trd && typeof jwqRefreshLineDiamondBaseFromUi === 'function') {
-                    jwqRefreshLineDiamondBaseFromUi(trd);
-                }
-                if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
-                    jwqSyncOrderLineDiamondWtFromMaterialTable();
-                }
-            }
-        });
+        jwqLinesTbody.addEventListener('input', jwqHandleOrderLineWeightInput);
+        jwqLinesTbody.addEventListener('change', jwqHandleOrderLineWeightInput);
     }
     if (jwqLinesTbody && !jwqLinesTbody._jwqDiamondMaterialLineBound) {
         jwqLinesTbody._jwqDiamondMaterialLineBound = true;
@@ -5191,8 +5328,15 @@ function mpJcpHistoryCellRaw(row, key, mfgFallback) {
             return row.profit_wt != null ? String(row.profit_wt) : '—';
         case 'gold_wt':
             return row.metal_wt != null ? String(row.metal_wt) : '—';
-        case 'diamond_wt':
-            return row.diamond_wt != null ? String(row.diamond_wt) : '—';
+        case 'diamond_wt': {
+            if (row.diamond_wt != null && String(row.diamond_wt).trim() !== '' && String(row.diamond_wt).trim() !== '—') {
+                return String(row.diamond_wt);
+            }
+            if (row.diamond_weight != null && String(row.diamond_weight).trim() !== '' && String(row.diamond_weight).trim() !== '—') {
+                return String(row.diamond_weight);
+            }
+            return '—';
+        }
         case 'spent_time': {
             var ms = row.manufacturing_seconds != null ? parseInt(row.manufacturing_seconds, 10) : 0;
             if (!isFinite(ms) || ms < 1) {
@@ -6219,7 +6363,7 @@ function mpSumJobworkLocationTotalsForFilter() {
     return { wt: wt, qty: qty };
 }
 
-/** Inward header: net from log rows, but never below actual jobwork assigned to this dept (deleting a log line must not zero balance). */
+/** Inward header: net inward minus outward from visible log rows (may be negative). */
 function mpUpdateStockBalanceSummaries(inwardRows, outwardRows) {
     function sumRows(rows) {
         var wt = 0;
@@ -6240,12 +6384,209 @@ function mpUpdateStockBalanceSummaries(inwardRows, outwardRows) {
     var so = sumRows(outwardRows);
     var netWt = si.wt - so.wt;
     var netQty = si.qty - so.qty;
-    var jw = mpSumJobworkLocationTotalsForFilter();
-    netWt = Math.max(netWt, jw.wt);
-    netQty = Math.max(netQty, jw.qty);
     var elIn = document.getElementById('mpInwardBalanceSummary');
     if (elIn) {
         elIn.textContent = '(Balance Stock — Wt.: ' + netWt.toFixed(3) + ', Qty.: ' + netQty.toFixed(2) + ')';
+    }
+}
+
+function mpStockGrandTotalNumericKeys() {
+    return ['dust_wastage_wt', 'loss_wt', 'profit_wt', 'total_wt', 'metal_wt', 'diamond_wt', 'purity_wt', 'total_quantity'];
+}
+
+function mpFmtStockGrandTotal(key, sum) {
+    if (key === 'total_quantity') {
+        return sum.toFixed(2);
+    }
+    return sum.toFixed(3);
+}
+
+function mpSumStockRowsForKey(rows, key) {
+    var sum = 0;
+    var any = false;
+    (rows || []).forEach(function (row) {
+        var n = mpParseStockNumeric(row[key]);
+        if (n !== null) {
+            sum += n;
+            any = true;
+        }
+    });
+    return any ? sum : null;
+}
+
+function mpStockGrandTotalBarId(tableId) {
+    if (tableId === 'inwardTable') {
+        return 'inwardGrandTotalBar';
+    }
+    if (tableId === 'outwardTable') {
+        return 'outwardGrandTotalBar';
+    }
+    return '';
+}
+
+function mpStockGrandTotalTableId(tableId) {
+    if (tableId === 'inwardTable') {
+        return 'inwardGrandTotalTable';
+    }
+    if (tableId === 'outwardTable') {
+        return 'outwardGrandTotalTable';
+    }
+    return '';
+}
+
+/** Match fixed footer column widths to the main inward/outward grid. */
+function mpSyncStockGrandTotalColumnWidths(mainTable, gtTable) {
+    if (!mainTable || !gtTable) {
+        return;
+    }
+    var gtRow = gtTable.querySelector('tbody tr.mp-stock-grand-total-row');
+    if (!gtRow) {
+        return;
+    }
+    var widthFrom = null;
+    var tbody = mainTable.querySelector('tbody');
+    if (tbody && tbody.querySelector('tr')) {
+        widthFrom = tbody.querySelector('tr');
+    } else {
+        widthFrom = mainTable.querySelector('thead tr');
+    }
+    if (!widthFrom) {
+        return;
+    }
+    var totalW = 0;
+    var colgroup = gtTable.querySelector('colgroup');
+    if (!colgroup) {
+        colgroup = document.createElement('colgroup');
+        gtTable.insertBefore(colgroup, gtTable.firstChild);
+    }
+    colgroup.innerHTML = '';
+    widthFrom.querySelectorAll('th[data-col], td[data-col]').forEach(function (srcCell) {
+        var col = srcCell.getAttribute('data-col');
+        if (!col) {
+            return;
+        }
+        var td = gtRow.querySelector('td[data-col="' + col + '"]');
+        if (!td) {
+            return;
+        }
+        var hidden = srcCell.classList.contains('col-hidden');
+        if (hidden) {
+            td.classList.add('col-hidden');
+            td.style.width = '';
+            td.style.minWidth = '';
+            td.style.maxWidth = '';
+            return;
+        }
+        td.classList.remove('col-hidden');
+        var w = srcCell.offsetWidth;
+        if (w < 1) {
+            w = srcCell.getBoundingClientRect().width;
+        }
+        w = Math.ceil(w);
+        if (w > 0) {
+            var colEl = document.createElement('col');
+            colEl.setAttribute('data-col', col);
+            colEl.style.width = w + 'px';
+            colgroup.appendChild(colEl);
+            td.style.width = w + 'px';
+            td.style.minWidth = w + 'px';
+            td.style.maxWidth = w + 'px';
+            totalW += w;
+        }
+    });
+    if (totalW > 0) {
+        gtTable.style.width = totalW + 'px';
+        gtTable.style.minWidth = totalW + 'px';
+    } else {
+        gtTable.style.width = '';
+        gtTable.style.minWidth = mainTable.offsetWidth > 0 ? mainTable.offsetWidth + 'px' : '100%';
+    }
+}
+
+function mpSyncAllStockGrandTotalWidths() {
+    requestAnimationFrame(function () {
+        mpSyncStockGrandTotalColumnWidths(
+            document.getElementById('inwardTable'),
+            document.getElementById('inwardGrandTotalTable')
+        );
+        mpSyncStockGrandTotalColumnWidths(
+            document.getElementById('outwardTable'),
+            document.getElementById('outwardGrandTotalTable')
+        );
+    });
+}
+window.mpSyncAllStockGrandTotalWidths = mpSyncAllStockGrandTotalWidths;
+
+function mpInitStockGrandTotalScrollSync() {
+    [
+        ['inwardTable', 'inwardGrandTotalBar'],
+        ['outwardTable', 'outwardGrandTotalBar']
+    ].forEach(function (pair) {
+        var scrollEl = document.querySelector('[data-stock-scroll-for="' + pair[0] + '"]');
+        var bar = document.getElementById(pair[1]);
+        var barScroll = bar ? bar.querySelector('.mp-stock-grand-total-scroll') : null;
+        if (!scrollEl || !barScroll || scrollEl._mpGrandTotalSync) {
+            return;
+        }
+        scrollEl._mpGrandTotalSync = true;
+        scrollEl.addEventListener('scroll', function () {
+            barScroll.scrollLeft = scrollEl.scrollLeft;
+        });
+        barScroll.addEventListener('scroll', function () {
+            scrollEl.scrollLeft = barScroll.scrollLeft;
+        });
+    });
+}
+
+function mpUpdateInwardOutwardStockFooter(table, rows, keys) {
+    if (!table) {
+        return;
+    }
+    var tableId = table.id || '';
+    var bar = document.getElementById(mpStockGrandTotalBarId(tableId));
+    var gtTable = document.getElementById(mpStockGrandTotalTableId(tableId));
+    if (!bar || !gtTable) {
+        return;
+    }
+    var tbody = gtTable.querySelector('tbody');
+    if (!tbody) {
+        tbody = document.createElement('tbody');
+        gtTable.appendChild(tbody);
+    }
+    tbody.innerHTML = '';
+    if (!rows || !rows.length) {
+        bar.classList.remove('is-visible');
+        return;
+    }
+    bar.classList.add('is-visible');
+    var numericKeys = mpStockGrandTotalNumericKeys();
+    var tr = document.createElement('tr');
+    tr.className = 'mp-stock-grand-total-row';
+    (keys || []).forEach(function (k) {
+        var td = document.createElement('td');
+        td.setAttribute('data-col', k);
+        if (k === 'queue_no') {
+            td.innerHTML = '<strong>Grand Total</strong>';
+        } else if (numericKeys.indexOf(k) >= 0) {
+            var sum = mpSumStockRowsForKey(rows, k);
+            if (sum !== null) {
+                td.className = 'num';
+                td.innerHTML = '<strong>' + jwqEsc(mpFmtStockGrandTotal(k, sum)) + '</strong>';
+            } else {
+                td.innerHTML = '<strong>—</strong>';
+            }
+        }
+        tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+    if (typeof mpApplyInwardOutwardStockHidden === 'function') {
+        mpApplyInwardOutwardStockHidden();
+    }
+    if (typeof mpSyncStockGrandTotalColumnWidths === 'function') {
+        mpSyncStockGrandTotalColumnWidths(table, gtTable);
+        requestAnimationFrame(function () {
+            mpSyncStockGrandTotalColumnWidths(table, gtTable);
+        });
     }
 }
 
@@ -6294,6 +6635,7 @@ function mpFillInwardOutwardStockTable(tableId, rows, keys) {
         });
         tbody.appendChild(tr);
     });
+    mpUpdateInwardOutwardStockFooter(table, rows, keys);
     if (empty) {
         empty.style.display = rows.length ? 'none' : '';
     }
@@ -6371,6 +6713,9 @@ function mpRenderManufacturingQueueTablesFromCache() {
     if (typeof mpApplyInwardOutwardStockHidden === 'function') {
         mpApplyInwardOutwardStockHidden();
     }
+    if (typeof mpSyncAllStockGrandTotalWidths === 'function') {
+        mpSyncAllStockGrandTotalWidths();
+    }
 }
 window.mpRenderManufacturingQueueTablesFromCache = mpRenderManufacturingQueueTablesFromCache;
 
@@ -6400,29 +6745,37 @@ function mpReloadManufacturingQueueTable() {
 
 /** Re-apply column visibility on inward/outward after tbody refresh. */
 function mpApplyInwardOutwardStockHidden() {
-    [['inwardTable', 'manufacturing_process_inward_hidden_columns'], ['outwardTable', 'manufacturing_process_outward_hidden_columns']].forEach(function (pair) {
-        var table = document.getElementById(pair[0]);
-        if (!table) {
-            return;
-        }
+    [
+        ['inwardTable', 'inwardGrandTotalTable', 'manufacturing_process_inward_hidden_columns'],
+        ['outwardTable', 'outwardGrandTotalTable', 'manufacturing_process_outward_hidden_columns']
+    ].forEach(function (pair) {
+        var tables = [document.getElementById(pair[0]), document.getElementById(pair[1])];
         var hidden = [];
         try {
-            hidden = JSON.parse(localStorage.getItem(pair[1]) || '[]');
+            hidden = JSON.parse(localStorage.getItem(pair[2]) || '[]');
         } catch (e1) {
             hidden = [];
         }
         if (!Array.isArray(hidden)) {
             hidden = [];
         }
-        table.querySelectorAll('th[data-col], td[data-col]').forEach(function (el) {
-            var col = el.getAttribute('data-col');
-            if (hidden.indexOf(col) >= 0) {
-                el.classList.add('col-hidden');
-            } else {
-                el.classList.remove('col-hidden');
+        tables.forEach(function (table) {
+            if (!table) {
+                return;
             }
+            table.querySelectorAll('th[data-col], td[data-col]').forEach(function (el) {
+                var col = el.getAttribute('data-col');
+                if (hidden.indexOf(col) >= 0) {
+                    el.classList.add('col-hidden');
+                } else {
+                    el.classList.remove('col-hidden');
+                }
+            });
         });
     });
+    if (typeof mpSyncAllStockGrandTotalWidths === 'function') {
+        mpSyncAllStockGrandTotalWidths();
+    }
 }
 window.mpApplyInwardOutwardStockHidden = mpApplyInwardOutwardStockHidden;
 
@@ -6527,7 +6880,282 @@ function jwqKaratSelectHtml(raw) {
     return parts.join('');
 }
 
-/** Transfer modal: prefill weight/qty from job line (last saved / source dept); user may edit before save. data-orig-total-wt is the baseline for auto-loss when weight decreases (from dept with auto_loss); increases are allowed. */
+/**
+ * Fallback when queue_display_total_wt is absent: final_weight if saved, else metal − loss + diamond.
+ */
+function jwqLineQueueDisplayTotalWt(it) {
+    it = it || {};
+    if (it.queue_display_total_wt != null && String(it.queue_display_total_wt).trim() !== '') {
+        var qn0 = parseFloat(String(it.queue_display_total_wt).replace(/,/g, ''));
+        if (isFinite(qn0)) {
+            return qn0;
+        }
+    }
+    var f = parseFloat(it.final_weight);
+    if (isFinite(f) && f > 0.0000001) {
+        return f;
+    }
+    var n = parseFloat(it.net_weight);
+    var g = parseFloat(it.gross_weight);
+    var lo = typeof jwqLineServerLossGrams === 'function' ? jwqLineServerLossGrams(it) : 0;
+    if (!isFinite(lo) || lo < 0) {
+        lo = 0;
+    }
+    var d = NaN;
+    if (it.diamond_wt != null && it.diamond_wt !== '') {
+        d = parseFloat(String(it.diamond_wt).replace(/,/g, ''));
+    } else if (it.diamond_weight != null && it.diamond_weight !== '') {
+        d = parseFloat(String(it.diamond_weight).replace(/,/g, ''));
+    }
+    if (!isFinite(d) || d < 0) {
+        d = 0;
+    }
+    var metal = 0;
+    if (isFinite(n) && n > 0.0000001) {
+        metal = n;
+    } else if (isFinite(g) && g > 0.0000001) {
+        metal = g;
+    }
+    return Math.max(0, metal - lo + d);
+}
+
+/** metal_wt − loss + diamond_wt (same as PHP fallback when final_weight is not authoritative). */
+function jwqComputedTotalMetalLossDiamondFromItem(it) {
+    it = it || {};
+    var n = parseFloat(it.net_weight);
+    var g = parseFloat(it.gross_weight);
+    var lo = typeof jwqLineServerLossGrams === 'function' ? jwqLineServerLossGrams(it) : 0;
+    if (!isFinite(lo) || lo < 0) {
+        lo = 0;
+    }
+    var d = NaN;
+    if (it.diamond_wt != null && it.diamond_wt !== '') {
+        d = parseFloat(String(it.diamond_wt).replace(/,/g, ''));
+    } else if (it.diamond_weight != null && it.diamond_weight !== '') {
+        d = parseFloat(String(it.diamond_weight).replace(/,/g, ''));
+    }
+    if (!isFinite(d) || d < 0) {
+        d = 0;
+    }
+    var metal = 0;
+    if (isFinite(n) && n > 0.0000001) {
+        metal = n;
+    } else if (isFinite(g) && g > 0.0000001) {
+        metal = g;
+    }
+    return Math.max(0, metal - lo + d);
+}
+
+/** Saved final_weight differs from metal−loss+diamond ⇒ user locked display total (e.g. 8 vs 9). */
+function jwqItemTotalManuallyLockedFromServer(it) {
+    it = it || {};
+    var f = parseFloat(it.final_weight);
+    if (!isFinite(f) || f <= 0.0000001) {
+        return false;
+    }
+    var comp = jwqComputedTotalMetalLossDiamondFromItem(it);
+    if (!isFinite(comp)) {
+        return false;
+    }
+    return Math.abs(f - comp) > 0.05;
+}
+
+/** Guard: programmatic weight updates must not re-enter live handlers. */
+window.__jwqIsRecalculatingWeight = false;
+
+/**
+ * Live line weights — always: Total = Metal − Loss + Diamond.
+ * - Edit total → Metal = Total − Diamond; Loss reconciled (≥ 0)
+ * - Edit metal / loss / diamond → Total = Metal − Loss + Diamond
+ */
+function jwqLineFormulaTotal(mw, lw, dw) {
+    if (!isFinite(mw) || mw < 0) {
+        mw = 0;
+    }
+    if (!isFinite(lw) || lw < 0) {
+        lw = 0;
+    }
+    if (!isFinite(dw) || dw < 0) {
+        dw = 0;
+    }
+    var t = mw - lw + dw;
+    return isFinite(t) && t >= 0 ? t : 0;
+}
+
+function jwqLineStoredTotalMismatch(tr, dwOptional) {
+    var tw = jwqLineFieldNum(tr, 'total_wt');
+    var mw = jwqLineFieldNum(tr, 'metal_wt');
+    var lw = jwqLineFieldNum(tr, 'loss');
+    var dw = isFinite(dwOptional) ? dwOptional : jwqLineFieldNum(tr, 'diamond_wt');
+    if (!isFinite(lw) || lw < 0) {
+        lw = 0;
+    }
+    if (!isFinite(mw) || mw < 0) {
+        mw = 0;
+    }
+    if (!isFinite(dw) || dw < 0) {
+        dw = 0;
+    }
+    var expected = jwqLineFormulaTotal(mw, lw, dw);
+    return !isFinite(tw) || Math.abs(tw - expected) > 0.05;
+}
+
+function jwqItemFormulaTotalWt(it) {
+    it = it || {};
+    var mw = jwqLineOrigMetalWt(it);
+    var lo = typeof jwqLineServerLossGrams === 'function' ? jwqLineServerLossGrams(it) : 0;
+    if (!isFinite(lo) || lo < 0) {
+        lo = 0;
+    }
+    var dw = NaN;
+    if (it.diamond_wt != null && it.diamond_wt !== '') {
+        dw = parseFloat(String(it.diamond_wt).replace(/,/g, ''));
+    }
+    if (!isFinite(dw) || dw <= 0) {
+        dw = parseFloat(it.diamond_weight != null ? it.diamond_weight : NaN);
+    }
+    if (!isFinite(dw) || dw < 0) {
+        dw = 0;
+    }
+    return jwqLineFormulaTotal(mw, lo, dw);
+}
+
+function jwqLineLiveRecalcWeights(tr, sourceField) {
+    if (!tr || window.__jwqIsRecalculatingWeight) {
+        return;
+    }
+    if (tr.getAttribute('data-jwq-freeze-weights') === '1' && !jwqLineStoredTotalMismatch(tr)) {
+        return;
+    }
+    var mInp = jwqLineFieldEl(tr, 'metal_wt');
+    var dInp = jwqLineFieldEl(tr, 'diamond_wt');
+    var lInp = jwqLineFieldEl(tr, 'loss');
+    var tInp = jwqLineFieldEl(tr, 'total_wt');
+    if (!mInp || !tInp) {
+        return;
+    }
+    var mw = jwqLineFieldNum(tr, 'metal_wt');
+    var dw = dInp ? jwqLineFieldNum(tr, 'diamond_wt') : 0;
+    var lw = lInp ? jwqLineFieldNum(tr, 'loss') : 0;
+    if (!isFinite(mw) || mw < 0) {
+        mw = 0;
+    }
+    if (!isFinite(dw) || dw < 0) {
+        dw = 0;
+    }
+    if (!isFinite(lw) || lw < 0) {
+        lw = 0;
+    }
+    window.__jwqIsRecalculatingWeight = true;
+    try {
+        if (sourceField === 'total_wt') {
+            var tRead = jwqLineFieldEl(tr, 'total_wt');
+            var twRaw = tRead ? parseFloat(String(tRead.value || '').replace(/,/g, '')) : NaN;
+            if (!isFinite(twRaw)) {
+                return;
+            }
+            var tw = twRaw < 0 ? 0 : twRaw;
+            var newMetal = tw - dw;
+            if (!isFinite(newMetal) || newMetal < 0) {
+                newMetal = 0;
+            }
+            mInp.value = jwqNum3(newMetal);
+            tr.setAttribute('data-base-metal-wt', String(newMetal));
+            if (lInp) {
+                var lossVal = newMetal + dw - tw;
+                if (!isFinite(lossVal) || lossVal < 0) {
+                    lossVal = 0;
+                }
+                lInp.value = jwqNumOptDash3(lossVal);
+            }
+            tr.setAttribute('data-jwq-total-manual', '1');
+        } else {
+            if (sourceField === 'metal_wt') {
+                tr.setAttribute('data-base-metal-wt', String(mw));
+            }
+            var newTotal = mw - lw + dw;
+            if (!isFinite(newTotal) || newTotal < 0) {
+                newTotal = 0;
+            }
+            tInp.value = jwqNum3(newTotal);
+            tr.removeAttribute('data-jwq-total-manual');
+        }
+        var tw2 = jwqLineFieldNum(tr, 'total_wt');
+        var lw2 = lInp ? jwqLineFieldNum(tr, 'loss') : 0;
+        var mw2 = jwqLineFieldNum(tr, 'metal_wt');
+        var dw2 = dInp ? jwqLineFieldNum(tr, 'diamond_wt') : 0;
+        if (!isFinite(lw2) || lw2 < 0) {
+            lw2 = 0;
+        }
+        if (!isFinite(dw2) || dw2 < 0) {
+            dw2 = 0;
+        }
+        if (!isFinite(mw2) || mw2 < 0) {
+            mw2 = 0;
+        }
+        if (isFinite(tw2) && isFinite(mw2) && isFinite(lw2) && isFinite(dw2)) {
+            var expected = mw2 - lw2 + dw2;
+            if (isFinite(expected) && Math.abs(tw2 - expected) < 0.05) {
+                tr.removeAttribute('data-jwq-total-manual');
+            }
+        }
+    } finally {
+        window.__jwqIsRecalculatingWeight = false;
+    }
+}
+window.jwqLineLiveRecalcWeights = jwqLineLiveRecalcWeights;
+
+function jwqHandleOrderLineWeightInput(e) {
+    if (window.__jwqIsRecalculatingWeight) {
+        return;
+    }
+    var tbody = e.currentTarget;
+    if (!tbody) {
+        return;
+    }
+    var inp = e.target.closest(
+        '.jwq-cell-input[data-field="total_wt"], .jwq-cell-input[data-field="metal_wt"], .jwq-cell-input[data-field="loss"], .jwq-cell-input[data-col-input="total_wt"], .jwq-cell-input[data-col-input="metal_wt"], .jwq-cell-input[data-col-input="loss"]'
+    );
+    if (inp && tbody.contains(inp)) {
+        var tr = inp.closest('tr');
+        if (tr) {
+            tr.removeAttribute('data-jwq-freeze-weights');
+        }
+        var f = inp.getAttribute('data-field') || inp.getAttribute('data-col-input');
+        if (tr && typeof jwqLineLiveRecalcWeights === 'function' && f) {
+            jwqLineLiveRecalcWeights(tr, f);
+        }
+        if (tr && f !== 'total_wt' && typeof jwqMaybeApplyAutoLoss === 'function') {
+            jwqMaybeApplyAutoLoss(tr);
+        }
+        return;
+    }
+    var inD = e.target.closest('.jwq-cell-input[data-field="diamond_wt"], .jwq-cell-input[data-col-input="diamond_wt"]');
+    if (inD && tbody.contains(inD)) {
+        var trd = inD.closest('tr');
+        if (trd) {
+            trd.removeAttribute('data-jwq-freeze-weights');
+        }
+        if (trd && typeof jwqRefreshLineDiamondBaseFromUi === 'function') {
+            jwqRefreshLineDiamondBaseFromUi(trd);
+        }
+        if (trd && typeof jwqLineLiveRecalcWeights === 'function') {
+            jwqLineLiveRecalcWeights(trd, 'diamond_wt');
+        }
+        if (trd && typeof jwqMaybeApplyAutoLoss === 'function') {
+            jwqMaybeApplyAutoLoss(trd);
+        }
+    }
+}
+window.jwqHandleOrderLineWeightInput = jwqHandleOrderLineWeightInput;
+
+/** When Total Wt is not manually locked: set total = metal − loss + diamond from current line inputs. */
+function jwqRefreshComputedTotalWt(tr) {
+    jwqLineLiveRecalcWeights(tr, 'metal_wt');
+}
+window.jwqRefreshComputedTotalWt = jwqRefreshComputedTotalWt;
+
+/** Transfer modal: line weights come from tbl_jobwork_order_items (mp-jobwork-order-items.php). data-orig-total-wt is auto-loss baseline (max of metal vs carrying total), not raw final-only. */
 function jwqCellRawByKey(key, it, orderRef) {
     it = it || {};
     switch (key) {
@@ -6539,15 +7167,25 @@ function jwqCellRawByKey(key, it, orderRef) {
             return it.product_name != null ? String(it.product_name) : '';
         case 'order_no':
             return orderRef != null ? String(orderRef) : '';
-        case 'total_wt':
-            if (!window.__jwqPrefillLineWeights) {
-                return '';
+        case 'total_wt': {
+            var formulaTot = jwqItemFormulaTotalWt(it);
+            if (Object.prototype.hasOwnProperty.call(it, 'queue_display_total_wt')) {
+                var qnS = it.queue_display_total_wt != null ? String(it.queue_display_total_wt).replace(/,/g, '') : '';
+                var qnStrict = parseFloat(qnS);
+                if (isFinite(qnStrict)) {
+                    if (formulaTot > qnStrict + 0.0001) {
+                        return jwqNum3(formulaTot);
+                    }
+                    return jwqNum3(qnStrict);
+                }
             }
-            return jwqNum3(jwqLineOrigTotalWt(it));
+            var disp = jwqLineQueueDisplayTotalWt(it);
+            if (formulaTot > disp + 0.0001) {
+                return jwqNum3(formulaTot);
+            }
+            return jwqNum3(disp);
+        }
         case 'metal_wt':
-            if (!window.__jwqPrefillLineWeights) {
-                return '';
-            }
             return jwqNum3(jwqLineOrigMetalWt(it));
         case 'diamond_wt': {
             var dStored = NaN;
@@ -6584,8 +7222,34 @@ function jwqCellRawByKey(key, it, orderRef) {
                 return jwqNum3(it.wastage_wt);
             }
             return jwqNum3(0);
-        case 'loss':
-            return jwqNumOptDash3(it.loss_wt != null ? it.loss_wt : it.gold_loss_1);
+        case 'loss': {
+            if (Object.prototype.hasOwnProperty.call(it, 'queue_display_loss_wt')) {
+                var qlossS = it.queue_display_loss_wt != null ? String(it.queue_display_loss_wt).replace(/,/g, '') : '';
+                var qxStrict = parseFloat(qlossS);
+                if (isFinite(qxStrict) && qxStrict >= 0) {
+                    return jwqNumOptDash3(qxStrict);
+                }
+            }
+            var gRaw = it.gold_loss_1;
+            var lRaw = it.loss_wt;
+            var g = NaN;
+            if (gRaw !== null && gRaw !== undefined && String(gRaw).trim() !== '') {
+                g = parseFloat(String(gRaw).replace(/,/g, ''));
+            }
+            if (isFinite(g) && Math.abs(g) > 0.00001) {
+                return jwqNumOptDash3(g);
+            }
+            if (lRaw !== null && lRaw !== undefined && String(lRaw).trim() !== '') {
+                var l = parseFloat(String(lRaw).replace(/,/g, ''));
+                if (isFinite(l)) {
+                    return jwqNumOptDash3(l);
+                }
+            }
+            if (isFinite(g)) {
+                return jwqNumOptDash3(g);
+            }
+            return jwqNumOptDash3(0);
+        }
         case 'profit':
             return jwqNumOptDash2(it.profit != null ? it.profit : it.net_amount);
         case 'expected_wt':
@@ -6607,11 +7271,92 @@ function jwqCellRawByKey(key, it, orderRef) {
     }
 }
 
-function jwqInputTypeByCol(key) {
-    var numeric3 = ['total_wt', 'metal_wt', 'diamond_wt', 'total_purity', 'total_qty', 'dust_wastage_wt', 'loss', 'expected_wt', 'requested_wt', 'requested_purity', 'alloy_wt', 'damage_qty', 'damage_wt'];
-    var numeric2 = ['price', 'profit'];
-    if (numeric3.indexOf(key) >= 0 || numeric2.indexOf(key) >= 0) return 'number';
-    return 'text';
+function jwqIsNumericCol(key) {
+    var numeric = ['total_wt', 'metal_wt', 'diamond_wt', 'total_purity', 'total_qty', 'dust_wastage_wt', 'loss', 'expected_wt', 'requested_wt', 'requested_purity', 'alloy_wt', 'damage_qty', 'damage_wt', 'price', 'profit'];
+    return numeric.indexOf(key) >= 0;
+}
+
+function jwqSanitizeDecimalInputValue(raw) {
+    if (raw == null) {
+        return '';
+    }
+    var s = String(raw).replace(/,/g, '');
+    if (s === '') {
+        return '';
+    }
+    var out = '';
+    var dot = false;
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charAt(i);
+        if (c >= '0' && c <= '9') {
+            out += c;
+        } else if (c === '.' && !dot) {
+            dot = true;
+            out += c;
+        }
+    }
+    return out;
+}
+
+function jwqDecimalInputGuardKeydown(e) {
+    var inp = e.target;
+    if (!inp || !inp.classList || !inp.classList.contains('jwq-cell-input--decimal')) {
+        return;
+    }
+    var k = e.key;
+    if (!k || k.length !== 1) {
+        return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+    }
+    if (k >= '0' && k <= '9') {
+        return;
+    }
+    if (k === '.' && String(inp.value).indexOf('.') < 0) {
+        return;
+    }
+    e.preventDefault();
+}
+
+function jwqDecimalInputGuardInput(e) {
+    var inp = e.target;
+    if (!inp || !inp.classList || !inp.classList.contains('jwq-cell-input--decimal')) {
+        return;
+    }
+    var clean = jwqSanitizeDecimalInputValue(inp.value);
+    if (clean !== inp.value) {
+        inp.value = clean;
+    }
+}
+
+function jwqDecimalInputGuardPaste(e) {
+    var inp = e.target;
+    if (!inp || !inp.classList || !inp.classList.contains('jwq-cell-input--decimal')) {
+        return;
+    }
+    e.preventDefault();
+    var clip = (e.clipboardData || window.clipboardData).getData('text');
+    var clean = jwqSanitizeDecimalInputValue(clip);
+    if (clean === '') {
+        return;
+    }
+    var start = typeof inp.selectionStart === 'number' ? inp.selectionStart : inp.value.length;
+    var end = typeof inp.selectionEnd === 'number' ? inp.selectionEnd : start;
+    var merged = jwqSanitizeDecimalInputValue(String(inp.value).slice(0, start) + clean + String(inp.value).slice(end));
+    inp.value = merged;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function initJwqDecimalInputGuards() {
+    var root = document.getElementById('jwqModalOverlay');
+    if (!root || root._jwqDecimalGuardBound) {
+        return;
+    }
+    root._jwqDecimalGuardBound = true;
+    root.addEventListener('keydown', jwqDecimalInputGuardKeydown);
+    root.addEventListener('input', jwqDecimalInputGuardInput);
+    root.addEventListener('paste', jwqDecimalInputGuardPaste);
 }
 
 function jwqCellByKey(key, it, orderRef) {
@@ -6625,12 +7370,13 @@ function jwqCellByKey(key, it, orderRef) {
     if (key === 'karat') {
         return jwqKaratSelectHtml(raw);
     }
-    var type = jwqInputTypeByCol(key);
-    var step = 'any';
-    if (type === 'number') {
-        step = (key === 'price' || key === 'profit') ? '0.01' : '0.001';
+    var cls = 'jwq-cell-input';
+    var attrs = ' type="text"';
+    if (jwqIsNumericCol(key)) {
+        cls += ' jwq-cell-input--decimal';
+        attrs += ' inputmode="decimal" autocomplete="off"';
     }
-    return '<input class="jwq-cell-input" data-col-input="' + jwqEsc(key) + '" data-field="' + jwqEsc(key) + '" type="' + type + '" value="' + jwqInputEsc(raw) + '"' + (type === 'number' ? ' step="' + step + '"' : '') + '>';
+    return '<input class="' + cls + '" data-col-input="' + jwqEsc(key) + '" data-field="' + jwqEsc(key) + '"' + attrs + ' value="' + jwqInputEsc(raw) + '">';
 }
 
 function jwqLineOrigTotalWt(it) {
@@ -6660,6 +7406,25 @@ function jwqLineOrigMetalWt(it) {
     return jwqLineOrigTotalWt(it);
 }
 
+/**
+ * Baseline weight for auto-loss (orig − current total): use max(metal, carrying total) so orig is not stuck at final (8)
+ * while metal is 10 — otherwise auto-loss zeroes the Loss field before diamond sync recomputes total wrong.
+ */
+function jwqLineAutoLossBaselineWt(it) {
+    var m = jwqLineOrigMetalWt(it);
+    var t = jwqLineOrigTotalWt(it);
+    if (isFinite(m) && isFinite(t)) {
+        return Math.max(m, t);
+    }
+    if (isFinite(m) && m > 0) {
+        return m;
+    }
+    if (isFinite(t) && t > 0) {
+        return t;
+    }
+    return 0;
+}
+
 function jwqOrderDiamondPoolWtFromItem(it) {
     it = it || {};
     var dStored = NaN;
@@ -6679,6 +7444,70 @@ function jwqOrderDiamondPoolWtFromItem(it) {
     }
     return 0;
 }
+
+/** Grams saved on the jobwork line for loss (non-zero gold_loss_1 else loss_wt) — matches line_saved_loss_wt SQL. */
+function jwqLineServerLossGrams(it) {
+    it = it || {};
+    if (it.queue_display_loss_wt != null && String(it.queue_display_loss_wt).trim() !== '') {
+        var qx = parseFloat(String(it.queue_display_loss_wt).replace(/,/g, ''));
+        if (isFinite(qx) && qx > 0.00001) {
+            return qx;
+        }
+    }
+    var gRaw = it.gold_loss_1;
+    var lRaw = it.loss_wt;
+    var g = NaN;
+    if (gRaw !== null && gRaw !== undefined && String(gRaw).trim() !== '') {
+        g = parseFloat(String(gRaw).replace(/,/g, ''));
+    }
+    if (isFinite(g) && Math.abs(g) > 0.00001) {
+        return g;
+    }
+    if (lRaw !== null && lRaw !== undefined && String(lRaw).trim() !== '') {
+        var l = parseFloat(String(lRaw).replace(/,/g, ''));
+        if (isFinite(l)) {
+            return l;
+        }
+    }
+    return isFinite(g) ? g : 0;
+}
+
+/** If Loss input is still zero after load, restore server loss or infer metal + diamond − total (before diamond sync). */
+function jwqReconcileLineLossFromWeights() {
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    if (!tbody) {
+        return;
+    }
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        var lossEl = jwqLineFieldEl(tr, 'loss');
+        if (!lossEl) {
+            return;
+        }
+        var cur = jwqLineFieldNum(tr, 'loss');
+        if (isFinite(cur) && cur > 0.00001) {
+            return;
+        }
+        var saved = parseFloat(String(tr.getAttribute('data-jwq-saved-loss-grams') || '').replace(/,/g, ''));
+        if (isFinite(saved) && saved > 0.00001) {
+            lossEl.value = jwqNumOptDash3(saved);
+            return;
+        }
+        var mw = jwqLineFieldNum(tr, 'metal_wt');
+        var tw = jwqLineFieldNum(tr, 'total_wt');
+        var dw = jwqLineFieldNum(tr, 'diamond_wt');
+        if (!isFinite(dw) || dw < 0) {
+            dw = 0;
+        }
+        if (!isFinite(mw) || !isFinite(tw)) {
+            return;
+        }
+        var implied = mw + dw - tw;
+        if (implied > 0.00001 && implied < 500000) {
+            lossEl.value = jwqNumOptDash3(implied);
+        }
+    });
+}
+window.jwqReconcileLineLossFromWeights = jwqReconcileLineLossFromWeights;
 
 function jwqDeptHasAutoLoss(deptId) {
     var id = parseInt(deptId, 10) || 0;
@@ -6700,9 +7529,20 @@ function jwqMaybeApplyAutoLoss(tr) {
     if (!tr || !tr.getAttribute('data-item-id')) {
         return;
     }
+    if (tr.getAttribute('data-jwq-total-manual') === '1') {
+        return;
+    }
+    if (tr.getAttribute('data-jwq-freeze-weights') === '1') {
+        return;
+    }
     var fromDept = document.getElementById('jwqFromDept');
     var fd = fromDept ? parseInt(fromDept.value || '0', 10) : 0;
     if (!jwqDeptHasAutoLoss(fd)) {
+        return;
+    }
+    /* Do not overwrite process loss loaded from DB / queue_display (orig−total conflates diamond with loss). */
+    var savedLossGrams = parseFloat(String(tr.getAttribute('data-jwq-saved-loss-grams') || '').replace(/,/g, ''));
+    if (isFinite(savedLossGrams) && savedLossGrams > 0.00001) {
         return;
     }
     var orig = parseFloat(tr.getAttribute('data-orig-total-wt') || '0');
@@ -7155,28 +7995,93 @@ function jwqSyncOrderLineDiamondWtFromMaterialTable() {
         if (onJobDiamond > dWt + 0.0001 && onJobDiamond > lineGap + 0.0001) {
             dWt = onJobDiamond;
         }
+        var prevDWt = jwqLineFieldNum(tr, 'diamond_wt');
+        if (!isFinite(prevDWt) || prevDWt < 0) {
+            prevDWt = 0;
+        }
         dInp.value = jwqNum3(dWt);
+        var diamondChanged = Math.abs(prevDWt - dWt) > 0.0001;
+
+        var mismatch = jwqLineStoredTotalMismatch(tr, dWt);
+        if (tr.getAttribute('data-jwq-freeze-weights') === '1' && !mismatch && !diamondChanged) {
+            return;
+        }
+        if (tr.getAttribute('data-jwq-total-manual') === '1' && !diamondChanged && !mismatch) {
+            return;
+        }
 
         if (tInp && mInp) {
-            /* Rule: added diamonds increase diamond_wt and total_wt only; metal_wt stays as entered. */
-            var baseMetal = parseFloat(tr.getAttribute('data-base-metal-wt') || '');
-            if (!isFinite(baseMetal) || baseMetal < 0) {
-                baseMetal = parseFloat(mInp.value);
+            /* Total = Metal − Loss + Diamond (refresh when diamonds added from material grid). */
+            window.__jwqIsRecalculatingWeight = true;
+            try {
+                var baseMetal = jwqLineFieldNum(tr, 'metal_wt');
+                if (!isFinite(baseMetal) || baseMetal < 0) {
+                    baseMetal = parseFloat(tr.getAttribute('data-base-metal-wt') || '');
+                }
+                if (baseMetal < 0.0000001 && dWt > 0.0000001) {
+                    var origM = parseFloat(tr.getAttribute('data-orig-total-wt') || '');
+                    if (isFinite(origM) && origM > 0.0000001) {
+                        baseMetal = origM;
+                    }
+                }
+                if (!isFinite(baseMetal) || baseMetal < 0) {
+                    baseMetal = 0;
+                }
+                tr.setAttribute('data-base-metal-wt', String(baseMetal));
+                var lossNum = jwqLineFieldNum(tr, 'loss');
+                if (!isFinite(lossNum) || lossNum < 0) {
+                    lossNum = 0;
+                }
+                var newTotal = baseMetal - lossNum + dWt;
+                if (!isFinite(newTotal) || newTotal < 0) {
+                    newTotal = 0;
+                }
+                mInp.value = jwqNum3(baseMetal);
+                tInp.value = jwqNum3(newTotal);
+                tr.removeAttribute('data-jwq-total-manual');
+                tr.removeAttribute('data-jwq-freeze-weights');
+            } finally {
+                window.__jwqIsRecalculatingWeight = false;
             }
-            if (!isFinite(baseMetal) || baseMetal < 0) {
-                baseMetal = 0;
-            }
-            tr.setAttribute('data-base-metal-wt', String(baseMetal));
-            var newTotal = baseMetal + dWt;
-            mInp.value = jwqNum3(baseMetal);
-            tInp.value = jwqNum3(newTotal);
-        }
-        if (typeof jwqMaybeApplyAutoLoss === 'function') {
-            jwqMaybeApplyAutoLoss(tr);
         }
     });
 }
 window.jwqSyncOrderLineDiamondWtFromMaterialTable = jwqSyncOrderLineDiamondWtFromMaterialTable;
+
+function jwqDebugLogQueueLinesBeforeSave() {
+    if (!window.console || typeof console.log !== 'function') {
+        return;
+    }
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    if (!tbody) {
+        return;
+    }
+    tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        var id = parseInt(tr.getAttribute('data-item-id'), 10) || 0;
+        var og = tr.getAttribute('data-jwq-orig-gross');
+        var on = tr.getAttribute('data-jwq-orig-net');
+        var of = tr.getAttribute('data-jwq-orig-final');
+        var mw = jwqLineFieldNum(tr, 'metal_wt');
+        var dw = jwqLineFieldNum(tr, 'diamond_wt');
+        var lw = jwqLineFieldNum(tr, 'loss');
+        var tw = jwqLineFieldNum(tr, 'total_wt');
+        var calc = (isFinite(mw) ? mw : 0) + (isFinite(dw) ? dw : 0) - (isFinite(lw) ? lw : 0);
+        if (!isFinite(calc) || calc < 0) {
+            calc = 0;
+        }
+        console.log('JWQ_SAVE_DEBUG_ROW', {
+            item_id: id,
+            gross_weight: og,
+            net_weight: on,
+            final_weight: of,
+            metal_wt: mw,
+            diamond_wt: dw,
+            loss_wt: lw,
+            total_wt_input: tw,
+            calculated_total_wt: calc
+        });
+    });
+}
 
 function jwqCollectQueueLinePayload() {
     var tbody = document.getElementById('jwqOrderLinesBody');
@@ -7481,17 +8386,41 @@ function jwqBuildLineRowHtml(it, orderRef) {
         iid = parseInt(it.id != null ? it.id : (it.item_id != null ? it.item_id : 0), 10) || 0;
     }
     if (iid > 0) {
-        var ow = jwqLineOrigTotalWt(it);
-        var prefillWts = window.__jwqPrefillLineWeights === true;
+        var owAuto = jwqLineAutoLossBaselineWt(it);
         var poolW = jwqOrderDiamondPoolWtFromItem(it);
+        var slg = typeof jwqLineServerLossGrams === 'function' ? jwqLineServerLossGrams(it) : 0;
         trAttrs =
             ' data-item-id="' +
             iid +
             '"' +
-            (prefillWts && ow > 0 ? ' data-orig-total-wt="' + String(ow) + '"' : '') +
+            (owAuto > 0.0000001 ? ' data-orig-total-wt="' + String(owAuto) + '"' : '') +
+            ' data-jwq-saved-loss-grams="' +
+            String(isFinite(slg) ? slg : 0) +
+            '"' +
             ' data-jwq-order-diamond-wt="' +
             jwqNum3(Math.max(0, isFinite(poolW) ? poolW : 0)) +
-            '"';
+            '"' +
+            (it &&
+            Object.prototype.hasOwnProperty.call(it, 'queue_display_total_wt') &&
+            (function () {
+                var qn = parseFloat(String(it.queue_display_total_wt).replace(/,/g, ''));
+                var fx = jwqItemFormulaTotalWt(it);
+                return isFinite(qn) && isFinite(fx) && Math.abs(qn - fx) < 0.05;
+            })()
+                ? ' data-jwq-freeze-weights="1"'
+                : '') +
+            (it && typeof jwqItemTotalManuallyLockedFromServer === 'function' && jwqItemTotalManuallyLockedFromServer(it)
+                ? ' data-jwq-total-manual="1"'
+                : '') +
+            (it && it.gross_weight != null && String(it.gross_weight).trim() !== ''
+                ? ' data-jwq-orig-gross="' + jwqEsc(String(it.gross_weight)) + '"'
+                : '') +
+            (it && it.net_weight != null && String(it.net_weight).trim() !== ''
+                ? ' data-jwq-orig-net="' + jwqEsc(String(it.net_weight)) + '"'
+                : '') +
+            (it && it.final_weight != null && String(it.final_weight).trim() !== ''
+                ? ' data-jwq-orig-final="' + jwqEsc(String(it.final_weight)) + '"'
+                : '');
     }
     var tds = keys.map(function (k) {
         return '<td data-col="' + k + '">' + jwqCellByKey(k, it, orderRef) + '</td>';
@@ -7510,6 +8439,9 @@ function jwqApplyStoredLineColumnVisibility() {
             if (hidden.indexOf(col) >= 0) el.classList.add('col-hidden');
             else el.classList.remove('col-hidden');
         });
+        if (typeof AuragoldColReorder !== 'undefined' && typeof AuragoldColReorder.refresh === 'function') {
+            AuragoldColReorder.refresh(table);
+        }
     } catch (e) {}
 }
 
@@ -7700,6 +8632,9 @@ function jwqOpenModal(btn, opts) {
                 tbody.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(ph, orderRef));
             }
             jwqApplyStoredLineColumnVisibility();
+            if (typeof jwqReconcileLineLossFromWeights === 'function') {
+                jwqReconcileLineLossFromWeights();
+            }
             jwqRefreshAutoLossAllRows();
             if (typeof window.jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
                 window.jwqSyncOrderLineDiamondWtFromMaterialTable();
@@ -8443,6 +9378,7 @@ function initJobworkQueueModal() {
     var overlay = document.getElementById('jwqModalOverlay');
     if (!grid || !overlay || overlay._jwqBound) return;
     overlay._jwqBound = true;
+    initJwqDecimalInputGuards();
 
     document.addEventListener('click', function (e) {
         var infoBtn = e.target && e.target.closest ? e.target.closest('.jwq-diamond-used-info-btn') : null;
@@ -8561,6 +9497,9 @@ function initJobworkQueueModal() {
             var runSave = function () {
                 if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
                     jwqSyncOrderLineDiamondWtFromMaterialTable();
+                }
+                if (typeof jwqDebugLogQueueLinesBeforeSave === 'function') {
+                    jwqDebugLogQueueLinesBeforeSave();
                 }
                 var lines = typeof jwqCollectQueueLinePayload === 'function' ? jwqCollectQueueLinePayload() : [];
                 fd.append('queue_lines', JSON.stringify(lines));

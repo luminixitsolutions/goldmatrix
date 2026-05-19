@@ -2,6 +2,11 @@
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
+require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+if (is_file(__DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php')) {
+    require_once __DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php';
+}
 
 header('Content-Type: application/json');
 
@@ -114,6 +119,117 @@ function sale_order_group_image_urls_to_db_json($group_image) {
     return json_encode(['primary' => $primary_path, 'images' => $paths]);
 }
 
+if (!function_exists('sale_order_payment_merge_stored_details')) {
+    /** @deprecated Use auragold_payment_merge_stored_details */
+    function sale_order_payment_merge_stored_details(array $payment): array
+    {
+        return auragold_payment_merge_stored_details($payment);
+    }
+}
+
+if (!function_exists('sale_order_metal_exchange_resolve')) {
+    function sale_order_metal_exchange_resolve($conn, array $payment): array
+    {
+        return auragold_metal_exchange_resolve($conn, $payment);
+    }
+}
+
+if (!function_exists('sale_order_prepare_tbl_stock_reference_columns')) {
+    function sale_order_prepare_tbl_stock_reference_columns($conn): bool
+    {
+        return auragold_prepare_tbl_stock_reference_columns($conn);
+    }
+}
+
+if (!function_exists('sale_order_payment_is_metal_exchange_inward')) {
+    function sale_order_payment_is_metal_exchange_inward($conn, array $payment): bool
+    {
+        return auragold_payment_is_metal_exchange_inward($conn, $payment);
+    }
+}
+
+if (!function_exists('sale_order_should_persist_payment_row')) {
+    function sale_order_should_persist_payment_row($conn, array $payment): bool
+    {
+        return auragold_should_persist_payment_row_with_metal_exchange($conn, $payment);
+    }
+}
+
+if (!function_exists('sale_order_metal_amt_from_payments')) {
+  /** Sum metal-exchange value for tbl_sale_orders.metal_amt (matches sale-order.php sidebar). */
+    function sale_order_metal_amt_from_payments($conn, array $payments): float
+    {
+        $total = 0.0;
+        foreach ($payments as $payment) {
+            if (!sale_order_should_persist_payment_row($conn, $payment)) {
+                continue;
+            }
+            $p = auragold_payment_merge_stored_details($payment);
+            if (!auragold_metal_exchange_resolve($conn, $p)['is_me']) {
+                continue;
+            }
+            $amt = (float) ($p['amount'] ?? 0);
+            $prev = (float) ($p['previous_balance_amount'] ?? 0);
+            $cur = isset($p['current_order_amount']) && $p['current_order_amount'] !== ''
+                ? (float) $p['current_order_amount']
+                : ($amt - $prev);
+            if ($cur > 0.00001) {
+                $total += $cur;
+                continue;
+            }
+            $pw = (float) ($p['metal_exchange_purity_wt'] ?? 0);
+            $rt = (float) ($p['metal_exchange_rate'] ?? 0);
+            $qty = (float) ($p['quantity'] ?? 0);
+            $q = $qty > 0 ? $qty : 1.0;
+            if ($pw > 0 && $rt > 0) {
+                $total += $pw * $rt * $q;
+            }
+        }
+
+        return round($total, 2);
+    }
+}
+
+if (!function_exists('sale_order_validate_metal_exchange_for_stock')) {
+    function sale_order_validate_metal_exchange_for_stock($conn, array $payment): void
+    {
+        auragold_validate_metal_exchange_for_stock($conn, $payment);
+    }
+}
+
+if (!function_exists('sale_order_post_metal_exchange_to_stock')) {
+    /**
+     * @param array<int, array{barcode: string, product_name: string}> $created_barcodes_out
+     */
+    function sale_order_post_metal_exchange_to_stock(
+        mysqli $conn,
+        int $order_id,
+        string $order_no_plain,
+        string $order_date_ymd,
+        array $payment,
+        int $branch_id,
+        int $pay_seq,
+        bool $tbl_stock_has_reference,
+        array &$created_barcodes_out
+    ): void {
+        auragold_post_metal_exchange_payment_to_stock(
+            $conn,
+            'sale_order_metal_exchange',
+            $order_id,
+            $order_no_plain,
+            $order_date_ymd,
+            $payment,
+            $branch_id,
+            $pay_seq,
+            $tbl_stock_has_reference,
+            'Sale Order — Metal Exchange',
+            'so_me',
+            'SO-ME-',
+            $created_barcodes_out
+        );
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['status' => 'error', 'message' => 'Invalid Request']);
     exit;
@@ -123,7 +239,8 @@ mysqli_begin_transaction($conn);
 
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
-    
+    $metal_exchange_barcodes_out = [];
+
     // Get order data
     $order_no = esc($_POST['order_no'] ?? '');
     $customer_id = isset($_POST['customer_id']) ? (int)$_POST['customer_id'] : 0;
@@ -233,6 +350,13 @@ try {
     if ($c && mysqli_num_rows($c) > 0) { $has_adjusted_balance_used = true; } if ($c) mysqli_free_result($c);
     
     if ($is_update) {
+        if (function_exists('auragold_sale_order_has_linked_jobwork_order')
+            && auragold_sale_order_has_linked_jobwork_order($conn, $order_id)) {
+            $jwo_tip = function_exists('auragold_sale_order_jobwork_save_blocked_tip')
+                ? auragold_sale_order_jobwork_save_blocked_tip($conn, $order_id)
+                : 'Cannot update: a Job Work Order exists for this sale order. Delete Jobwork Queue records, then the Job Work Order, first.';
+            throw new Exception($jwo_tip);
+        }
         // Update existing order
         $extra_update = "";
         if ($has_payment_comments) $extra_update .= ", payment_comments = '$payment_comments_esc'";
@@ -365,6 +489,7 @@ try {
     if ($is_update && $order_id > 0) {
         $oid_del = (int) $order_id;
         mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=so|oid=" . $oid_del . "|%'");
+        mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=so_me|oid=" . $oid_del . "|%'");
     }
 
     if (!empty($items) && is_array($items)) {
@@ -500,7 +625,7 @@ try {
         }
     }
     
-    // Save payments
+    // Save payments (including metal exchange with zero rupee amount — still persisted + posted to stock)
     $payments = [];
     if (isset($_POST['payments'])) {
         if (is_string($_POST['payments'])) {
@@ -509,24 +634,119 @@ try {
             $payments = $_POST['payments'];
         }
     }
-    
+
+    $sale_order_stock_branch_id = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
+    if ($sale_order_stock_branch_id <= 0) {
+        $sale_order_stock_branch_id = 1;
+    }
+
+    $sop_pd_chk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'payment_details'");
+    $sop_has_payment_details = ($sop_pd_chk && mysqli_num_rows($sop_pd_chk) > 0);
+    if ($sop_pd_chk) {
+        mysqli_free_result($sop_pd_chk);
+    }
+    if (!$sop_has_payment_details) {
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_order_payments ADD COLUMN payment_details TEXT NULL COMMENT 'JSON: scrap modal fields, metal exchange, etc.'");
+        $sop_pd_chk2 = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'payment_details'");
+        $sop_has_payment_details = ($sop_pd_chk2 && mysqli_num_rows($sop_pd_chk2) > 0);
+        if ($sop_pd_chk2) {
+            mysqli_free_result($sop_pd_chk2);
+        }
+    }
+
+    $sop_prev_chk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'previous_balance_amount'");
+    $sop_has_prev_balance_col = ($sop_prev_chk && mysqli_num_rows($sop_prev_chk) > 0);
+    if ($sop_prev_chk) {
+        mysqli_free_result($sop_prev_chk);
+    }
+
+    $sale_order_tbl_stock_has_ref = auragold_metal_exchange_document_init(
+        $conn,
+        $is_update,
+        (int) $order_id,
+        'sale_order_metal_exchange'
+    );
+
     if (!empty($payments) && is_array($payments)) {
-        foreach ($payments as $payment) {
-            $payment_type = esc($payment['payment_type'] ?? '');
-            $deposit_into = esc($payment['deposit_into'] ?? '');
-            $transaction_no = esc($payment['transaction_no'] ?? '');
-            $cheque_date = isset($payment['cheque_date']) && $payment['cheque_date'] ? esc($payment['cheque_date']) : NULL;
-            $purity_carat = esc($payment['purity_carat'] ?? '');
-            $amount = (float)($payment['amount'] ?? 0); // Total amount (current order + previous balance)
-            $previous_balance_amount = (float)($payment['previous_balance_amount'] ?? 0);
-            $current_order_amount = (float)($payment['current_order_amount'] ?? ($amount - $previous_balance_amount));
-            $diamond_category = esc($payment['diamond_category'] ?? '');
-            $quantity = (float)($payment['quantity'] ?? 0);
-            
-            if ($amount > 0) {
-                // Try to insert with previous_balance_amount column (if it exists)
-                $previous_balance_amount = (float)($payment['previous_balance_amount'] ?? 0);
-                
+        foreach ($payments as $pay_seq => $payment) {
+            sale_order_validate_metal_exchange_for_stock($conn, $payment);
+            if (!sale_order_should_persist_payment_row($conn, $payment)) {
+                continue;
+            }
+
+            $payment_merged = sale_order_payment_merge_stored_details($payment);
+            $payment_type_raw = trim((string) ($payment_merged['payment_type'] ?? ''));
+            if ($payment_type_raw === '' && !empty($payment_merged['type'])) {
+                $type_map = [
+                    'cash' => 'Cash',
+                    'bank' => 'Bank',
+                    'cheque' => 'Cheque',
+                    'upi' => 'UPI',
+                    'card' => 'Card',
+                    'metal-exchange' => 'M. Exch.',
+                    'scrap' => 'Scrap',
+                ];
+                $tk = strtolower(trim((string) $payment_merged['type']));
+                $payment_type_raw = $type_map[$tk] ?? ucfirst($tk);
+            }
+            $payment_type = esc($payment_type_raw);
+            $deposit_into = esc($payment_merged['deposit_into'] ?? '');
+            $transaction_no = esc($payment_merged['transaction_no'] ?? '');
+            $cheque_date = isset($payment_merged['cheque_date']) && $payment_merged['cheque_date'] ? esc($payment_merged['cheque_date']) : NULL;
+            $purity_carat = esc($payment_merged['purity_carat'] ?? '');
+            $amount = (float) ($payment_merged['amount'] ?? 0);
+            $previous_balance_amount = (float) ($payment_merged['previous_balance_amount'] ?? 0);
+            $diamond_category = esc($payment_merged['diamond_category'] ?? '');
+            $quantity = (float) ($payment_merged['quantity'] ?? 0);
+
+            $pd_sql_part = 'NULL';
+            if ($sop_has_payment_details) {
+                $pd_wrap = $payment_merged;
+                unset($pd_wrap['id'], $pd_wrap['payment_details']);
+                $pd_sql_part = "'" . mysqli_real_escape_string($conn, json_encode($pd_wrap, JSON_UNESCAPED_UNICODE)) . "'";
+            }
+
+            $payment_sql = '';
+            if ($sop_has_payment_details && $sop_has_prev_balance_col) {
+                $payment_sql = "
+                    INSERT INTO tbl_sale_order_payments (
+                        order_id, payment_type, deposit_into, transaction_no,
+                        cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity, payment_details,
+                        status, created_at
+                    ) VALUES (
+                        $order_id, '$payment_type',
+                        " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                        " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                        " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                        " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                        $amount,
+                        $previous_balance_amount,
+                        " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                        $quantity,
+                        $pd_sql_part,
+                        1, NOW()
+                    )
+                ";
+            } elseif ($sop_has_payment_details) {
+                $payment_sql = "
+                    INSERT INTO tbl_sale_order_payments (
+                        order_id, payment_type, deposit_into, transaction_no,
+                        cheque_date, purity_carat, amount, diamond_category, quantity, payment_details,
+                        status, created_at
+                    ) VALUES (
+                        $order_id, '$payment_type',
+                        " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                        " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                        " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                        " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                        $amount,
+                        " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                        $quantity,
+                        $pd_sql_part,
+                        1, NOW()
+                    )
+                ";
+            } elseif ($sop_has_prev_balance_col) {
                 $payment_sql = "
                     INSERT INTO tbl_sale_order_payments (
                         order_id, payment_type, deposit_into, transaction_no,
@@ -545,16 +765,51 @@ try {
                         1, NOW()
                     )
                 ";
-                
-                // If insert fails due to missing column, try without previous_balance_amount
-                if (!mysqli_query($conn, $payment_sql)) {
-                    $error = mysqli_error($conn);
-                    if (strpos($error, 'previous_balance_amount') !== false) {
-                        // Column doesn't exist, insert without it (will need to add column to table)
-                        $payment_sql = "
+            } else {
+                $payment_sql = "
+                    INSERT INTO tbl_sale_order_payments (
+                        order_id, payment_type, deposit_into, transaction_no,
+                        cheque_date, purity_carat, amount, diamond_category, quantity,
+                        status, created_at
+                    ) VALUES (
+                        $order_id, '$payment_type',
+                        " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                        " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                        " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                        " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                        $amount,
+                        " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                        $quantity,
+                        1, NOW()
+                    )
+                ";
+            }
+
+            if (!mysqli_query($conn, $payment_sql)) {
+                $error = mysqli_error($conn);
+                if ($sop_has_prev_balance_col && strpos($error, 'previous_balance_amount') !== false) {
+                    $payment_sql_fallback = "
+                        INSERT INTO tbl_sale_order_payments (
+                            order_id, payment_type, deposit_into, transaction_no,
+                            cheque_date, purity_carat, amount, diamond_category, quantity,
+                            status, created_at
+                        ) VALUES (
+                            $order_id, '$payment_type',
+                            " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                            " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                            " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                            " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                            $amount,
+                            " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                            $quantity,
+                            1, NOW()
+                        )
+                    ";
+                    if ($sop_has_payment_details) {
+                        $payment_sql_fallback = "
                             INSERT INTO tbl_sale_order_payments (
                                 order_id, payment_type, deposit_into, transaction_no,
-                                cheque_date, purity_carat, amount, diamond_category, quantity,
+                                cheque_date, purity_carat, amount, diamond_category, quantity, payment_details,
                                 status, created_at
                             ) VALUES (
                                 $order_id, '$payment_type',
@@ -565,17 +820,36 @@ try {
                                 $amount,
                                 " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
                                 $quantity,
+                                $pd_sql_part,
                                 1, NOW()
                             )
                         ";
-                        if (!mysqli_query($conn, $payment_sql)) {
-                            throw new Exception("Payment insert failed: " . mysqli_error($conn));
-                        }
-                    } else {
-                        throw new Exception("Payment insert failed: " . $error);
                     }
+                    if (!mysqli_query($conn, $payment_sql_fallback)) {
+                        throw new Exception('Payment insert failed: ' . mysqli_error($conn));
+                    }
+                } else {
+                    throw new Exception('Payment insert failed: ' . $error);
                 }
             }
+
+            sale_order_post_metal_exchange_to_stock(
+                $conn,
+                (int) $order_id,
+                $order_no,
+                $order_date,
+                $payment_merged,
+                $sale_order_stock_branch_id,
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $sale_order_tbl_stock_has_ref,
+                $metal_exchange_barcodes_out
+            );
+        }
+
+        $computed_metal_amt = sale_order_metal_amt_from_payments($conn, $payments);
+        if ($computed_metal_amt > 0) {
+            $metal_amt = max($metal_amt, $computed_metal_amt);
+            mysqli_query($conn, 'UPDATE tbl_sale_orders SET metal_amt = ' . (float) $metal_amt . ' WHERE id = ' . (int) $order_id);
         }
     }
     
@@ -942,7 +1216,90 @@ try {
     }
     // ================== END CUSTOMER LEDGER UPDATE ==================
     }
-    
+
+    // Diamond stock: lines queued on client before first Save — apply in same transaction as order save
+    $pending_diamond_raw = $_POST['pending_diamond_allocations'] ?? '[]';
+    if (is_string($pending_diamond_raw)) {
+        $pending_diamond_in = json_decode($pending_diamond_raw, true);
+    } elseif (is_array($pending_diamond_raw)) {
+        $pending_diamond_in = $pending_diamond_raw;
+    } else {
+        $pending_diamond_in = [];
+    }
+    if (!is_array($pending_diamond_in)) {
+        $pending_diamond_in = [];
+    }
+    $diamond_lines = [];
+    foreach ($pending_diamond_in as $ln) {
+        if (!is_array($ln)) {
+            continue;
+        }
+        $sid = (int) ($ln['stock_id'] ?? 0);
+        $qty = isset($ln['allocate_qty']) ? (float) $ln['allocate_qty'] : (isset($ln['qty']) ? (float) $ln['qty'] : 0);
+        $wt = isset($ln['allocate_weight']) ? (float) $ln['allocate_weight'] : (isset($ln['weight']) ? (float) $ln['weight'] : 0);
+        if ($sid < 1 || ($qty <= 0 && $wt <= 0)) {
+            continue;
+        }
+        $diamond_lines[] = [
+            'stock_id' => $sid,
+            'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
+            'qty' => $qty,
+            'weight' => $wt,
+            'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
+            'diamond_category' => isset($ln['diamond_category']) ? trim((string) $ln['diamond_category']) : '',
+        ];
+    }
+    if ($diamond_lines !== [] && (int) $order_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_sale_order_diamond_stock.php';
+        $d_tx_ok = true;
+        $d_tx_err = '';
+        auragold_sale_order_apply_diamond_allocations($conn, (int) $order_id, $diamond_lines, $order_no, $order_date, $d_tx_ok, $d_tx_err);
+        if (!$d_tx_ok) {
+            throw new Exception($d_tx_err !== '' ? $d_tx_err : 'Diamond stock allocation failed.');
+        }
+    }
+
+    $pending_stone_raw = $_POST['pending_stone_allocations'] ?? '[]';
+    if (is_string($pending_stone_raw)) {
+        $pending_stone_in = json_decode($pending_stone_raw, true);
+    } elseif (is_array($pending_stone_raw)) {
+        $pending_stone_in = $pending_stone_raw;
+    } else {
+        $pending_stone_in = [];
+    }
+    if (!is_array($pending_stone_in)) {
+        $pending_stone_in = [];
+    }
+    $stone_lines = [];
+    foreach ($pending_stone_in as $ln) {
+        if (!is_array($ln)) {
+            continue;
+        }
+        $sid = (int) ($ln['stock_id'] ?? 0);
+        $qty = isset($ln['allocate_qty']) ? (float) $ln['allocate_qty'] : (isset($ln['qty']) ? (float) $ln['qty'] : 0);
+        $wt = isset($ln['allocate_weight']) ? (float) $ln['allocate_weight'] : (isset($ln['weight']) ? (float) $ln['weight'] : 0);
+        if ($sid < 1 || ($qty <= 0 && $wt <= 0)) {
+            continue;
+        }
+        $stone_lines[] = [
+            'stock_id' => $sid,
+            'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
+            'qty' => $qty,
+            'weight' => $wt,
+            'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
+            'stone_category' => isset($ln['stone_category']) ? trim((string) $ln['stone_category']) : '',
+        ];
+    }
+    if ($stone_lines !== [] && (int) $order_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_sale_order_stone_stock.php';
+        $s_tx_ok = true;
+        $s_tx_err = '';
+        auragold_sale_order_apply_stone_allocations($conn, (int) $order_id, $stone_lines, $order_no, $order_date, $s_tx_ok, $s_tx_err);
+        if (!$s_tx_ok) {
+            throw new Exception($s_tx_err !== '' ? $s_tx_err : 'Stone stock allocation failed.');
+        }
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -960,7 +1317,8 @@ try {
         'status' => 'success',
         'message' => 'Order saved successfully',
         'order_id' => $order_id,
-        'order_no' => $order_no
+        'order_no' => $order_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
     
 } catch (Exception $e) {

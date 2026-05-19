@@ -84,6 +84,9 @@ $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
 
+$auragold_voucher_ds_kind = 'purchase_return';
+$auragold_voucher_ds_db_id = (int) ($edit_order_id ?? 0);
+
 if (!empty($edit_order_id)) {
     $edit_order = getRecord("SELECT * FROM tbl_purchase_returns WHERE id = " . intval($edit_order_id));
     if ($edit_order) {
@@ -924,6 +927,7 @@ text-transform: uppercase;
         transform: translateY(-1px);
         box-shadow: 0 4px 10px rgba(33, 150, 243, 0.4);
     }
+    @media (min-width: 992px) {
     .company-header {
         display: flex;
         justify-content: space-between;
@@ -931,6 +935,7 @@ text-transform: uppercase;
         padding: 4px;
         background-color: #F8F6F1;
         border-radius: 0;
+    }
     }
     .company-info {
         display: flex;
@@ -2577,6 +2582,158 @@ text-transform: uppercase;
         box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
         outline: none;
     }
+
+    /* —— Purchase Return: mobile / tablet (≤991.98px) —— */
+    @media (max-width: 991.98px) {
+        html {
+            height: auto;
+            min-height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        body {
+            height: auto;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        .layout-wrapper {
+            height: auto;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            overflow-y: visible;
+        }
+        .layout-content {
+            height: auto !important;
+            min-height: 0;
+            overflow-x: hidden;
+            overflow-y: visible !important;
+            padding-bottom: 88px !important;
+        }
+
+        .invoice-content-row.row {
+            margin-left: 0;
+            margin-right: 0;
+        }
+        .invoice-content-row > .col-lg-8,
+        .invoice-content-row > .col-lg-4 {
+            min-width: 0 !important;
+            max-width: 100%;
+            flex: 0 0 100%;
+        }
+        .invoice-content-row .card {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+        }
+
+        .summary-panel {
+            position: relative;
+            top: auto;
+            margin-top: 0.75rem;
+        }
+        .summary-panel .invoice-header[style*="margin"] {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            margin-top: 0 !important;
+            flex-wrap: wrap;
+            row-gap: 0.5rem;
+        }
+        .summary-panel .summary-label {
+            white-space: normal;
+            max-width: 58%;
+            line-height: 1.3;
+        }
+        .summary-row {
+            flex-wrap: wrap;
+            row-gap: 0.25rem;
+        }
+
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] {
+            flex: 0 0 100% !important;
+            max-width: 100% !important;
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group {
+            margin-bottom: 14px !important;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            position: relative;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 14px 10px 10px;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > label:first-of-type {
+            position: absolute;
+            top: 0;
+            left: 10px;
+            transform: translateY(-50%);
+            margin: 0;
+            padding: 0 6px;
+            background: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            color: #11294b;
+            letter-spacing: 0.04em;
+            line-height: 1;
+            max-width: calc(100% - 24px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > .d-flex,
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > div:not(.input-group) {
+            width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .billing-form .auragold-mq-billing-grid .add-customer-icon,
+        .billing-form .auragold-mq-billing-grid .feather.icon-search {
+            top: 50% !important;
+        }
+
+        .payment-icons {
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .invoice-content-row .product-list-table-responsive {
+            min-height: 280px;
+            max-height: min(520px, 58vh);
+        }
+        .product-list-card .table-header-wrapper {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+        }
+        .product-list-card .table-header-wrapper h6 .text-muted {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.68rem !important;
+            line-height: 1.35;
+            font-weight: 500;
+        }
+        .product-list-card .table-settings-btn {
+            align-self: flex-start;
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .invoice-content-row .product-list-table-responsive {
+            min-height: 260px;
+            max-height: min(480px, 56vh);
+        }
+        .invoice-header h5 {
+            font-size: 0.8rem !important;
+        }
+        .invoice-header-actions {
+            flex-wrap: wrap;
+        }
+    }
 </style>
 </head>
 
@@ -2674,7 +2831,7 @@ text-transform: uppercase;
                             <!-- Transaction Details Form -->
                             <div class="card mb-4">
                                 <div class="card-body billing-form">
-                                        <div class="row">
+                                        <div class="row auragold-mq-billing-grid">
                                             <div class="col-md-6">
                                                 <div class="form-group">
                                                     <label>Search Purchase Return</label>
@@ -2875,6 +3032,7 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
                                     
                                     <!-- Comments: add multiple with date/time, edit, delete -->
                                     <div class="mt-3">
@@ -3116,10 +3274,9 @@ text-transform: uppercase;
 </div>
 
 <?php include 'includes/common-modal.php'; ?>
-<link rel="stylesheet" href="assets/css/auragold-payment-cards.css">
-<script src="assets/js/auragold-payment-cards.js"></script>
-
 <?php include 'footer-script.php';?>
+
+<?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
@@ -3224,7 +3381,13 @@ window.PB_PAGE_CONFIG = {
             'discount_percent' => (float)($edit_order['discount_percent'] ?? 0),
             'comment' => $edit_order['comment'] ?? '',
             'payment_comments' => $edit_order['payment_comments'] ?? '[]',
+            'diamond_issues' => [],
+            'stone_issues' => [],
         ];
+        require_once __DIR__ . '/includes/auragold_voucher_diamond_stock.php';
+        require_once __DIR__ . '/includes/auragold_voucher_stone_stock.php';
+        $embed_order['diamond_issues'] = auragold_voucher_list_diamond_issue_rows_for_kind($conn, 'purchase_return', (int) ($edit_order['id'] ?? 0));
+        $embed_order['stone_issues'] = auragold_voucher_list_stone_issue_rows_for_kind($conn, 'purchase_return', (int) ($edit_order['id'] ?? 0));
         $embed_items = is_array($edit_items) ? $edit_items : [];
         $embed_payments = is_array($edit_payments) ? $edit_payments : [];
         // Convert saved image paths (images column) to full URLs for group_image so UI can display them
@@ -9661,6 +9824,9 @@ window.PB_PAGE_CONFIG = {
         orderData.payments = (typeof collectPosPaymentsForSave === 'function')
             ? collectPosPaymentsForSave()
             : [];
+        if (typeof window.auragoldVoucherDiamondStoneAppendPendingToOrderData === 'function') {
+            window.auragoldVoucherDiamondStoneAppendPendingToOrderData(orderData);
+        }
         
         // Show loading
         const saveBtn = document.querySelector('.btn-save-invoice, .btn-purple');
@@ -9673,7 +9839,7 @@ window.PB_PAGE_CONFIG = {
         // Convert arrays to JSON strings for POST
         const postData = {};
         Object.keys(orderData).forEach(key => {
-            if (key === 'items' || key === 'payments') {
+            if (typeof window.auragoldVoucherDiamondStonePostDataShouldStringify === 'function' && window.auragoldVoucherDiamondStonePostDataShouldStringify(key)) {
                 postData[key] = JSON.stringify(orderData[key]);
             } else {
                 postData[key] = orderData[key];
@@ -9697,6 +9863,9 @@ window.PB_PAGE_CONFIG = {
                     }
                     
                     if (response.status === 'success') {
+                        if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                            window.auragoldVoucherDiamondStoneOnSaveSuccess(response.return_id || response.invoice_id || response.order_id);
+                        }
                         const invoiceId = response.return_id || response.invoice_id || response.order_id;
                         if (invoiceId) {
                             // After save: go to create page (not edit) when user closes print modal
@@ -9746,6 +9915,9 @@ window.PB_PAGE_CONFIG = {
                 }
                 
                 if (data.status === 'success') {
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(data.return_id || data.invoice_id || data.order_id);
+                    }
                     const invoiceId = data.return_id || data.invoice_id || data.order_id;
                     if (invoiceId) {
                         // After save: go to create page (not edit) when user closes print modal
@@ -10174,6 +10346,10 @@ window.PB_PAGE_CONFIG = {
     // Populate form with order data (param loadedPayments to avoid shadowing global payments)
     function populateOrderForm(order, items, loadedPayments) {
         console.log('populateOrderForm executing', { orderId: order && order.id, itemsCount: (items && items.length) || 0, paymentsCount: (loadedPayments && loadedPayments.length) || 0 });
+
+        if (typeof window.auragoldVoucherDiamondStonePopulateFromOrder === 'function') {
+            window.auragoldVoucherDiamondStonePopulateFromOrder(order);
+        }
         
         // Update order number
         if (document.getElementById('currentOrderNo')) {
@@ -10620,10 +10796,8 @@ window.PB_PAGE_CONFIG = {
         // Retry: if items/totals still empty after 1.2s, run again
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -10890,7 +11064,7 @@ window.PB_PAGE_CONFIG = {
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }

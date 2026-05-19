@@ -19,5 +19,11 @@ if (!function_exists('auragold_ensure_tbl_metal_dashboard_images')) {
                 "ALTER TABLE `{$t}` ADD COLUMN `dashboard_image_url` VARCHAR(1024) NULL DEFAULT NULL AFTER `dashboard_image_path`"
             );
         }
+        if (!auragold_tbl_has_column($conn, $t, 'show_on_dashboard')) {
+            @mysqli_query(
+                $conn,
+                "ALTER TABLE `{$t}` ADD COLUMN `show_on_dashboard` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Live rates dashboard card + tabs' AFTER `dashboard_image_url`"
+            );
+        }
     }
 }

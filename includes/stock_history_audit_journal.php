@@ -229,7 +229,9 @@ if (!function_exists('auragold_stock_history_audit_user_id')) {
     }
 
     /**
-     * Stock History (ledger) row when a saved line has a barcode. Skips if barcode is blank.
+     * Stock History (ledger) row for a saved document line. Inserts tbl_stock_journal with voucher_type_label.
+     * Resolves blank barcode from tbl_product_characteristics or tbl_stock (same branch / metal / PC when possible)
+     * so Material Issue and similar lines still create ledger rows.
      * Comment: auragold_doc|src={tag}|hid={header}|lid={line}|
      *
      * @param array<string,mixed> $line
@@ -246,6 +248,30 @@ if (!function_exists('auragold_stock_history_audit_user_id')) {
         array $line
     ): int {
         $barcode = trim((string) ($line['barcode'] ?? $line['barcode_no'] ?? ''));
+        $pid_resolve = (int) ($line['product_id'] ?? 0);
+        $pcid_resolve = (int) ($line['product_characteristic_id'] ?? $line['characteristic_id'] ?? 0);
+        if ($barcode === '' && $pcid_resolve > 0 && function_exists('getRecord')) {
+            $bpc = getRecord('SELECT NULLIF(TRIM(barcode), \'\') AS bc FROM tbl_product_characteristics WHERE id = ' . $pcid_resolve . ' AND status = 1 LIMIT 1');
+            if ($bpc && !empty($bpc['bc'])) {
+                $barcode = trim((string) $bpc['bc']);
+            }
+        }
+        if ($barcode === '' && $pid_resolve > 0 && function_exists('getRecord')) {
+            $bst = '\'opening\',\'purchase\',\'stock_journal\',\'balance\',\'sale_return\',\'inward\'';
+            $mid_ln = (int) ($line['metal_id'] ?? 0);
+            $metal_sql = $mid_ln > 0 ? ' AND metal_id = ' . $mid_ln : '';
+            $pc_sql = $pcid_resolve > 0 ? ' AND product_characteristic_id = ' . $pcid_resolve : '';
+            $bs = getRecord('SELECT NULLIF(TRIM(barcode), \'\') AS bc FROM tbl_stock WHERE status = 1 AND product_id = ' . $pid_resolve . ' AND stock_type IN (' . $bst . ')' . $metal_sql . $pc_sql . ' AND NULLIF(TRIM(barcode), \'\') IS NOT NULL ORDER BY id DESC LIMIT 1');
+            if ($bs && !empty($bs['bc'])) {
+                $barcode = trim((string) $bs['bc']);
+            }
+            if ($barcode === '' && ($metal_sql !== '' || $pc_sql !== '')) {
+                $bs2 = getRecord('SELECT NULLIF(TRIM(barcode), \'\') AS bc FROM tbl_stock WHERE status = 1 AND product_id = ' . $pid_resolve . ' AND stock_type IN (' . $bst . ') AND NULLIF(TRIM(barcode), \'\') IS NOT NULL ORDER BY id DESC LIMIT 1');
+                if ($bs2 && !empty($bs2['bc'])) {
+                    $barcode = trim((string) $bs2['bc']);
+                }
+            }
+        }
         if ($barcode === '') {
             return 0;
         }

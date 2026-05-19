@@ -2,6 +2,7 @@
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -46,6 +47,7 @@ try {
     $created_by = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
     $scrap_invoice_numbers = [];
     $scrap_ledger_segments = [];
+    $metal_exchange_barcodes_out = [];
 
     $rv_money_types = ['cash', 'bank', 'cheque', 'upi', 'card'];
     $sum_money_from_items = 0.0;
@@ -196,9 +198,23 @@ try {
         $voucher_id = mysqli_insert_id($conn);
     }
 
+    if (is_array($items)) {
+        foreach ($items as $__rvi) {
+            if (!is_array($__rvi)) {
+                continue;
+            }
+            $__mrg = auragold_payment_merge_stored_details($__rvi);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mrg)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mrg);
+        }
+    }
+    $___rv_me_has_ref = auragold_metal_exchange_document_init($conn, $receipt_voucher_existed, (int) $voucher_id, 'receipt_voucher_metal_exchange');
+
     // Insert receipt items
     if (is_array($items) && count($items) > 0) {
-        foreach ($items as $item) {
+        foreach ($items as $pay_seq => $item) {
             $payment_type = esc($item['payment_type'] ?? '');
             $diamond_category = esc($item['diamond_category'] ?? '');
             $transaction_no = esc($item['transaction_no'] ?? '');
@@ -213,7 +229,13 @@ try {
 
             $amount = isset($item['amount']) ? (float)$item['amount'] : 0.00;
             $previous_balance_amount = isset($item['previous_balance_amount']) ? (float)$item['previous_balance_amount'] : 0.00;
-            
+
+            $__rv_keep_line = auragold_should_persist_payment_row_with_metal_exchange($conn, $item)
+                || strlen(trim((string) ($item['payment_type'] ?? ''))) > 0;
+            if (!$__rv_keep_line) {
+                continue;
+            }
+
             $item_query = "
                 INSERT INTO tbl_receipt_voucher_items (
                     voucher_id, payment_type, diamond_category, transaction_no, deposit_into,
@@ -269,6 +291,24 @@ try {
                 'net_amt_with_tax' => $amount,
                 'category' => trim((string) ($item['diamond_category'] ?? '')),
             ]);
+
+            $rv_plain_no = trim((string) ($_POST['voucher_no'] ?? ''));
+            $rv_me_pm = auragold_payment_merge_stored_details($item);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'receipt_voucher_metal_exchange',
+                (int) $voucher_id,
+                $rv_plain_no,
+                substr(trim((string) $voucher_date), 0, 10),
+                $rv_me_pm,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___rv_me_has_ref,
+                'Receipt Voucher — Metal Exchange',
+                'rv_me',
+                'RV-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
         // Receipt voucher: compute total_amount, total_gold, total_silver from items (add/summation, not deduct)
         $sum_amt = 0.000;
@@ -768,6 +808,11 @@ try {
         @mysqli_query($conn, $up);
     }
 
+    if ((int) $voucher_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'receipt_voucher', (int) $voucher_id, $voucher_no, $voucher_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -785,7 +830,8 @@ try {
         'status' => 'success',
         'message' => 'Receipt voucher saved successfully',
         'voucher_id' => $voucher_id,
-        'voucher_no' => $voucher_no
+        'voucher_no' => $voucher_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
 
 } catch (Exception $e) {

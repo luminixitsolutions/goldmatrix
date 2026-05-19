@@ -52,6 +52,9 @@ $edit_voucher_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $edit_voucher = null;
 $edit_items = [];
 
+$auragold_voucher_ds_kind = 'payment_voucher';
+$auragold_voucher_ds_db_id = (int) ($edit_voucher_id ?? 0);
+
 if ($edit_voucher_id > 0) {
     $edit_voucher = getRecord("SELECT * FROM tbl_payment_vouchers WHERE id = $edit_voucher_id");
     if ($edit_voucher) {
@@ -1068,7 +1071,14 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
                                                     <div class="payment-icon payment-jewelry" title="Scrap Payment" style="cursor: pointer; transition: all 0.3s ease;">
                                                         <img src="icons/scrap.jpeg" alt="Scrap Payment" style="width: 45px; height: 45px;">
                                                     </div>
+                                                    <div class="payment-icon payment-diamond" title="Diamond" style="cursor: pointer; transition: all 0.3s ease;">
+                                                        <img src="icons/diamond.jpeg" alt="Diamond" style="width: 45px; height: 45px;">
+                                                    </div>
+                                                    <div class="payment-icon payment-stone" title="Stone" style="cursor: pointer; transition: all 0.3s ease;">
+                                                        <img src="icons/stone.jpeg" alt="Stone" style="width: 45px; height: 45px;">
+                                                    </div>
                                                 </div>
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
                                                 <div class="table-responsive" style="padding-top: 6px;">
                                                     <table class="table table-bordered table-sm" id="receiptTable" style="margin-bottom: 0; font-size: 0.75rem;">
                                                         <thead>
@@ -1597,6 +1607,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
     <?php include 'includes/customer-ledger-modal.php'; ?>
     <!-- Core scripts -->
     <?php include 'footer-script.php';?>
+    <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
     <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
     <script src="assets/libs/sortablejs/sortable.js"></script>
     <script src="js/customer-ledger-address.js"></script>
@@ -3352,6 +3363,10 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
         voucherData.total_gold = totalGold;
         voucherData.total_silver = totalSilver;
 
+        if (typeof window.auragoldVoucherDiamondStoneAppendPendingToOrderData === 'function') {
+            window.auragoldVoucherDiamondStoneAppendPendingToOrderData(voucherData);
+        }
+
         // Validation
         if (!voucherData.customer_name) {
             alert('Please select a customer');
@@ -3365,6 +3380,9 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             dataType: 'json',
             success: function(response) {
                 if (response.status === 'success') {
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(response.voucher_id);
+                    }
                     const vid = response.voucher_id ? parseInt(response.voucher_id, 10) : 0;
                     if (vid > 0 && typeof window.showPrintPaymentVoucherModal === 'function') {
                         window.pendingPaymentVoucherRedirectUrl = buildTransactionReportUrlAfterVoucherSave();
@@ -3393,8 +3411,15 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
     <?php endif; ?>
     // Load edit data if editing (use json_encode so quotes/special chars don't break JS)
     <?php if ($edit_voucher): ?>
+    <?php
+    require_once __DIR__ . '/includes/auragold_voucher_diamond_stock.php';
+    require_once __DIR__ . '/includes/auragold_voucher_stone_stock.php';
+    $pv_edit_di = auragold_voucher_list_diamond_issue_rows_for_kind($conn, 'payment_voucher', (int) ($edit_voucher['id'] ?? 0));
+    $pv_edit_si = auragold_voucher_list_stone_issue_rows_for_kind($conn, 'payment_voucher', (int) ($edit_voucher['id'] ?? 0));
+    ?>
     $(document).ready(function() {
         var editData = <?php echo json_encode([
+            'id' => (int) ($edit_voucher['id'] ?? 0),
             'customer_id' => $edit_voucher['customer_id'] ?? '',
             'customer_name' => $edit_voucher['customer_name'] ?? '',
             'ref_no' => $edit_voucher['ref_no'] ?? '',
@@ -3411,7 +3436,9 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             'previous_silver' => $edit_voucher['previous_silver'] ?? 0,
             'previous_diamond' => $edit_voucher['previous_diamond'] ?? 0,
             'previous_gemstone' => $edit_voucher['previous_gemstone'] ?? 0,
-            'comment' => $edit_voucher['comment'] ?? ''
+            'comment' => $edit_voucher['comment'] ?? '',
+            'diamond_issues' => $pv_edit_di,
+            'stone_issues' => $pv_edit_si,
         ]); ?>;
         $('#customerId').val(editData.customer_id || '');
         $('#customerName').val(editData.customer_name || '');
@@ -3434,6 +3461,10 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             formatVoucherPreviousBalanceMetal(document.getElementById('previousBalanceGemstone'), parseFloat(editData.previous_gemstone) || 0, 3, 'data-original-gemstone');
         }
         $('#comment').val(editData.comment || '');
+
+        if (typeof window.auragoldVoucherDiamondStonePopulateFromOrder === 'function') {
+            window.auragoldVoucherDiamondStonePopulateFromOrder(editData);
+        }
 
         // Load receipt items from JSON (avoids JS break from quotes in item data)
         var editItems = <?php echo json_encode($edit_items); ?>;

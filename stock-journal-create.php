@@ -197,8 +197,15 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
     }
 }
 
-// Add Product / extra grid rows: hide for single-product gold-style opening; keep for Diamond & Stones (multi-line, one barcode group)
-$stock_journal_show_add_product_row = ($edit_item_id <= 0) && (!$product_opening_single_product || $product_opening_is_diamond_or_stones);
+// Add Product / extra grid rows: hide for single-product gold-style opening; keep for Diamond & Stones (multi-line, one barcode group).
+// Purchase-invoice flow uses item_id in the URL — still allow adding rows up to PI line balance (not tied to edit_item_id).
+$stock_journal_show_add_product_row = (!$product_opening_single_product || $product_opening_is_diamond_or_stones);
+
+// Sample Excel + Excel import: product opening with balance context, or purchase-invoice line (same template/import pipeline).
+$sj_excel_sample_import_enabled = ($product_id_param > 0 && $characteristic_id_param > 0) && (
+    ($voucher_type_param === 'product_opening' && !empty($product_opening_item))
+    || ($voucher_type_param === 'purchase_invoice' && $edit_item_id > 0 && !empty($purchase_invoice_item))
+);
 
 // Single variable for the balance block: show for either purchase invoice or product opening
 $stock_detail_item = $purchase_invoice_item ?: $product_opening_item;
@@ -2992,8 +2999,13 @@ text-transform: uppercase;
                                     <div class="d-flex justify-content-between align-items-center mb-2">
                                         <h6 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #1e293b;">Product Selection</h6>
                                         <div class="d-flex align-items-center" style="gap: 0.5rem;">
-                                            <?php if ($voucher_type_param === 'product_opening' && !empty($product_opening_item) && $product_id_param > 0 && $characteristic_id_param > 0): ?>
-                                            <a href="ajax/download-stock-journal-excel-sample.php?voucher=product_opening&amp;product_id=<?php echo (int)$product_id_param; ?>&amp;characteristic_id=<?php echo (int)$characteristic_id_param; ?>" class="btn btn-sm" title="Download template, fill rows, then use Excel import" style="background: #334155; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                            <?php if (!empty($sj_excel_sample_import_enabled)): ?>
+                                            <?php
+                                            $sj_excel_sample_href = ($voucher_type_param === 'purchase_invoice')
+                                                ? 'ajax/download-stock-journal-excel-sample.php?voucher=purchase_invoice&item_id=' . (int) $edit_item_id . '&product_id=' . (int) $product_id_param . '&characteristic_id=' . (int) $characteristic_id_param
+                                                : 'ajax/download-stock-journal-excel-sample.php?voucher=product_opening&product_id=' . (int) $product_id_param . '&characteristic_id=' . (int) $characteristic_id_param;
+                                            ?>
+                                            <a href="<?php echo htmlspecialchars($sj_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm" title="Download template, fill rows, then use Excel import" style="background: #334155; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                                                 <i class="feather icon-download"></i> Sample Excel
                                             </a>
                                             <button type="button" class="btn btn-sm" id="sjExcelImportBtn" title="Upload .xlsx: rows load into the Product List with generated barcodes; stock is updated only when you click Save Stock Journal. Metal Qty and Gross Wt. columns are required per row." style="background: #0f766e; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600;">
@@ -5543,11 +5555,13 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             other_charges: p.other_charges,
             diamond_value: p.diamond_value,
             gemstone_value: p.gemstone_value,
-            barcode: '',
+            barcode: (p.barcode != null && String(p.barcode).trim() !== '') ? String(p.barcode).trim() : '',
+            from_excel: true,
             barcode_prefix: p.barcode_prefix,
             barcode_digits: p.barcode_digits,
             metal_id: p.metal_id,
             metal_name: p.metal_name,
+            voucher_type: (p.voucher_type != null && String(p.voucher_type).trim() !== '') ? String(p.voucher_type).trim() : ((typeof window.SJ_DEFAULT_VOUCHER_TYPE === 'string' && window.SJ_DEFAULT_VOUCHER_TYPE) ? window.SJ_DEFAULT_VOUCHER_TYPE : ''),
             carat_id: (p.karat != null && String(p.karat).trim() !== '') ? String(p.karat).trim() : '',
             location_id: (p.location != null && String(p.location).trim() !== '') ? String(p.location).trim() : '',
             excelTempImagePaths: tpaths,
@@ -5572,9 +5586,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             }
             var fd = new FormData();
             fd.append('excel_file', inp.files[0]);
-            fd.append('voucher', 'product_opening');
-            fd.append('product_id', <?php echo (int)($product_id_param ?? 0); ?>);
-            fd.append('characteristic_id', <?php echo (int)($characteristic_id_param ?? 0); ?>);
+            fd.append('voucher', <?php echo json_encode(($voucher_type_param === 'purchase_invoice' && $edit_item_id > 0 && !empty($purchase_invoice_item)) ? 'purchase_invoice' : 'product_opening', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>);
+            fd.append('product_id', String(<?php echo (int)($product_id_param ?? 0); ?>));
+            fd.append('characteristic_id', String(<?php echo (int)($characteristic_id_param ?? 0); ?>));
+            <?php if ($voucher_type_param === 'purchase_invoice' && $edit_item_id > 0 && !empty($purchase_invoice_item)): ?>
+            fd.append('item_id', String(<?php echo (int) $edit_item_id; ?>));
+            <?php endif; ?>
             fd.append('preview_only', '1');
             var od = document.getElementById('orderDate');
             if (od && od.value) fd.append('date', od.value);
@@ -6887,6 +6904,24 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         return { prefix: m[1], digits: m[2].length };
     }
 
+    /** Manual / non-Excel barcodes: must match row master prefix + numeric suffix length (Excel rows skip via data-sj-excel-import). */
+    function sjBarcodeMatchesPrefixDigitsStrict(barcode, prefix, digits) {
+        var bc = String(barcode || '').trim();
+        var pfx = String(prefix || '').trim();
+        var dig = parseInt(digits, 10) || 0;
+        if (!pfx || dig < 1) {
+            return true;
+        }
+        if (bc.length < pfx.length) {
+            return false;
+        }
+        if (bc.slice(0, pfx.length) !== pfx) {
+            return false;
+        }
+        var suf = bc.slice(pfx.length);
+        return (/^\d+$/.test(suf) && suf.length === dig);
+    }
+
     /**
      * When allocating the next server barcode, never fall back to hardcoded "RN" if this journal
      * already has lines like RNN00004 — use that prefix (and digit width) so the next is RNN00005.
@@ -7121,7 +7156,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             <td data-column="photo" class="product-row-photo" style="text-align: center; vertical-align: middle; min-width: 70px;"><img src="" alt="" class="product-photo-thumb" style="max-width: 50px; max-height: 50px; display: none;"><span class="product-photo-placeholder text-muted" style="font-size: 0.65rem;">—</span></td>
             <td data-column="barcode" style="position: relative;">
                 <div style="display: flex; align-items: center; gap: 5px;">
-                    <input type="text" class="form-control form-control-sm barcode-input" value="${uniqueBarcode}" style="width: 100px; font-size: 0.7rem;" onclick="printBarcode('${barcodeEsc}', event)" readonly>
+                    <input type="text" class="form-control form-control-sm barcode-input" value="${uniqueBarcode}" style="width: 100px; font-size: 0.7rem;" title="Auto-filled from server; you may edit if it matches this product barcode prefix and digit count." onclick="printBarcode('${barcodeEsc}', event)">
                     <i class="feather icon-printer barcode-print-icon" style="cursor: pointer; font-size: 0.9rem; color: #c5a864; flex-shrink: 0;" onclick="printBarcode('${barcodeEsc}', event)" title="Print Barcode"></i>
                 </div>
             </td>
@@ -7726,7 +7761,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                                 <td data-column="photo" class="product-row-photo" style="text-align: center; vertical-align: middle; min-width: 70px;"><img src="" alt="" class="product-photo-thumb" style="max-width: 50px; max-height: 50px; display: none;"><span class="product-photo-placeholder text-muted" style="font-size: 0.65rem;">—</span></td>
                                 <td data-column="barcode" style="position: relative;">
                                     <div style="display: flex; align-items: center; gap: 5px;">
-                                        <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(pBarcode)}" style="width: 100px; font-size: 0.7rem;" onclick="printBarcode('${pBarcodeEsc}', event)" readonly>
+                                        <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(pBarcode)}" style="width: 100px; font-size: 0.7rem;" title="Must match product prefix + digit count when edited manually." onclick="printBarcode('${pBarcodeEsc}', event)">
                                         <i class="feather icon-printer barcode-print-icon" style="cursor: pointer; font-size: 0.9rem; color: #c5a864; flex-shrink: 0;" onclick="printBarcode('${pBarcodeEsc}', event)" title="Print Barcode"></i>
                                     </div>
                                 </td>
@@ -7973,7 +8008,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                                 <td data-column="photo" class="product-row-photo" style="text-align: center; vertical-align: middle; min-width: 70px;"><img src="" alt="" class="product-photo-thumb" style="max-width: 50px; max-height: 50px; display: none;"><span class="product-photo-placeholder text-muted" style="font-size: 0.65rem;">—</span></td>
                                 <td data-column="barcode" style="position: relative;">
                                     <div style="display: flex; align-items: center; gap: 5px;">
-                                        <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(pBarcode2)}" style="width: 100px; font-size: 0.7rem;" onclick="printBarcode('${pBarcodeEsc2}', event)" readonly>
+                                        <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(pBarcode2)}" style="width: 100px; font-size: 0.7rem;" title="Must match product prefix + digit count when edited manually." onclick="printBarcode('${pBarcodeEsc2}', event)">
                                         <i class="feather icon-printer barcode-print-icon" style="cursor: pointer; font-size: 0.9rem; color: #c5a864; flex-shrink: 0;" onclick="printBarcode('${pBarcodeEsc2}', event)" title="Print Barcode"></i>
                                     </div>
                                 </td>
@@ -9081,6 +9116,16 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         row.setAttribute('data-making-discount-amt', modalRowData.making_discount_amt != null && modalRowData.making_discount_amt !== '' ? String(modalRowData.making_discount_amt) : '0');
         row.setAttribute('data-metal-id', modalRowData.metal_id || '');
         row.setAttribute('data-metal-name', (modalRowData.metal_name || '').trim());
+        if (modalRowData.from_excel) {
+            row.setAttribute('data-sj-excel-import', '1');
+        }
+        if ((modalRowData.barcode_prefix || '').trim() !== '') {
+            row.setAttribute('data-barcode-prefix', String(modalRowData.barcode_prefix).trim());
+        }
+        var _mbd = parseInt(modalRowData.barcode_digits, 10);
+        if (_mbd > 0) {
+            row.setAttribute('data-barcode-digits', String(_mbd));
+        }
         try {
             // Product opening: always allocate a new server serial per new line. Else reuse modal barcode when set, or fetch next.
             let barcode = '';
@@ -12312,7 +12357,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             <td data-column="photo" class="product-row-photo" style="text-align: center; vertical-align: middle; min-width: 70px;">${itemPhotoThumbHtml}</td>
             <td data-column="barcode" style="position: relative;">
                 <div style="display: flex; align-items: center; gap: 5px;">
-                    <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(item.barcode_no || '')}" style="width: 100px; font-size: 0.7rem;" onclick="printBarcode(this.value, event)" readonly>
+                    <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(item.barcode_no || '')}" style="width: 100px; font-size: 0.7rem;" title="Must match product prefix + digit count when edited manually." onclick="printBarcode(this.value, event)">
                     <i class="feather icon-printer barcode-print-icon" style="cursor: pointer; font-size: 0.9rem; color: #c5a864; flex-shrink: 0;" onclick="printBarcode(this.previousElementSibling.value, event)" title="Print Barcode"></i>
                 </div>
             </td>
@@ -13539,6 +13584,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         }
         
         const products = [];
+        const sjSaveRowRefs = [];
         let lineNum = 0;
         productRows.forEach(row => {
             // Skip if it's the empty row message
@@ -13623,6 +13669,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             }
             
             products.push(product);
+            sjSaveRowRefs.push(row);
         });
         
         if (products.length === 0) {
@@ -13663,6 +13710,18 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 return;
             }
             seenBc.add(bc);
+            const domRow = sjSaveRowRefs[vi];
+            if (domRow) {
+                const skipFmt = domRow.getAttribute('data-sj-excel-import') === '1';
+                if (!skipFmt) {
+                    const pfx = (domRow.getAttribute('data-barcode-prefix') || '').trim();
+                    const dig = parseInt(domRow.getAttribute('data-barcode-digits'), 10) || 0;
+                    if (pfx && dig > 0 && typeof sjBarcodeMatchesPrefixDigitsStrict === 'function' && !sjBarcodeMatchesPrefixDigitsStrict(bc, pfx, dig)) {
+                        alert('Line ' + (vi + 1) + ': barcode "' + bc + '" must start with prefix "' + pfx + '" followed by exactly ' + dig + ' digit(s). Rows loaded from Excel may use any unique barcode from the sheet.');
+                        return;
+                    }
+                }
+            }
         }
         
         // Get date from header
@@ -13799,6 +13858,34 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 }
             }
         });
+
+        document.addEventListener('focus', function(e) {
+            var inp = e.target;
+            if (!inp || !inp.classList || !inp.classList.contains('barcode-input')) return;
+            var tr = inp.closest && inp.closest('#productListBodyPage tr.product-row, #productListBody tr.product-row');
+            if (!tr) return;
+            inp.setAttribute('data-sj-bc-prev', String(inp.value || ''));
+        }, true);
+        document.addEventListener('blur', function(e) {
+            var inp = e.target;
+            if (!inp || !inp.classList || !inp.classList.contains('barcode-input')) return;
+            var tr = inp.closest && inp.closest('#productListBodyPage tr.product-row, #productListBody tr.product-row');
+            if (!tr) return;
+            var pfx = (tr.getAttribute('data-barcode-prefix') || '').trim();
+            var dig = parseInt(tr.getAttribute('data-barcode-digits'), 10) || 0;
+            var v = String(inp.value || '').trim();
+            if (v === '') return;
+            if (typeof sjBarcodeMatchesPrefixDigitsStrict === 'function' && !sjBarcodeMatchesPrefixDigitsStrict(v, pfx, dig)) {
+                alert('Barcode must start with "' + (pfx || '(prefix)') + '" and have exactly ' + (dig > 0 ? dig : 'N') + ' digit(s) after the prefix for this product.');
+                inp.value = inp.getAttribute('data-sj-bc-prev') || '';
+            } else {
+                tr.setAttribute('data-barcode', v);
+                var esc = v.replace(/'/g, "\\'");
+                inp.setAttribute('onclick', "printBarcode('" + esc + "', event)");
+                var printIcon = tr.querySelector('.barcode-print-icon');
+                if (printIcon) printIcon.setAttribute('onclick', "printBarcode('" + esc + "', event)");
+            }
+        }, true);
     });
     
     // Function to print barcode
@@ -13995,7 +14082,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         <td data-column="photo" class="product-row-photo" style="text-align: center; vertical-align: middle; min-width: 70px;"><img src="" alt="" class="product-photo-thumb" style="max-width: 50px; max-height: 50px; display: none;"><span class="product-photo-placeholder text-muted" style="font-size: 0.65rem;">—</span></td>
                         <td data-column="barcode" style="position: relative;">
                             <div style="display: flex; align-items: center; gap: 5px;">
-                                <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(barcode)}" style="width: 100px; font-size: 0.7rem;" onclick="printBarcode('${sjBcEsc}', event)" readonly>
+                                <input type="text" class="form-control form-control-sm barcode-input" value="${escapeHtml(barcode)}" style="width: 100px; font-size: 0.7rem;" title="Must match product prefix + digit count when edited manually." onclick="printBarcode('${sjBcEsc}', event)">
                                 <i class="feather icon-printer barcode-print-icon" style="cursor: pointer; font-size: 0.9rem; color: #c5a864; flex-shrink: 0;" onclick="printBarcode('${sjBcEsc}', event)" title="Print Barcode"></i>
                             </div>
                         </td>

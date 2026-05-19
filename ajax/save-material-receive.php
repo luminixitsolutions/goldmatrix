@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -33,6 +34,16 @@ if (is_string($items_json) && $items_json !== '') {
 if (!is_array($items)) {
     $items = [];
 }
+
+$payments_json_mr = isset($_POST['payments']) ? $_POST['payments'] : '';
+$me_mr_payments = [];
+if (is_string($payments_json_mr) && $payments_json_mr !== '') {
+    $me_mr_payments = json_decode($payments_json_mr, true);
+}
+if (!is_array($me_mr_payments)) {
+    $me_mr_payments = [];
+}
+$metal_exchange_barcodes_out = [];
 
 if ($sale_order_id < 1) {
     echo json_encode(['status' => 'error', 'message' => 'Sale order ID required']);
@@ -258,6 +269,49 @@ if ($jwo_id > 0) {
     }
     auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
     auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
+    if (!empty($me_mr_payments)) {
+        foreach ($me_mr_payments as $__pmr) {
+            if (!is_array($__pmr)) {
+                continue;
+            }
+            $__mmr = auragold_payment_merge_stored_details($__pmr);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mmr)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mmr);
+        }
+        $rmr_h = @getRecord('SELECT material_receive_no, order_date FROM tbl_material_receives WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+        $__mr_no = trim((string) ($rmr_h['material_receive_no'] ?? ''));
+        $__mr_dt = substr(trim((string) ($rmr_h['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mr_dt) && !empty($sale_order['order_date'])) {
+            $__mr_dt = substr(trim((string) $sale_order['order_date']), 0, 10);
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mr_dt)) {
+            $__mr_dt = date('Y-m-d');
+        }
+        $___mr_me_ref = auragold_metal_exchange_document_init($conn, true, (int) $jwo_id, 'material_receive_metal_exchange');
+        foreach ($me_mr_payments as $pay_seq => $payment) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                continue;
+            }
+            $___pm_mr = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'material_receive_metal_exchange',
+                (int) $jwo_id,
+                $__mr_no,
+                $__mr_dt,
+                $___pm_mr,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___mr_me_ref,
+                'Material Receive — Metal Exchange',
+                'mr_me',
+                'MR-ME-',
+                $metal_exchange_barcodes_out
+            );
+        }
+    }
     require_once __DIR__ . '/../includes/auragold_notifications.php';
     $rmr = @getRecord('SELECT material_receive_no, customer_name, order_date, due_date FROM tbl_material_receives WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
     if (is_array($rmr)) {
@@ -277,7 +331,7 @@ if ($jwo_id > 0) {
             'ref_id' => (int) $jwo_id,
         ]);
     }
-    echo json_encode(['status' => 'success', 'message' => 'Material receive updated', 'jwo_id' => $jwo_id]);
+    echo json_encode(['status' => 'success', 'message' => 'Material receive updated', 'jwo_id' => $jwo_id, 'new_barcodes' => $metal_exchange_barcodes_out]);
     exit;
 }
 
@@ -372,6 +426,50 @@ auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
 auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
 mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'processing' WHERE id = $sale_order_id");
 
+if (!empty($me_mr_payments)) {
+    foreach ($me_mr_payments as $__pmr_n) {
+        if (!is_array($__pmr_n)) {
+            continue;
+        }
+        $__mmr_n = auragold_payment_merge_stored_details($__pmr_n);
+        if (!auragold_payment_is_metal_exchange_inward($conn, $__mmr_n)) {
+            continue;
+        }
+        auragold_validate_metal_exchange_for_stock($conn, $__mmr_n);
+    }
+    $rmr_n = @getRecord('SELECT material_receive_no, order_date FROM tbl_material_receives WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+    $__mr_no_n = trim((string) ($rmr_n['material_receive_no'] ?? $material_receive_no));
+    $__mr_dt_n = substr(trim((string) ($rmr_n['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mr_dt_n) && !empty($sale_order['order_date'])) {
+        $__mr_dt_n = substr(trim((string) $sale_order['order_date']), 0, 10);
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mr_dt_n)) {
+        $__mr_dt_n = date('Y-m-d');
+    }
+    $___mr_new_me_ref = auragold_metal_exchange_document_init($conn, false, (int) $new_jwo_id, 'material_receive_metal_exchange');
+    foreach ($me_mr_payments as $pay_seq => $payment) {
+        if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+            continue;
+        }
+        $___pm_mr_n = auragold_payment_merge_stored_details($payment);
+        auragold_post_metal_exchange_payment_to_stock(
+            $conn,
+            'material_receive_metal_exchange',
+            (int) $new_jwo_id,
+            $__mr_no_n,
+            $__mr_dt_n,
+            $___pm_mr_n,
+            auragold_metal_exchange_default_branch_id(),
+            is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+            $___mr_new_me_ref,
+            'Material Receive — Metal Exchange',
+            'mr_me',
+            'MR-ME-',
+            $metal_exchange_barcodes_out
+        );
+    }
+}
+
 require_once __DIR__ . '/../includes/auragold_notifications.php';
 $rmr_new = @getRecord('SELECT material_receive_no, customer_name, order_date, due_date FROM tbl_material_receives WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
 if (is_array($rmr_new)) {
@@ -399,5 +497,6 @@ echo json_encode([
     'job_work_no' => $material_receive_no,
     'jobwork_no' => $material_receive_no,
     'material_receive_no' => $material_receive_no,
-    'sale_order_id' => $sale_order_id
+    'sale_order_id' => $sale_order_id,
+    'new_barcodes' => $metal_exchange_barcodes_out,
 ]);

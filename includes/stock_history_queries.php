@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Link inward rows to stock journal via reference columns when present (reliable for product opening voucher)
 $stock_has_ref = false;
 $ref_col_chk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type')");
@@ -9,13 +9,94 @@ if ($ref_col_chk) {
     mysqli_free_result($ref_col_chk);
 }
 
+require_once __DIR__ . '/auragold_metal_exchange_stock.php';
+$auragold_me_ref_sql_in = auragold_metal_exchange_reference_types_sql_list_safe(isset($conn) && $conn instanceof mysqli ? $conn : null);
+
 $sj_ref_join = '';
+$so_me_join = '';
 if ($stock_has_ref) {
     $sj_ref_join = "
     LEFT JOIN tbl_stock_journal sj_ref ON (
         s.reference_type = 'stock_journal'
         AND s.reference_id = sj_ref.id
         AND sj_ref.status = 'active'
+    )";
+    $so_me_join = "
+    LEFT JOIN tbl_sale_orders so_me_inv ON (
+        s.reference_type = 'sale_order_metal_exchange'
+        AND s.reference_id = so_me_inv.id
+    )
+    LEFT JOIN tbl_sale_invoices si_me_inv ON (
+        s.reference_type = 'sale_invoice_metal_exchange'
+        AND s.reference_id = si_me_inv.id
+    )
+    LEFT JOIN tbl_sale_quotations sq_me_inv ON (
+        s.reference_type = 'sale_quotation_metal_exchange'
+        AND s.reference_id = sq_me_inv.id
+    )
+    LEFT JOIN tbl_sale_returns sr_me_inv ON (
+        s.reference_type = 'sale_return_metal_exchange'
+        AND s.reference_id = sr_me_inv.id
+    )
+    LEFT JOIN tbl_purchase_invoices pi_me_inv ON (
+        s.reference_type = 'purchase_invoice_metal_exchange'
+        AND s.reference_id = pi_me_inv.id
+    )
+    LEFT JOIN tbl_purchase_quotations pq_me_inv ON (
+        s.reference_type = 'purchase_quotation_metal_exchange'
+        AND s.reference_id = pq_me_inv.id
+    )
+    LEFT JOIN tbl_purchase_returns pr_me_inv ON (
+        s.reference_type = 'purchase_return_metal_exchange'
+        AND s.reference_id = pr_me_inv.id
+    )
+    LEFT JOIN tbl_payment_vouchers pv_me_inv ON (
+        s.reference_type = 'payment_voucher_metal_exchange'
+        AND s.reference_id = pv_me_inv.id
+    )
+    LEFT JOIN tbl_receipt_vouchers rv_me_inv ON (
+        s.reference_type = 'receipt_voucher_metal_exchange'
+        AND s.reference_id = rv_me_inv.id
+    )
+    LEFT JOIN tbl_advance_payments ap_me_inv ON (
+        s.reference_type = 'advance_payment_metal_exchange'
+        AND s.reference_id = ap_me_inv.id
+    )
+    LEFT JOIN tbl_old_jewelry_scrap_invoices ojsi_me_inv ON (
+        s.reference_type = 'old_jewelry_scrap_invoice_metal_exchange'
+        AND s.reference_id = ojsi_me_inv.id
+    )
+    LEFT JOIN tbl_material_issues mi_me_inv ON (
+        s.reference_type = 'material_issue_metal_exchange'
+        AND s.reference_id = mi_me_inv.id
+    )
+    LEFT JOIN tbl_material_receives mr_me_inv ON (
+        s.reference_type = 'material_receive_metal_exchange'
+        AND s.reference_id = mr_me_inv.id
+    )
+    LEFT JOIN tbl_jobwork_orders jwo_me_inv ON (
+        s.reference_type = 'jobwork_order_metal_exchange'
+        AND s.reference_id = jwo_me_inv.id
+    )
+    LEFT JOIN tbl_jobwork_invoices jwi_me_inv ON (
+        s.reference_type = 'jobwork_invoice_metal_exchange'
+        AND s.reference_id = jwi_me_inv.id
+    )
+    LEFT JOIN tbl_old_jewelry_scrap_invoices ojstk_me_inv ON (
+        s.reference_type = 'old_jewellery_scrap_stock_in_metal_exchange'
+        AND s.reference_id = ojstk_me_inv.id
+    )
+    LEFT JOIN tbl_consignment_in cin_me_inv ON (
+        s.reference_type = 'consignment_in_metal_exchange'
+        AND s.reference_id = cin_me_inv.id
+    )
+    LEFT JOIN tbl_consignment_out cout_me_inv ON (
+        s.reference_type = 'consignment_out_metal_exchange'
+        AND s.reference_id = cout_me_inv.id
+    )
+    LEFT JOIN tbl_pos_sale_invoices posi_me_inv ON (
+        s.reference_type = 'pos_sale_invoice_metal_exchange'
+        AND s.reference_id = posi_me_inv.id
     )";
 }
 // Match journal by barcode when strict join (time/amount/weight) fails - e.g. stock.value = net_amount but SJ has net_amt_with_tax
@@ -56,6 +137,57 @@ $inward_any_sj_expr = $stock_has_ref
 
 // Purchase lines created via stock journal but tied to a purchase invoice line — show "Purchase Invoice", not "Stock Journal"
 $inward_purchase_invoice_voucher_expr = "(s.stock_type = 'purchase' AND (pi_item.id IS NOT NULL OR pi_item_sj.id IS NOT NULL))";
+
+// Document metal exchange rows: tagged on tbl_stock.reference_type (avoid mis-label as PI/SJ)
+$doc_metal_exchange_voucher_expr = $stock_has_ref
+    ? "(s.reference_type IN ($auragold_me_ref_sql_in))"
+    : '(1 = 0)';
+$against_invoice_me_docs_coalesce = $stock_has_ref ? "
+            NULLIF(TRIM(so_me_inv.order_no), ''),
+            NULLIF(TRIM(si_me_inv.invoice_no), ''),
+            NULLIF(TRIM(sq_me_inv.quotation_no), ''),
+            NULLIF(TRIM(sr_me_inv.return_no), ''),
+            NULLIF(TRIM(pi_me_inv.invoice_no), ''),
+            NULLIF(TRIM(pq_me_inv.quotation_no), ''),
+            NULLIF(TRIM(pr_me_inv.return_no), ''),
+            NULLIF(TRIM(pv_me_inv.voucher_no), ''),
+            NULLIF(TRIM(rv_me_inv.voucher_no), ''),
+            NULLIF(TRIM(ap_me_inv.voucher_no), ''),
+            NULLIF(TRIM(ojsi_me_inv.invoice_no), ''),
+            NULLIF(TRIM(mi_me_inv.material_issue_no), ''),
+            NULLIF(TRIM(mr_me_inv.material_receive_no), ''),
+            NULLIF(TRIM(jwo_me_inv.jobwork_no), ''),
+            NULLIF(TRIM(jwi_me_inv.invoice_no), ''),
+            NULLIF(TRIM(ojstk_me_inv.invoice_no), ''),
+            NULLIF(TRIM(cin_me_inv.consignment_no), ''),
+            NULLIF(TRIM(cout_me_inv.consignment_no), ''),
+            NULLIF(TRIM(posi_me_inv.invoice_no), ''),
+            " : '';
+
+$doc_me_voucher_label_case = "
+            CASE s.reference_type
+                WHEN 'sale_order_metal_exchange' THEN 'Sale Order — Metal Exchange'
+                WHEN 'sale_invoice_metal_exchange' THEN 'Sale Invoice — Metal Exchange'
+                WHEN 'sale_quotation_metal_exchange' THEN 'Sale Quotation — Metal Exchange'
+                WHEN 'sale_return_metal_exchange' THEN 'Sale Return — Metal Exchange'
+                WHEN 'purchase_invoice_metal_exchange' THEN 'Purchase Invoice — Metal Exchange'
+                WHEN 'purchase_quotation_metal_exchange' THEN 'Purchase Quotation — Metal Exchange'
+                WHEN 'purchase_return_metal_exchange' THEN 'Purchase Return — Metal Exchange'
+                WHEN 'payment_voucher_metal_exchange' THEN 'Payment Voucher — Metal Exchange'
+                WHEN 'receipt_voucher_metal_exchange' THEN 'Receipt Voucher — Metal Exchange'
+                WHEN 'advance_payment_metal_exchange' THEN 'Advance Payment — Metal Exchange'
+                WHEN 'old_jewelry_scrap_invoice_metal_exchange' THEN 'Old Jewelry Scrap Invoice — Metal Exchange'
+                WHEN 'material_issue_metal_exchange' THEN 'Material Issue — Metal Exchange'
+                WHEN 'material_receive_metal_exchange' THEN 'Material Receive — Metal Exchange'
+                WHEN 'jobwork_order_metal_exchange' THEN 'Jobwork Order — Metal Exchange'
+                WHEN 'jobwork_invoice_metal_exchange' THEN 'Jobwork Invoice — Metal Exchange'
+                WHEN 'old_jewellery_scrap_stock_in_metal_exchange' THEN 'Old Jewellery Scrap Stock In — Metal Exchange'
+                WHEN 'consignment_in_metal_exchange' THEN 'Consignment In — Metal Exchange'
+                WHEN 'consignment_out_metal_exchange' THEN 'Consignment Out — Metal Exchange'
+                WHEN 'pos_sale_invoice_metal_exchange' THEN 'POS Sale Invoice — Metal Exchange'
+                ELSE 'Metal Exchange'
+            END
+            ";
 
 $sj_attach_item_select = $stock_has_ref
     ? 'COALESCE(sj.item_id, sj_ref.item_id, sj_bc.item_id, pi_item.id, pi_item_sj.id, 0) as sj_attach_item_id'
@@ -115,11 +247,13 @@ $inward_query = "
             sj_bc.sj_invoice_no,
             pi.invoice_no, 
             sr.return_no,
+            $against_invoice_me_docs_coalesce
             ''
         ) as against_invoice_no,
         COALESCE(NULLIF(TRIM(pi.invoice_no), ''), NULLIF(TRIM(sr.return_no), ''), '') as invoice_no,
-        /* Purchase invoice first (stock often joins SJ + PI line). Stock Journal label only when SJ-linked but not PI-backed. */
+        /* Purchase invoice first. Document metal exchange before generic SJ match. */
         CASE 
+            WHEN $doc_metal_exchange_voucher_expr THEN $doc_me_voucher_label_case
             WHEN s.stock_type = 'sale_return' THEN 'Sale Return'
             WHEN $inward_purchase_invoice_voucher_expr THEN 'Purchase Invoice'
             WHEN $inward_any_sj_expr THEN 'Stock Journal'
@@ -127,6 +261,7 @@ $inward_query = "
             ELSE s.stock_type
         END as type_of_voucher,
         CASE 
+            WHEN $doc_metal_exchange_voucher_expr THEN $doc_me_voucher_label_case
             WHEN s.stock_type = 'sale_return' THEN 'Sale Return'
             WHEN $inward_purchase_invoice_voucher_expr THEN 'Purchase Invoice'
             WHEN $inward_any_sj_expr THEN 'Stock Journal'
@@ -174,8 +309,10 @@ $inward_query = "
         AND s.stock_type = 'purchase'
         AND ABS(sj.net_amt_with_tax - s.value) < 0.01
         AND ABS(sj.gross_weight - s.current_weight) < 0.001
+        AND (s.reference_type IS NULL OR s.reference_type NOT IN ($auragold_me_ref_sql_in))
     )
     $sj_ref_join
+    $so_me_join
     LEFT JOIN (
         SELECT sj_x.*
         FROM tbl_stock_journal sj_x
@@ -190,6 +327,7 @@ $inward_query = "
     ) sj_bc ON sj_bc.product_id = s.product_id
         AND sj_bc.barcode COLLATE utf8mb4_unicode_ci = s.barcode COLLATE utf8mb4_unicode_ci
         AND s.stock_type = 'purchase'
+        AND (s.reference_type IS NULL OR s.reference_type NOT IN ($auragold_me_ref_sql_in))
         AND s.barcode IS NOT NULL
         AND s.barcode != ''
     LEFT JOIN tbl_purchase_invoice_items pi_item ON (
@@ -199,6 +337,7 @@ $inward_query = "
         AND ABS(TIMESTAMPDIFF(SECOND, pi_item.created_at, s.created_at)) <= 5
         AND pi_item.status = 1
         AND s.stock_type = 'purchase'
+        AND (s.reference_type IS NULL OR s.reference_type NOT IN ($auragold_me_ref_sql_in))
         AND sj.id IS NULL
         AND (
             sj_bc.id IS NULL
@@ -451,9 +590,10 @@ $outward_query = "
         COALESCE(MAX(sub.sj_item_id), 0) as sj_attach_item_id,
         '' as rfid,
         '' as location,
-        COALESCE(MAX(sub.sj_invoice_no), MAX(sub.pi_invoice_no), '') as against_invoice_no,
+        COALESCE(MAX(sub.sj_invoice_no), MAX(sub.mi_invoice_no), MAX(sub.pi_invoice_no), '') as against_invoice_no,
         COALESCE(MAX(sub.pi_invoice_no), '') as invoice_no,
         CASE
+            WHEN MAX(sub.s_ref_type) = 'material_issue' THEN 'Material Issue'
             WHEN COALESCE(MAX(sub.sj_invoice_no), '') = '' AND MAX(sub.sj_item_id) IS NULL THEN 'Outward'
             WHEN LOWER(TRIM(COALESCE(MAX(sub.sj_voucher_type), ''))) = 'product_opening' THEN 'Product Opening'
             WHEN TRIM(COALESCE(MAX(sub.sj_voucher_type), '')) IN ('Purchase Invoice', 'purchase_invoice') THEN 'Purchase Invoice'
@@ -462,6 +602,7 @@ $outward_query = "
             ELSE 'Outward'
         END as type_of_voucher,
         CASE
+            WHEN MAX(sub.s_ref_type) = 'material_issue' THEN 'Material Issue'
             WHEN COALESCE(MAX(sub.sj_invoice_no), '') = '' AND MAX(sub.sj_item_id) IS NULL THEN 'Outward'
             WHEN LOWER(TRIM(COALESCE(MAX(sub.sj_voucher_type), ''))) = 'product_opening' THEN 'Product Opening'
             WHEN TRIM(COALESCE(MAX(sub.sj_voucher_type), '')) IN ('Purchase Invoice', 'purchase_invoice') THEN 'Purchase Invoice'
@@ -517,6 +658,9 @@ $outward_query = "
             s.created_at,
             s.stock_type,
             s.barcode as s_barcode,
+            COALESCE(NULLIF(TRIM(s.reference_type), ''), '') as s_ref_type,
+            s.reference_id as s_ref_id,
+            mi_sh.material_issue_no as mi_invoice_no,
             p.name as product_name,
             p.article as article,
             m.display_name as metal_name,
@@ -538,6 +682,11 @@ $outward_query = "
         LEFT JOIN tbl_metal m ON s.metal_id = m.id
         LEFT JOIN tbl_branches b ON s.branch_id = b.id
         LEFT JOIN tbl_product_characteristics pc ON s.product_characteristic_id = pc.id
+        LEFT JOIN tbl_material_issues mi_sh ON (
+            s.stock_type = 'outward'
+            AND s.reference_type = 'material_issue'
+            AND mi_sh.id = s.reference_id
+        )
         LEFT JOIN (
             SELECT s_inner.id as stock_id,
                 (SELECT sj_in.id FROM tbl_stock_journal sj_in

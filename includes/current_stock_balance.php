@@ -14,7 +14,7 @@ function auragold_get_current_stock_balance_row($conn, $product_id, $branch_id, 
         return null;
     }
 
-    $where_clause = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'outward')";
+    $where_clause = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'inward', 'balance', 'stock_journal', 'sale_return', 'outward')";
     $where_clause .= " AND s.product_id = $product_id AND s.branch_id = $branch_id AND s.metal_id = $metal_id";
 
     $stock_inner_from = "
@@ -67,13 +67,13 @@ function auragold_get_current_stock_balance_row($conn, $product_id, $branch_id, 
                 )
             )
         ), 0) as production_qty,
-        SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as inward_gross_sum,
-        SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as inward_pure_sum,
+        SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as inward_gross_sum,
+        SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as inward_pure_sum,
         SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as outward_pure_sum,
-        (SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.current_qty, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.current_qty, 0) ELSE 0 END)) as available_qty,
-        (SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END)) as stock_net_weight,
+        (SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.current_qty, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.current_qty, 0) ELSE 0 END)) as available_qty,
+        (SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END)) as stock_net_weight,
         SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as outward_weight_sum,
-        CASE WHEN SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) > 0 THEN SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) * COALESCE(s.opening_purity, 0) ELSE 0 END) / SUM(CASE WHEN s.stock_type IN ('opening','purchase') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) ELSE MAX(s.opening_purity) END as opening_purity,
+        CASE WHEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) > 0 THEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) * COALESCE(s.opening_purity, 0) ELSE 0 END) / SUM(CASE WHEN s.stock_type IN ('opening','purchase','inward','balance','stock_journal','sale_return') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) ELSE MAX(s.opening_purity) END as opening_purity,
         SUM(s.value) as value
 ";
 

@@ -264,8 +264,15 @@
                 return row.profit_wt != null ? String(row.profit_wt) : '—';
             case 'gold_wt':
                 return row.metal_wt != null ? String(row.metal_wt) : '—';
-            case 'diamond_wt':
-                return row.diamond_wt != null ? String(row.diamond_wt) : '—';
+            case 'diamond_wt': {
+                if (row.diamond_wt != null && String(row.diamond_wt).trim() !== '' && String(row.diamond_wt).trim() !== '—') {
+                    return String(row.diamond_wt);
+                }
+                if (row.diamond_weight != null && String(row.diamond_weight).trim() !== '' && String(row.diamond_weight).trim() !== '—') {
+                    return String(row.diamond_weight);
+                }
+                return '—';
+            }
             case 'spent_time': {
                 var ms = row.manufacturing_seconds != null ? parseInt(row.manufacturing_seconds, 10) : 0;
                 if (!isFinite(ms) || ms < 1) {

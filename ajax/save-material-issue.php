@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -33,6 +34,16 @@ if (is_string($items_json) && $items_json !== '') {
 if (!is_array($items)) {
     $items = [];
 }
+
+$payments_json_mi = isset($_POST['payments']) ? $_POST['payments'] : '';
+$me_mi_payments = [];
+if (is_string($payments_json_mi) && $payments_json_mi !== '') {
+    $me_mi_payments = json_decode($payments_json_mi, true);
+}
+if (!is_array($me_mi_payments)) {
+    $me_mi_payments = [];
+}
+$metal_exchange_barcodes_out = [];
 
 $standalone_mi = ($sale_order_id < 1);
 $header_order_date = isset($_POST['header_order_date']) ? trim((string)$_POST['header_order_date']) : '';
@@ -200,6 +211,404 @@ function auragold_material_issue_no_taken($conn, $no_esc, $branch_scope_sql = ''
     return false;
 }
 
+/** Metal (final) weight for issue rules: final_weight, else net, else gross. */
+function auragold_material_issue_line_metal_wt(array $item): float
+{
+    $fw = (float) ($item['final_weight'] ?? 0);
+    if ($fw > 0.0000001) {
+        return $fw;
+    }
+    $nw = (float) ($item['net_weight'] ?? 0);
+    if ($nw > 0.0000001) {
+        return $nw;
+    }
+
+    return (float) ($item['gross_weight'] ?? 0);
+}
+
+/**
+ * Weight issued to department / deducted from available stock:
+ * both metal and requested filled → requested; only requested → requested; otherwise metal when present.
+ */
+function auragold_material_issue_resolve_issue_weight(array $item): float
+{
+    $metal = auragold_material_issue_line_metal_wt($item);
+    $req = (float) ($item['requested_wt'] ?? 0);
+    $has_m = $metal > 0.0000001;
+    $has_r = $req > 0.0000001;
+    if ($has_m && $has_r) {
+        return $req;
+    }
+    if ($has_r) {
+        return $req;
+    }
+    if ($has_m) {
+        return $metal;
+    }
+
+    return 0.0;
+}
+
+function auragold_material_issue_tbl_stock_has_reference(mysqli $conn): bool
+{
+    static $cached_ok = null;
+    if ($cached_ok === true) {
+        return true;
+    }
+    $ref_check = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type')");
+    $n = ($ref_check && mysqli_num_rows($ref_check) >= 2);
+    if ($ref_check) {
+        mysqli_free_result($ref_check);
+    }
+    if ($n) {
+        $cached_ok = true;
+
+        return true;
+    }
+    @mysqli_query($conn, 'ALTER TABLE `tbl_stock` ADD COLUMN `reference_id` INT NULL DEFAULT NULL AFTER `transaction_date`');
+    @mysqli_query($conn, 'ALTER TABLE `tbl_stock` ADD COLUMN `reference_type` VARCHAR(50) NULL DEFAULT NULL AFTER `reference_id`');
+    $ref_check2 = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type')");
+    $ok = ($ref_check2 && mysqli_num_rows($ref_check2) >= 2);
+    if ($ref_check2) {
+        mysqli_free_result($ref_check2);
+    }
+    if ($ok) {
+        $cached_ok = true;
+    }
+
+    return $ok;
+}
+
+/** Restore main stock from prior Material Issue outward rows, then delete those outward rows. */
+function auragold_material_issue_reverse_outward_stock(mysqli $conn, int $mi_header_id): void
+{
+    if (!auragold_material_issue_tbl_stock_has_reference($conn) || $mi_header_id < 1) {
+        return;
+    }
+    $mid = (int) $mi_header_id;
+    $rev_rows = getList("SELECT barcode, opening_weight, opening_qty, product_id, product_characteristic_id, branch_id FROM tbl_stock WHERE stock_type = 'outward' AND reference_id = $mid AND reference_type = 'material_issue'");
+    if (!is_array($rev_rows)) {
+        $rev_rows = [];
+    }
+    foreach ($rev_rows as $rv) {
+        $ow = (float) ($rv['opening_weight'] ?? 0);
+        $oq = (float) ($rv['opening_qty'] ?? 0);
+        if ($ow <= 0 && $oq <= 0) {
+            continue;
+        }
+        $b = trim((string) ($rv['barcode'] ?? ''));
+        $target_id = 0;
+        if ($b !== '') {
+            $be = mysqli_real_escape_string($conn, $b);
+            $tr = getRecord("SELECT id FROM tbl_stock WHERE barcode = '$be' AND status = 1 AND stock_type IN ('inward','balance','opening','purchase','stock_journal') ORDER BY id DESC LIMIT 1");
+            if ($tr && !empty($tr['id'])) {
+                $target_id = (int) $tr['id'];
+            }
+        }
+        if ($target_id <= 0) {
+            $pid = (int) ($rv['product_id'] ?? 0);
+            $bid = (int) ($rv['branch_id'] ?? 0);
+            if ($pid > 0 && $bid > 0) {
+                $cid_raw = $rv['product_characteristic_id'] ?? null;
+                if ($cid_raw !== null && $cid_raw !== '') {
+                    $cid = (int) $cid_raw;
+                    $tr = getRecord("SELECT id FROM tbl_stock WHERE product_id = $pid AND product_characteristic_id = $cid AND branch_id = $bid AND status = 1 AND stock_type IN ('inward','balance','opening','purchase','stock_journal') ORDER BY id DESC LIMIT 1");
+                } else {
+                    $tr = getRecord("SELECT id FROM tbl_stock WHERE product_id = $pid AND product_characteristic_id IS NULL AND branch_id = $bid AND status = 1 AND stock_type IN ('inward','balance','opening','purchase','stock_journal') ORDER BY id DESC LIMIT 1");
+                }
+                if ($tr && !empty($tr['id'])) {
+                    $target_id = (int) $tr['id'];
+                }
+            }
+        }
+        if ($target_id > 0) {
+            mysqli_query($conn, "UPDATE tbl_stock SET current_weight = COALESCE(current_weight, 0) + $ow, current_qty = COALESCE(current_qty, 0) + $oq WHERE id = $target_id");
+        }
+    }
+    mysqli_query($conn, "DELETE FROM tbl_stock WHERE stock_type = 'outward' AND reference_id = $mid AND reference_type = 'material_issue'");
+}
+
+/**
+ * Deduct issue_weight + quantity from barcode inward stock; insert outward row linked to Material Issue.
+ * Mirrors ajax/save-consignment-out.php (barcode path).
+ *
+ * @return bool false on hard SQL failure
+ */
+function auragold_material_issue_apply_barcode_stock_deduct(
+    mysqli $conn,
+    int $mi_header_id,
+    string $transaction_date_ymd,
+    array $item,
+    float $issue_weight
+): bool {
+    if ($mi_header_id < 1 || $issue_weight <= 0.0000001) {
+        return true;
+    }
+    $bc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock LIKE 'barcode'");
+    $tbl_stock_has_barcode = ($bc && mysqli_num_rows($bc) > 0);
+    if ($bc) {
+        mysqli_free_result($bc);
+    }
+    if (!$tbl_stock_has_barcode) {
+        return true;
+    }
+    $has_ref = auragold_material_issue_tbl_stock_has_reference($conn);
+    if (!$has_ref) {
+        return true;
+    }
+
+    // Include 'inward' — some lots are stored as inward/balance rows; omitting them skipped MI outward + stock history.
+    $stock_in_types = "'opening','purchase','stock_journal','balance','sale_return','inward'";
+    $co_branch_id = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
+    if ($co_branch_id <= 0 && !empty($_SESSION['working_branch_id'])) {
+        $co_branch_id = (int) $_SESSION['working_branch_id'];
+    } elseif ($co_branch_id <= 0 && !empty($_SESSION['branch_id'])) {
+        $co_branch_id = (int) $_SESSION['branch_id'];
+    }
+    $co_branch_sql = '';
+    if ($co_branch_id > 0 && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_stock', 'branch_id')) {
+        $co_main_bid = function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0;
+        if ($co_main_bid > 0 && $co_branch_id === $co_main_bid) {
+            $co_branch_sql = ' AND (branch_id = ' . $co_branch_id . ' OR branch_id IS NULL OR branch_id = 0)';
+        } else {
+            $co_branch_sql = ' AND branch_id = ' . $co_branch_id;
+        }
+    }
+
+    $barcode_raw = trim((string) ($item['barcode'] ?? ''));
+    $deduct_weight = $issue_weight;
+    $quantity = (float) ($item['quantity'] ?? 1);
+    if ($quantity <= 0) {
+        $quantity = 1;
+    }
+    $product_id = (int) ($item['product_id'] ?? 0);
+    $characteristic_id = isset($item['characteristic_id']) && $item['characteristic_id'] !== '' ? (int) $item['characteristic_id'] : 0;
+    $metal_id = (int) ($item['metal_id'] ?? 0);
+    if ($metal_id <= 0 && $characteristic_id > 0) {
+        $mr_pc = getRecord('SELECT metal_id FROM tbl_product_characteristics WHERE id = ' . (int) $characteristic_id . ' AND status = 1 LIMIT 1');
+        $metal_id = (int) ($mr_pc['metal_id'] ?? 0);
+    }
+    $purity = (float) ($item['purity'] ?? 0);
+    $rate = (float) ($item['rate'] ?? 0);
+
+    $source_stock = null;
+    if ($barcode_raw !== '') {
+        $barcode_esc_q = mysqli_real_escape_string($conn, $barcode_raw);
+        $source_stock = getRecord("
+            SELECT *
+            FROM tbl_stock
+            WHERE barcode = '$barcode_esc_q' AND status = 1
+            AND stock_type IN ($stock_in_types)
+            AND (
+                COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0
+                OR COALESCE(opening_qty, 0) > 0 OR COALESCE(opening_weight, 0) > 0
+            )
+            $co_branch_sql
+            ORDER BY CASE
+                WHEN COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0 THEN 0
+                ELSE 1
+            END, id DESC
+            LIMIT 1
+        ");
+        if (!$source_stock) {
+            $co_branch_sql_s = str_replace('branch_id', 's.branch_id', $co_branch_sql);
+            $agg_pick = getRecord("
+                SELECT MAX(CASE WHEN s.stock_type IN ($stock_in_types) THEN s.id END) AS pick_id
+                FROM tbl_stock s
+                WHERE s.status = 1 AND s.barcode = '$barcode_esc_q'
+                $co_branch_sql_s
+                GROUP BY s.barcode, s.branch_id
+                HAVING MAX(CASE WHEN s.stock_type IN ($stock_in_types) THEN s.id END) IS NOT NULL
+                AND (
+                    (SUM(CASE WHEN s.stock_type IN ($stock_in_types) THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)
+                     - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)) > 0.00001
+                    OR
+                    (SUM(CASE WHEN s.stock_type IN ($stock_in_types) THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)
+                     - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)) > 0.00001
+                )
+                LIMIT 1
+            ");
+            if ($agg_pick && !empty($agg_pick['pick_id'])) {
+                $pick_id = (int) $agg_pick['pick_id'];
+                if ($pick_id > 0) {
+                    $source_stock = getRecord("SELECT * FROM tbl_stock WHERE id = $pick_id AND status = 1 LIMIT 1");
+                }
+            }
+        }
+        if (!$source_stock && $co_branch_sql !== '') {
+            $source_stock = getRecord("
+                SELECT *
+                FROM tbl_stock
+                WHERE barcode = '$barcode_esc_q' AND status = 1
+                AND stock_type IN ($stock_in_types)
+                AND (
+                    COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0
+                    OR COALESCE(opening_qty, 0) > 0 OR COALESCE(opening_weight, 0) > 0
+                )
+                ORDER BY CASE
+                    WHEN COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0 THEN 0
+                    ELSE 1
+                END, id DESC
+                LIMIT 1
+            ");
+        }
+    } elseif ($product_id > 0 && ($characteristic_id > 0 || $metal_id > 0)) {
+        // Material Issue UI often clears barcode in JSON; resolve lot by product + characteristic + metal (same branch rules).
+        $pc_sql = '';
+        if ($characteristic_id > 0) {
+            $pc_sql = ' AND product_characteristic_id = ' . (int) $characteristic_id;
+        }
+        $metal_sql = $metal_id > 0 ? ' AND metal_id = ' . (int) $metal_id : '';
+        $source_stock = getRecord("
+            SELECT *
+            FROM tbl_stock
+            WHERE status = 1
+            AND stock_type IN ($stock_in_types)
+            AND product_id = " . (int) $product_id . "
+            $pc_sql
+            $metal_sql
+            AND (
+                COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0
+                OR COALESCE(opening_qty, 0) > 0 OR COALESCE(opening_weight, 0) > 0
+            )
+            $co_branch_sql
+            ORDER BY CASE
+                WHEN COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0 THEN 0
+                ELSE 1
+            END, id DESC
+            LIMIT 1
+        ");
+        if (!$source_stock && $co_branch_sql !== '') {
+            $source_stock = getRecord("
+                SELECT *
+                FROM tbl_stock
+                WHERE status = 1
+                AND stock_type IN ($stock_in_types)
+                AND product_id = " . (int) $product_id . "
+                $pc_sql
+                $metal_sql
+                AND (
+                    COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0
+                    OR COALESCE(opening_qty, 0) > 0 OR COALESCE(opening_weight, 0) > 0
+                )
+                ORDER BY CASE
+                    WHEN COALESCE(current_qty, 0) > 0 OR COALESCE(current_weight, 0) > 0 THEN 0
+                    ELSE 1
+                END, id DESC
+                LIMIT 1
+            ");
+        }
+    }
+
+    if (!$source_stock) {
+        $log_key = $barcode_raw !== '' ? ('barcode ' . $barcode_raw) : ('product ' . $product_id . ' pc ' . $characteristic_id . ' metal ' . $metal_id);
+        error_log('Material Issue: no inward stock row for ' . $log_key);
+
+        return true;
+    }
+
+    $stock_row = $source_stock;
+    if ($product_id <= 0) {
+        $product_id = (int) ($stock_row['product_id'] ?? 0);
+    }
+    if ($characteristic_id <= 0 && isset($stock_row['product_characteristic_id']) && $stock_row['product_characteristic_id'] !== null && $stock_row['product_characteristic_id'] !== '') {
+        $characteristic_id = (int) $stock_row['product_characteristic_id'];
+    }
+    if ($metal_id <= 0) {
+        $metal_id = (int) ($stock_row['metal_id'] ?? 0);
+    }
+    $branch_id = (int) ($stock_row['branch_id'] ?? 0);
+    $stock_metal_id = (int) ($stock_row['metal_id'] ?? $metal_id);
+    if ($stock_metal_id <= 0) {
+        $stock_metal_id = $metal_id > 0 ? $metal_id : 1;
+    }
+    $stock_purity = (float) ($stock_row['opening_purity'] ?? $purity);
+    $stock_rate_val = (float) ($stock_row['rate'] ?? $rate);
+    $stock_value = $deduct_weight * $stock_rate_val;
+    $barcode_for_out = $barcode_raw !== '' ? $barcode_raw : trim((string) ($stock_row['barcode'] ?? ''));
+    $barcode_esc = mysqli_real_escape_string($conn, $barcode_for_out);
+
+    $td = $transaction_date_ymd;
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $td)) {
+        $td = date('Y-m-d');
+    }
+    $td_esc = mysqli_real_escape_string($conn, $td);
+
+    $outward_sql = "
+        INSERT INTO tbl_stock (
+            product_id, product_characteristic_id, barcode, branch_id, metal_id,
+            opening_weight, opening_purity, opening_qty, final_weight, rate, value,
+            current_weight, current_qty, stock_type, transaction_date, status, created_at,
+            reference_id, reference_type
+        ) VALUES (
+            " . ($product_id > 0 ? $product_id : 'NULL') . ",
+            " . ($characteristic_id > 0 ? $characteristic_id : 'NULL') . ",
+            '$barcode_esc',
+            $branch_id,
+            $stock_metal_id,
+            $deduct_weight,
+            $stock_purity,
+            $quantity,
+            $deduct_weight,
+            $stock_rate_val,
+            $stock_value,
+            $deduct_weight,
+            $quantity,
+            'outward',
+            '$td_esc',
+            1,
+            NOW(),
+            $mi_header_id,
+            'material_issue'
+        )
+    ";
+    if (!@mysqli_query($conn, $outward_sql)) {
+        error_log('Material Issue outward insert failed: ' . mysqli_error($conn));
+
+        return false;
+    }
+
+    $src_id = (int) $stock_row['id'];
+    $prev_cq = (float) ($stock_row['current_qty'] ?? 0);
+    $prev_cw = (float) ($stock_row['current_weight'] ?? 0);
+    $op_q = (float) ($stock_row['opening_qty'] ?? 0);
+    $op_w = (float) ($stock_row['opening_weight'] ?? 0);
+    $sold_q = $quantity;
+
+    if ($prev_cq > 0 || $prev_cw > 0) {
+        if ($sold_q <= 0 && $prev_cw > 0 && $prev_cq > 0) {
+            $sold_q = $prev_cq * ($deduct_weight / $prev_cw);
+        }
+        $balance_weight = $prev_cw - $deduct_weight;
+        $new_cq = max(0, $prev_cq - $sold_q);
+        if ($balance_weight <= 0) {
+            if (!@mysqli_query($conn, "UPDATE tbl_stock SET current_weight = 0, current_qty = 0, value = 0 WHERE id = $src_id")) {
+                return false;
+            }
+        } else {
+            $new_val = $stock_rate_val * $balance_weight;
+            if (!@mysqli_query($conn, "UPDATE tbl_stock SET current_weight = $balance_weight, current_qty = $new_cq, final_weight = $balance_weight, value = $new_val WHERE id = $src_id")) {
+                return false;
+            }
+        }
+    } else {
+        $new_op_q = max(0, $op_q - $sold_q);
+        $new_op_w = max(0, $op_w - $deduct_weight);
+        if ($new_op_w <= 0.00001 && $new_op_q <= 0.00001) {
+            if (!@mysqli_query($conn, "UPDATE tbl_stock SET opening_qty = 0, opening_weight = 0, final_weight = 0, value = 0 WHERE id = $src_id")) {
+                return false;
+            }
+        } else {
+            $new_val = $stock_rate_val * $new_op_w;
+            if (!@mysqli_query($conn, "UPDATE tbl_stock SET opening_qty = $new_op_q, opening_weight = $new_op_w, final_weight = $new_op_w, value = $new_val WHERE id = $src_id")) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 $sale_order_no = mysqli_real_escape_string($conn, $sale_order['order_no']);
 $customer_name = mysqli_real_escape_string($conn, $sale_order['customer_name'] ?? '');
 $order_date = !empty($sale_order['order_date']) ? mysqli_real_escape_string($conn, $sale_order['order_date']) : 'NULL';
@@ -261,6 +670,7 @@ if ($jwo_id > 0) {
     }
     $upd .= " WHERE id = $jwo_id";
     mysqli_query($conn, $upd);
+    auragold_material_issue_reverse_outward_stock($conn, (int) $jwo_id);
     mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=mi|hid=" . (int) $jwo_id . "|%'");
     mysqli_query($conn, "DELETE FROM tbl_material_issue_items WHERE material_issue_id = $jwo_id");
     foreach ($items as $item) {
@@ -307,9 +717,38 @@ if ($jwo_id > 0) {
                 $mi_dt_now = date('Y-m-d');
             }
         }
+        $issue_wt_row = auragold_material_issue_resolve_issue_weight(array_merge($item, [
+            'final_weight' => $final_weight,
+            'net_weight' => $net_weight,
+            'gross_weight' => $gross_weight,
+            'requested_wt' => $requested_wt,
+        ]));
+        $metal_id_line = (int) ($item['metal_id'] ?? 0);
+        if ($metal_id_line <= 0 && $characteristic_id !== null && (int) $characteristic_id > 0) {
+            $mr_ln = getRecord('SELECT metal_id FROM tbl_product_characteristics WHERE id = ' . (int) $characteristic_id . ' AND status = 1 LIMIT 1');
+            $metal_id_line = (int) ($mr_ln['metal_id'] ?? 0);
+        }
+        auragold_material_issue_apply_barcode_stock_deduct($conn, (int) $jwo_id, $mi_dt_now, array_merge($item, [
+            'product_id' => $product_id,
+            'characteristic_id' => $characteristic_id,
+            'metal_id' => $metal_id_line,
+        ]), $issue_wt_row);
+        $metal_base = auragold_material_issue_line_metal_wt(array_merge($item, [
+            'final_weight' => $final_weight,
+            'net_weight' => $net_weight,
+            'gross_weight' => $gross_weight,
+        ]));
+        $audit_pw = $purity_weight;
+        if ($issue_wt_row > 0.0000001 && $metal_base > 0.0000001 && abs($issue_wt_row - $metal_base) > 0.0000001 && $purity_weight > 0.0000001) {
+            $audit_pw = round($purity_weight * ($issue_wt_row / $metal_base), 4);
+        }
         auragold_stock_history_audit_for_document_barcode_line($conn, 'Material Issue', $mi_doc_now, $mi_dt_now, 'MI', (int) $jwo_id, $mi_line_id, 'mi', array_merge($item, [
             'product_id' => $product_id,
             'product_characteristic_id' => $characteristic_id !== null ? (int) $characteristic_id : 0,
+            'final_weight' => $issue_wt_row,
+            'purity_weight' => $audit_pw,
+            'gross_weight' => $issue_wt_row > 0.0000001 ? $issue_wt_row : ((float) ($item['gross_weight'] ?? 0)),
+            'net_weight' => $issue_wt_row > 0.0000001 ? $issue_wt_row : ((float) ($item['net_weight'] ?? 0)),
         ]));
     }
     if (!$standalone_mi && $sale_order_id > 0 && strtolower($new_status) === 'completed') {
@@ -318,6 +757,64 @@ if ($jwo_id > 0) {
     if (!$standalone_mi && $sale_order_id > 0) {
         auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
         auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
+    }
+    if (!empty($me_mi_payments)) {
+        foreach ($me_mi_payments as $__pmi) {
+            if (!is_array($__pmi)) {
+                continue;
+            }
+            $__mmi = auragold_payment_merge_stored_details($__pmi);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mmi);
+        }
+        $rmi_h_me = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+        $__mi_no_me = trim((string) ($rmi_h_me['material_issue_no'] ?? ''));
+        $__mi_dt_me = substr(trim((string) ($rmi_h_me['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_me)) {
+            $__mi_dt_me = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_me)) {
+                $__mi_dt_me = date('Y-m-d');
+            }
+        }
+        $___mi_doc_me_ref = auragold_metal_exchange_document_init($conn, true, (int) $jwo_id, 'material_issue_metal_exchange');
+        foreach ($me_mi_payments as $pay_seq => $payment) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                continue;
+            }
+            $___pm_mi = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'material_issue_metal_exchange',
+                (int) $jwo_id,
+                $__mi_no_me,
+                $__mi_dt_me,
+                $___pm_mi,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___mi_doc_me_ref,
+                'Material Issue — Metal Exchange',
+                'mi_me',
+                'MI-ME-',
+                $metal_exchange_barcodes_out
+            );
+        }
+    }
+    require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+    $rmi_apply_upd = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+    if ($rmi_apply_upd && (int) $jwo_id > 0) {
+        $od_ap = substr(trim((string) ($rmi_apply_upd['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od_ap)) {
+            $od_ap = date('Y-m-d');
+        }
+        auragold_voucher_apply_pending_diamond_stone_from_post(
+            $conn,
+            'material_issue',
+            (int) $jwo_id,
+            trim((string) ($rmi_apply_upd['material_issue_no'] ?? '')),
+            $od_ap
+        );
     }
     require_once __DIR__ . '/../includes/auragold_notifications.php';
     $rmi = @getRecord('SELECT material_issue_no, customer_name, order_date, due_date FROM tbl_material_issues WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
@@ -338,7 +835,7 @@ if ($jwo_id > 0) {
             'ref_id' => (int) $jwo_id,
         ]);
     }
-    echo json_encode(['status' => 'success', 'message' => 'Material issue updated', 'jwo_id' => $jwo_id]);
+    echo json_encode(['status' => 'success', 'message' => 'Material issue updated', 'jwo_id' => $jwo_id, 'new_barcodes' => $metal_exchange_barcodes_out]);
     exit;
 }
 
@@ -429,9 +926,38 @@ foreach ($items as $item) {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $mi_dt_new)) {
         $mi_dt_new = date('Y-m-d');
     }
+    $issue_wt_new = auragold_material_issue_resolve_issue_weight(array_merge($item, [
+        'final_weight' => $final_weight,
+        'net_weight' => $net_weight,
+        'gross_weight' => $gross_weight,
+        'requested_wt' => $requested_wt,
+    ]));
+    $metal_id_line_new = (int) ($item['metal_id'] ?? 0);
+    if ($metal_id_line_new <= 0 && $characteristic_id !== null && (int) $characteristic_id > 0) {
+        $mr_lnn = getRecord('SELECT metal_id FROM tbl_product_characteristics WHERE id = ' . (int) $characteristic_id . ' AND status = 1 LIMIT 1');
+        $metal_id_line_new = (int) ($mr_lnn['metal_id'] ?? 0);
+    }
+    auragold_material_issue_apply_barcode_stock_deduct($conn, (int) $new_jwo_id, $mi_dt_new, array_merge($item, [
+        'product_id' => $product_id,
+        'characteristic_id' => $characteristic_id,
+        'metal_id' => $metal_id_line_new,
+    ]), $issue_wt_new);
+    $metal_base_n = auragold_material_issue_line_metal_wt(array_merge($item, [
+        'final_weight' => $final_weight,
+        'net_weight' => $net_weight,
+        'gross_weight' => $gross_weight,
+    ]));
+    $audit_pw_n = $purity_weight;
+    if ($issue_wt_new > 0.0000001 && $metal_base_n > 0.0000001 && abs($issue_wt_new - $metal_base_n) > 0.0000001 && $purity_weight > 0.0000001) {
+        $audit_pw_n = round($purity_weight * ($issue_wt_new / $metal_base_n), 4);
+    }
     auragold_stock_history_audit_for_document_barcode_line($conn, 'Material Issue', $material_issue_no, $mi_dt_new, 'MI', (int) $new_jwo_id, $mi_line_id, 'mi', array_merge($item, [
         'product_id' => $product_id,
         'product_characteristic_id' => $characteristic_id !== null ? (int) $characteristic_id : 0,
+        'final_weight' => $issue_wt_new,
+        'purity_weight' => $audit_pw_n,
+        'gross_weight' => $issue_wt_new > 0.0000001 ? $issue_wt_new : ((float) ($item['gross_weight'] ?? 0)),
+        'net_weight' => $issue_wt_new > 0.0000001 ? $issue_wt_new : ((float) ($item['net_weight'] ?? 0)),
     ]));
 }
 
@@ -439,6 +965,66 @@ if (!$standalone_mi && $sale_order_id > 0) {
     auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
     auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
     mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'processing' WHERE id = $sale_order_id");
+}
+
+if (!empty($me_mi_payments)) {
+    foreach ($me_mi_payments as $__pmi_ins) {
+        if (!is_array($__pmi_ins)) {
+            continue;
+        }
+        $__mmi_ins = auragold_payment_merge_stored_details($__pmi_ins);
+        if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi_ins)) {
+            continue;
+        }
+        auragold_validate_metal_exchange_for_stock($conn, $__mmi_ins);
+    }
+    $rmi_ins_hdr = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+    $__mi_no_ins = trim((string) ($rmi_ins_hdr['material_issue_no'] ?? $material_issue_no));
+    $__mi_dt_ins = substr(trim((string) ($rmi_ins_hdr['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_ins)) {
+        $__mi_dt_ins = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_ins)) {
+            $__mi_dt_ins = date('Y-m-d');
+        }
+    }
+    $___mi_ins_me_ref = auragold_metal_exchange_document_init($conn, false, (int) $new_jwo_id, 'material_issue_metal_exchange');
+    foreach ($me_mi_payments as $pay_seq => $payment) {
+        if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+            continue;
+        }
+        $___pm_mi_ins = auragold_payment_merge_stored_details($payment);
+        auragold_post_metal_exchange_payment_to_stock(
+            $conn,
+            'material_issue_metal_exchange',
+            (int) $new_jwo_id,
+            $__mi_no_ins,
+            $__mi_dt_ins,
+            $___pm_mi_ins,
+            auragold_metal_exchange_default_branch_id(),
+            is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+            $___mi_ins_me_ref,
+            'Material Issue — Metal Exchange',
+            'mi_me',
+            'MI-ME-',
+            $metal_exchange_barcodes_out
+        );
+    }
+}
+
+require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+$rmi_apply_ins = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+if ($rmi_apply_ins && (int) $new_jwo_id > 0) {
+    $od_ins = substr(trim((string) ($rmi_apply_ins['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od_ins)) {
+        $od_ins = date('Y-m-d');
+    }
+    auragold_voucher_apply_pending_diamond_stone_from_post(
+        $conn,
+        'material_issue',
+        (int) $new_jwo_id,
+        trim((string) ($rmi_apply_ins['material_issue_no'] ?? '')),
+        $od_ins
+    );
 }
 
 require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -468,5 +1054,6 @@ echo json_encode([
     'job_work_no' => $material_issue_no,
     'jobwork_no' => $material_issue_no,
     'material_issue_no' => $material_issue_no,
-    'sale_order_id' => $standalone_mi ? 0 : $sale_order_id
+    'sale_order_id' => $standalone_mi ? 0 : $sale_order_id,
+    'new_barcodes' => $metal_exchange_barcodes_out,
 ]);

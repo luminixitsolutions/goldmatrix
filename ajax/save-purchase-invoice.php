@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/branch_profile_schema.php';
 require_once __DIR__ . '/../includes/dashboard_currency_display.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -496,9 +497,24 @@ if (!function_exists('purchase_invoice_post_auto_payment_voucher_ledger')) {
     }
 }
 
+if (!function_exists('purchase_invoice_validate_metal_exchange_payments')) {
+    /** @param array<int, array<string, mixed>> $payments */
+    function purchase_invoice_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = auragold_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
+        }
+    }
+}
+
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
-    
+    $metal_exchange_barcodes_out = [];
+
     // Get invoice data
     $invoice_no = esc($_POST['order_no'] ?? '');
     $supplier_id = isset($_POST['customer_id']) ? (int)$_POST['customer_id'] : 0;
@@ -1360,6 +1376,7 @@ try {
     }
     
     if (!empty($payments) && is_array($payments)) {
+        purchase_invoice_validate_metal_exchange_payments($conn, $payments);
         $pip_has_payment_details = false;
         $_pdc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_purchase_invoice_payments LIKE 'payment_details'");
         if ($_pdc && mysqli_num_rows($_pdc) > 0) {
@@ -1370,7 +1387,9 @@ try {
             $pip_has_payment_details = ($_pdc2 && mysqli_num_rows($_pdc2) > 0);
         }
 
-        foreach ($payments as $payment) {
+        $__pi_me_has_ref = auragold_metal_exchange_document_init($conn, $is_update, (int) $invoice_id, 'purchase_invoice_metal_exchange');
+
+        foreach ($payments as $pay_seq => $payment) {
             $payment_type = esc($payment['payment_type'] ?? '');
             $deposit_into = esc($payment['deposit_into'] ?? '');
             $transaction_no = esc($payment['transaction_no'] ?? '');
@@ -1384,57 +1403,57 @@ try {
             $payment_details_esc = mysqli_real_escape_string($conn, json_encode($payment, JSON_UNESCAPED_UNICODE));
             $pd_ins_col = $pip_has_payment_details ? ', payment_details' : '';
             $pd_ins_val = $pip_has_payment_details ? ", '$payment_details_esc'" : '';
-            
-            if ($amount > 0) {
+
+            if (auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
                 // Try to insert with previous_balance_amount column (if it exists)
                 $payment_sql = "
-                    INSERT INTO tbl_purchase_invoice_payments (
-                        invoice_id, payment_type, deposit_into, transaction_no,
-                        cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity
-                        $pd_ins_col,
-                        status, created_at
-                    ) VALUES (
-                        $invoice_id, '$payment_type',
-                        " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
-                        " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
-                        " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
-                        " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
-                        $amount,
-                        $previous_balance_amount,
-                        " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
-                        $quantity
-                        $pd_ins_val,
-                        1, NOW()
-                    )
-                ";
-                
-                // If insert fails due to missing column, try without previous_balance_amount
+                        INSERT INTO tbl_purchase_invoice_payments (
+                            invoice_id, payment_type, deposit_into, transaction_no,
+                            cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity
+                            $pd_ins_col,
+                            status, created_at
+                        ) VALUES (
+                            $invoice_id, '$payment_type',
+                            " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                            " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                            " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                            " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                            $amount,
+                            $previous_balance_amount,
+                            " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                            $quantity
+                            $pd_ins_val,
+                            1, NOW()
+                        )
+                    ";
+
+                    // If insert fails due to missing column, try without previous_balance_amount
                 if (!mysqli_query($conn, $payment_sql)) {
                     $error = mysqli_error($conn);
                     // Check for various error messages related to missing column
-                    if (stripos($error, 'previous_balance_amount') !== false || 
-                        stripos($error, 'Unknown column') !== false ||
-                        stripos($error, "field list") !== false) {
+                    if (stripos($error, 'previous_balance_amount') !== false ||
+                                stripos($error, 'Unknown column') !== false ||
+                                stripos($error, "field list") !== false) {
                         // Column doesn't exist, insert without it (will need to add column to table)
                         $payment_sql = "
-                            INSERT INTO tbl_purchase_invoice_payments (
-                                invoice_id, payment_type, deposit_into, transaction_no,
-                                cheque_date, purity_carat, amount, diamond_category, quantity
-                                $pd_ins_col,
-                                status, created_at
-                            ) VALUES (
-                                $invoice_id, '$payment_type',
-                                " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
-                                " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
-                                " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
-                                " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
-                                $amount,
-                                " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
-                                $quantity
-                                $pd_ins_val,
-                                1, NOW()
-                            )
-                        ";
+                                INSERT INTO tbl_purchase_invoice_payments (
+                                    invoice_id, payment_type, deposit_into, transaction_no,
+                                    cheque_date, purity_carat, amount, diamond_category, quantity
+                                    $pd_ins_col,
+                                    status, created_at
+                                ) VALUES (
+                                    $invoice_id, '$payment_type',
+                                    " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                                    " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                                    " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                                    " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                                    $amount,
+                                    " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                                    $quantity
+                                    $pd_ins_val,
+                                    1, NOW()
+                                )
+                            ";
                         if (!mysqli_query($conn, $payment_sql)) {
                             throw new Exception("Payment insert failed: " . mysqli_error($conn));
                         }
@@ -1443,6 +1462,30 @@ try {
                     }
                 }
             }
+
+            $pm_saved = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'purchase_invoice_metal_exchange',
+                (int) $invoice_id,
+                trim((string) preg_replace('/\s.+/', '', (string) $invoice_no)),
+                substr(trim((string) $invoice_date), 0, 10),
+                $pm_saved,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $__pi_me_has_ref,
+                'Purchase Invoice — Metal Exchange',
+                'pi_me',
+                'PI-ME-',
+                $metal_exchange_barcodes_out
+            );
+        }
+
+        if ($_pdc) {
+            mysqli_free_result($_pdc);
+        }
+        if (isset($_pdc2) && $_pdc2) {
+            mysqli_free_result($_pdc2);
         }
     }
     
@@ -2643,6 +2686,11 @@ try {
         }
     }
     
+    if ((int) $invoice_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'purchase_invoice', (int) $invoice_id, $invoice_no, $invoice_date);
+    }
+
     mysqli_commit($conn);
 
     // Create linked Old Jewellery Scrap (OJB-*) when this invoice has scrap payment — Old Jewellery list uses OJB invoice no., not PI
@@ -2669,7 +2717,8 @@ try {
         'status' => 'success',
         'message' => 'Purchase invoice saved successfully',
         'invoice_id' => $invoice_id,
-        'invoice_no' => $invoice_no
+        'invoice_no' => $invoice_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
     
 } catch (Exception $e) {

@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_mfg_jobwork_queue_line_weights.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -20,11 +21,33 @@ if (!$chk || mysqli_num_rows($chk) === 0) {
 }
 mysqli_free_result($chk);
 
+$ji_cols = [];
+$icq = @mysqli_query($conn, 'SHOW COLUMNS FROM tbl_jobwork_order_items');
+if ($icq) {
+    while ($c = mysqli_fetch_assoc($icq)) {
+        $fn = (string) ($c['Field'] ?? '');
+        if ($fn !== '') {
+            $ji_cols[$fn] = true;
+        }
+    }
+    mysqli_free_result($icq);
+}
+
 $items = function_exists('getList')
     ? getList("SELECT * FROM tbl_jobwork_order_items WHERE jobwork_order_id = $id ORDER BY id ASC")
     : [];
 if (!is_array($items)) {
     $items = [];
 }
+
+foreach ($items as &$item) {
+    if (!is_array($item)) {
+        continue;
+    }
+    $display = auragold_mfg_jobwork_line_calculated_total_wt($item, $ji_cols);
+    $item['queue_display_total_wt'] = $display;
+    $item['queue_display_loss_wt'] = auragold_mfg_jobwork_line_queue_display_loss($item, $ji_cols, $display);
+}
+unset($item);
 
 echo json_encode(['ok' => true, 'items' => $items]);

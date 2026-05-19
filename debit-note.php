@@ -789,6 +789,8 @@ text-transform: uppercase;
         transform: translateY(-1px);
         box-shadow: 0 4px 10px rgba(33, 150, 243, 0.4);
     }
+    /* Desktop only: do not override newcss mobile grid (≤991px) — unscoped flex was breaking header + FY/DB chip */
+    @media (min-width: 992px) {
     .company-header {
         display: flex;
         justify-content: space-between;
@@ -796,6 +798,7 @@ text-transform: uppercase;
         padding: 4px;
         background-color: #F8F6F1;
         border-radius: 0;
+    }
     }
     .company-info {
         display: flex;

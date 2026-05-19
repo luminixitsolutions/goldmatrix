@@ -944,6 +944,8 @@ text-transform: uppercase;
         transform: translateY(-1px);
         box-shadow: 0 4px 10px rgba(33, 150, 243, 0.4);
     }
+    /* Desktop only: do not override newcss mobile grid (≤991px) — unscoped flex was breaking header + FY/DB chip */
+    @media (min-width: 992px) {
     .company-header {
         display: flex;
         justify-content: space-between;
@@ -951,6 +953,7 @@ text-transform: uppercase;
         padding: 4px;
         background-color: #F8F6F1;
         border-radius: 0;
+    }
     }
     .company-info {
         display: flex;
@@ -3056,9 +3059,6 @@ text-transform: uppercase;
 </div>
 <!-- / Layout wrapper -->
 <?php include 'includes/common-modal.php'; ?>
-<link rel="stylesheet" href="assets/css/auragold-payment-cards.css">
-<script src="assets/js/auragold-payment-cards.js"></script>
-
 <?php include 'footer-script.php';?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
@@ -10693,10 +10693,8 @@ window.PB_PAGE_CONFIG = {
         // Retry: if items/totals still empty after 1.2s, run again
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -10977,7 +10975,7 @@ window.PB_PAGE_CONFIG = {
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }

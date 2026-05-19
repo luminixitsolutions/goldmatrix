@@ -206,6 +206,14 @@
     color: var(--mp-ot-navy);
     text-align: center;
 }
+.mp-ot-step-card-qno {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--mp-ot-gold-deep);
+}
 .mp-ot-step-meta {
     font-size: 0.78rem;
     line-height: 1.45;
@@ -465,7 +473,13 @@
             node.innerHTML = mpOtNodeIcon(st);
             var card = document.createElement('div');
             card.className = 'mp-ot-step-card';
-            card.textContent = it.title ? String(it.title) : '';
+            var titleTxt = it.title ? String(it.title) : '';
+            var jqCard = it.job_queue_no != null ? String(it.job_queue_no) : '';
+            if (jqCard !== '' && jqCard !== 'NA') {
+                card.innerHTML = '<span>' + mpOtEsc(titleTxt) + '</span><span class="mp-ot-step-card-qno">' + mpOtEsc(jqCard) + '</span>';
+            } else {
+                card.textContent = titleTxt;
+            }
             if (side === 'mp-ot-step--right') {
                 row.appendChild(meta);
                 row.appendChild(node);

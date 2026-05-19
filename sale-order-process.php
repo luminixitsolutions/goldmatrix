@@ -693,6 +693,26 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
 .th-col-settings { position: relative; }
 .btn-col-settings { width: 32px; height: 32px; padding: 0; border: none; background: transparent; color: #64748b; cursor: pointer; border-radius: 4px; }
 .btn-col-settings:hover { background: #e2e8f0; color: #11294b; }
+/* Column resize (order process table) */
+#orderProcessTable thead th { position: relative; }
+#orderProcessTable thead th .sop-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 2;
+    user-select: none;
+}
+#orderProcessTable thead th .sop-col-resizer:hover {
+    background: rgba(17, 41, 75, 0.12);
+}
+.sop-table-hint {
+    padding: 6px 20px 0;
+    font-size: 11px;
+    color: #64748b;
+}
 #columnSettingsModal .modal-dialog { max-width: 360px; }
 #columnSettingsModal .form-check { padding: 6px 0; }
 .sop-col-hidden { display: none !important; }
@@ -757,6 +777,7 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
                     </form>
                 </div>
             </div>
+            <p class="sop-table-hint mb-0">Drag the <i class="feather icon-move" style="vertical-align:middle;font-size:12px;"></i> icon on a column header to reorder. Drag the right edge of a header to resize. Layout is saved in this browser.</p>
 
             <!-- Table -->
             <div class="table-container">
@@ -891,7 +912,7 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
                             <td data-col="tag_no"><?php echo htmlspecialchars($tag_no); ?></td>
                             <td data-col="status"><span class="status-badge <?php echo $status_class; ?>"><?php echo $status_label; ?></span></td>
                             <td data-col="ecom_order_no">-</td>
-                            <td data-col="source"><?php echo $is_repair_row ? 'Repair' : 'AuraGold'; ?></td>
+                            <td data-col="source"><?php echo $is_repair_row ? 'Repair' : 'Gold Matrix'; ?></td>
                             <td data-col="design_no"><?php echo htmlspecialchars($item['design_no'] ?? '-'); ?></td>
                             <td data-col="current_user"><?php echo htmlspecialchars($item['sales_person'] ?? '-'); ?></td>
                             <td data-col="ecom_status">NA</td>
@@ -1175,7 +1196,7 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
                 <button type="button" class="close" data-dismiss="modal">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-3">Toggle columns to show or hide in the table.</p>
+                <p class="text-muted small mb-3">Toggle columns to show or hide. Drag the move icon on a header to reorder columns; drag the right edge of a header to resize. Preferences are saved in this browser.</p>
                 <div id="columnSettingsList"></div>
             </div>
             <div class="modal-footer">
@@ -1187,6 +1208,114 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
 </div>
 
 <script>
+(function (global) {
+    'use strict';
+    var SOP_WIDTHS_KEY = 'sale_order_process_col_widths';
+    var sopSaveTimer = null;
+    function sopClampWidth(col, px) {
+        var n = Math.round(px);
+        if (col === 'check') {
+            return Math.max(32, Math.min(56, n));
+        }
+        if (col === 'action' || col === 'action_icons') {
+            return Math.max(96, Math.min(640, n));
+        }
+        if (col === 'image') {
+            return Math.max(48, Math.min(200, n));
+        }
+        return Math.max(48, Math.min(900, n));
+    }
+    function sopSetColumnWidthPx(table, col, px) {
+        if (!table || !col) return;
+        var w = sopClampWidth(col, px);
+        var sel = 'th[data-col="' + col + '"], td[data-col="' + col + '"]';
+        table.querySelectorAll(sel).forEach(function (cell) {
+            cell.style.width = w + 'px';
+            cell.style.minWidth = w + 'px';
+            cell.style.maxWidth = w + 'px';
+        });
+    }
+    function sopLoadWidths() {
+        try {
+            var raw = localStorage.getItem(SOP_WIDTHS_KEY);
+            if (!raw) return null;
+            var o = JSON.parse(raw);
+            return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+        } catch (e) {
+            return null;
+        }
+    }
+    function sopSaveWidthsDebounced(table) {
+        if (sopSaveTimer) clearTimeout(sopSaveTimer);
+        sopSaveTimer = setTimeout(function () {
+            sopSaveTimer = null;
+            var out = {};
+            if (!table) return;
+            table.querySelectorAll('thead th[data-col]').forEach(function (th) {
+                var k = th.getAttribute('data-col');
+                if (!k || th.classList.contains('sop-col-hidden')) return;
+                var ow = th.offsetWidth;
+                if (ow >= 40) out[k] = ow;
+            });
+            try {
+                localStorage.setItem(SOP_WIDTHS_KEY, JSON.stringify(out));
+            } catch (e2) {}
+        }, 350);
+    }
+    function sopApplySavedWidths(table) {
+        var widths = sopLoadWidths();
+        if (!table || !widths) return;
+        Object.keys(widths).forEach(function (k) {
+            var px = parseInt(widths[k], 10);
+            if (px >= 40) sopSetColumnWidthPx(table, k, px);
+        });
+    }
+    function sopRemoveResizers(table) {
+        if (!table) return;
+        table.querySelectorAll('thead .sop-col-resizer').forEach(function (el) {
+            el.remove();
+        });
+    }
+    function sopInstallResizers(table) {
+        if (!table) return;
+        sopRemoveResizers(table);
+        table.querySelectorAll('thead th[data-col]').forEach(function (th) {
+            var col = th.getAttribute('data-col');
+            if (!col || col === 'check') return;
+            if (th.classList.contains('sop-col-hidden')) return;
+            var grip = document.createElement('span');
+            grip.className = 'sop-col-resizer';
+            grip.setAttribute('title', 'Drag to resize column');
+            grip.setAttribute('aria-hidden', 'true');
+            th.appendChild(grip);
+            grip.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var startX = e.pageX;
+                var startW = th.offsetWidth;
+                function onMove(e2) {
+                    sopSetColumnWidthPx(table, col, startW + (e2.pageX - startX));
+                }
+                function onUp() {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.body.style.cursor = '';
+                    sopSaveWidthsDebounced(table);
+                }
+                document.body.style.cursor = 'col-resize';
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+    global.sopOrderProcessLayoutInit = function () {
+        var table = document.getElementById('orderProcessTable');
+        if (!table) return;
+        sopApplySavedWidths(table);
+        sopInstallResizers(table);
+    };
+})(typeof window !== 'undefined' ? window : this);
+
 document.getElementById('selectAll')?.addEventListener('change', function() {
     document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = this.checked);
     updateBulkActionState();
@@ -1491,6 +1620,9 @@ updateBulkActionState();
         }
         setStoredVisible(visible);
         applyColumnVisibility(visible);
+        if (typeof window.sopOrderProcessLayoutInit === 'function') {
+            window.sopOrderProcessLayoutInit();
+        }
         if (typeof $ !== 'undefined' && $.fn.modal) {
             $('#columnSettingsModal').modal('hide');
         } else {
@@ -1513,6 +1645,21 @@ updateBulkActionState();
     }
 
 })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="assets/js/auragold-col-reorder.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.AuragoldColReorder) {
+        AuragoldColReorder.init('#orderProcessTable', {
+            storageKey: 'auragold_colorder_sale_order_process',
+            fixedFirst: true
+        });
+    }
+    if (typeof window.sopOrderProcessLayoutInit === 'function') {
+        window.sopOrderProcessLayoutInit();
+    }
+});
 </script>
 </body>
 </html>

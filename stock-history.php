@@ -284,7 +284,7 @@ if ($product_id > 0) {
 }
 
 // Inward Stock Query (stock coming in - opening, purchases, journal/balance lots, sale returns — align with analysis aggregates)
-$inward_where = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'stock_journal', 'balance', 'sale_return')";
+$inward_where = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'stock_journal', 'balance', 'sale_return', 'inward')";
 if ($product_id > 0) {
     $inward_where .= " AND s.product_id = $product_id";
 }

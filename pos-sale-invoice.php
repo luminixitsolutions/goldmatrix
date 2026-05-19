@@ -64,8 +64,16 @@ $auragold_voucher_runtime_client = auragold_voucher_runtime_bootstrap($conn, $me
 $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherSettings() : [];
 
 
-// Load Karat master data
-$carats = getList("SELECT id, name, purity, description FROM tbl_carat WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_carat') . " ORDER BY id ASC");
+// Load Karat master data (metal_id when column exists — used to scope POS "Select Karat" per metal tab)
+$pos_carat_has_metal_col = isset($conn) && $conn instanceof mysqli && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
+if ($pos_carat_has_metal_col) {
+    $carats = getList("SELECT id, name, purity, description, metal_id FROM tbl_carat WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_carat') . " ORDER BY metal_id IS NULL, metal_id ASC, id ASC");
+} else {
+    $carats = getList("SELECT id, name, purity, description FROM tbl_carat WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_carat') . " ORDER BY id ASC");
+}
+if (!is_array($carats)) {
+    $carats = [];
+}
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_location') . " ORDER BY id ASC");
@@ -152,6 +160,9 @@ $edit_order_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
+
+$auragold_voucher_ds_kind = 'pos_sale_invoice';
+$auragold_voucher_ds_db_id = (int) ($edit_order_id ?? 0);
 
 if (!empty($edit_order_id)) {
     $edit_order = getRecord("SELECT * FROM tbl_pos_sale_invoices WHERE id = " . intval($edit_order_id));
@@ -1136,6 +1147,7 @@ text-transform: uppercase;
         transform: translateY(-1px);
         box-shadow: 0 4px 10px rgba(33, 150, 243, 0.4);
     }
+    @media (min-width: 992px) {
     .company-header {
         display: flex;
         justify-content: space-between;
@@ -1143,6 +1155,7 @@ text-transform: uppercase;
         padding: 4px;
         background-color: #F8F6F1;
         border-radius: 0;
+    }
     }
     .company-info {
         display: flex;
@@ -3229,6 +3242,7 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
                                 </div>
                             </div>
                         </div>
@@ -3422,10 +3436,9 @@ text-transform: uppercase;
 </div>
 
 <?php include 'includes/common-modal.php'; ?>
-<link rel="stylesheet" href="assets/css/auragold-payment-cards.css">
-<script src="assets/js/auragold-payment-cards.js"></script>
-
 <?php include 'footer-script.php';?>
+
+<?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <script src="assets/js/product-list-table-shared.js"></script>
@@ -3569,7 +3582,13 @@ window.PB_PAGE_CONFIG = {
             'eway_trans_doc_date' => trim((string)($edit_order['eway_trans_doc_date'] ?? '')),
             'eway_vehicle_type' => strtoupper(trim((string)($edit_order['eway_vehicle_type'] ?? 'R'))) === 'O' ? 'O' : 'R',
             'eway_to_pincode' => preg_replace('/\D/', '', (string)($edit_order['eway_to_pincode'] ?? '')),
+            'diamond_issues' => [],
+            'stone_issues' => [],
         ];
+        require_once __DIR__ . '/includes/auragold_voucher_diamond_stock.php';
+        require_once __DIR__ . '/includes/auragold_voucher_stone_stock.php';
+        $embed_order['diamond_issues'] = auragold_voucher_list_diamond_issue_rows_for_kind($conn, 'pos_sale_invoice', (int) ($edit_order['id'] ?? 0));
+        $embed_order['stone_issues'] = auragold_voucher_list_stone_issue_rows_for_kind($conn, 'pos_sale_invoice', (int) ($edit_order['id'] ?? 0));
         $embed_items = is_array($edit_items) ? $edit_items : [];
         $embed_payments = is_array($edit_payments) ? $edit_payments : [];
         // Convert saved image paths (images column) to full URLs for group_image so UI can display them
@@ -3659,6 +3678,131 @@ window.PB_PAGE_CONFIG = {
         }
     }
     window.populateSelect = populateSelect;
+
+    /** True if at least one carat row has metal_id set (enables strict metal scoping). */
+    function auragoldCaratsMasterUsesMetalIds() {
+        if (typeof carats === 'undefined' || !carats || !carats.length) return false;
+        for (var i = 0; i < carats.length; i++) {
+            var m = carats[i].metal_id;
+            if (m != null && String(m).trim() !== '' && String(m) !== '0') return true;
+        }
+        return false;
+    }
+
+    function auragoldMetalTabCategoryFromMetalId(metalId) {
+        var idStr = metalId != null ? String(metalId) : '';
+        if (!idStr || typeof window.metals === 'undefined' || !window.metals || !window.metals.length) return '';
+        for (var i = 0; i < window.metals.length; i++) {
+            var x = window.metals[i];
+            if (String(x.id) !== idStr) continue;
+            var label = (x.display_name || x.system_name || x.name || '').toLowerCase();
+            if (!label) return '';
+            if (label.indexOf('diamond') !== -1) return 'diamond';
+            if (label.indexOf('gold') !== -1) return 'gold';
+            if (label.indexOf('silver') !== -1) return 'silver';
+            if (label.indexOf('platinum') !== -1) return 'platinum';
+            if (label.indexOf('imitation') !== -1 || label.indexOf('watch') !== -1) return 'other';
+            if (label.indexOf('other') !== -1 || label.indexOf('service') !== -1) return 'other';
+            return '';
+        }
+        return '';
+    }
+
+    /** When metal_id is not set on carat rows, infer line type from the name (fallback before master data is fully linked). */
+    function auragoldInferCaratNameKind(name) {
+        var raw = String(name != null ? name : '').trim();
+        if (!raw) return '';
+        var n = raw.toLowerCase();
+        if (/\d+(\.\d+)?\s*ct\b/i.test(n)) return 'diamond';
+        if (/\d+\s*k\b/i.test(raw)) return 'gold';
+        if (/^\d{3,4}(\.\d+)?$/i.test(raw.replace(/\s+/g, ''))) return 'fineness';
+        return '';
+    }
+
+    function auragoldFinenessCode(name) {
+        var raw = String(name != null ? name : '').trim().replace(/\s+/g, '');
+        var m = raw.match(/^(\d{3,4}(?:\.\d+)?)/i);
+        return m ? m[1].toUpperCase() : '';
+    }
+
+    function auragoldCaratMatchesTabCategory(crow, tabCat) {
+        if (!tabCat || tabCat === 'other') return true;
+        var nm = (crow && crow.name != null) ? String(crow.name) : '';
+        var kind = auragoldInferCaratNameKind(nm);
+        if (tabCat === 'gold') return kind === 'gold';
+        if (tabCat === 'diamond') return kind === 'diamond';
+        var code = auragoldFinenessCode(nm);
+        if (tabCat === 'silver') {
+            if (kind !== 'fineness' && !code) return false;
+            return /^(999|995|990|980|970|960|958|940|925|920|915|910|905|900|875|840|835|800)$/.test(code);
+        }
+        if (tabCat === 'platinum') {
+            if (kind !== 'fineness' && !code) return false;
+            return /^(9995|999|990|980|970|960|950|900|850|800)$/.test(code);
+        }
+        return true;
+    }
+
+    /** Map free-text tab / metal label to category (fallback when metal master name is non-standard). */
+    function auragoldMetalTabCategoryFromLabel(label) {
+        var ln = String(label != null ? label : '').toLowerCase();
+        if (!ln) return '';
+        if (ln.indexOf('diamond') !== -1) return 'diamond';
+        if (ln.indexOf('gold') !== -1) return 'gold';
+        if (ln.indexOf('silver') !== -1) return 'silver';
+        if (ln.indexOf('platinum') !== -1) return 'platinum';
+        if (ln.indexOf('imitation') !== -1 || ln.indexOf('watch') !== -1) return 'other';
+        if (ln.indexOf('other') !== -1 || ln.indexOf('service') !== -1) return 'other';
+        return '';
+    }
+
+    /** Carat rows allowed for a POS metal tab / row metal id. */
+    function caratsFilteredForModalMetal(metalId) {
+        if (typeof carats === 'undefined' || !carats || !carats.length) return [];
+        var idKey = metalId != null ? String(metalId).trim() : '';
+        if (auragoldCaratsMasterUsesMetalIds()) {
+            return carats.filter(function(c) {
+                var m = c.metal_id;
+                if (m == null || String(m).trim() === '' || String(m) === '0') return false;
+                return String(m) === idKey;
+            });
+        }
+        var tabCat = auragoldMetalTabCategoryFromMetalId(idKey);
+        if (!tabCat && idKey && typeof currentMetalId !== 'undefined' && currentMetalName &&
+            String(currentMetalId) === idKey) {
+            tabCat = auragoldMetalTabCategoryFromLabel(currentMetalName);
+        }
+        if (!tabCat) return carats.slice();
+        return carats.filter(function(c) { return auragoldCaratMatchesTabCategory(c, tabCat); });
+    }
+
+    /** (Re)fill one "Select Karat" dropdown for the row's metal; keeps previous value if still valid. */
+    function populateCaratSelectForModalRow(caratSelect, row) {
+        if (!caratSelect) return;
+        var mid = '';
+        if (row && row.getAttribute) mid = row.getAttribute('data-metal-id') || '';
+        if (!mid && typeof currentMetalId !== 'undefined' && currentMetalId != null && currentMetalId !== '') mid = String(currentMetalId);
+        var prev = '';
+        try { prev = caratSelect.value || ''; } catch (e) { prev = ''; }
+        populateSelect(caratSelect, caratsFilteredForModalMetal(mid), 'id', 'name', 'Select Karat');
+        if (prev) {
+            try {
+                caratSelect.value = prev;
+                if (caratSelect.value !== prev) caratSelect.value = '';
+            } catch (e2) {}
+        }
+    }
+    window.populateCaratSelectForModalRow = populateCaratSelectForModalRow;
+
+    function refreshProductModalCaratSelectsForVisibleRows() {
+        var tbody = document.getElementById('productListBody');
+        if (!tbody) return;
+        tbody.querySelectorAll('tr.product-row').forEach(function(row) {
+            if (row.style.display === 'none') return;
+            var sel = row.querySelector('.carat-select');
+            if (sel) populateCaratSelectForModalRow(sel, row);
+        });
+    }
     
     function auragoldPopulateModalSpecSelectsForRow(row) {
         if (!row || !row.querySelector) return;
@@ -3725,7 +3869,7 @@ window.PB_PAGE_CONFIG = {
         { dataColumn: 'amount', label: 'Amount' },
         { dataColumn: 'metal-group', label: 'Metal (group)' },
         { dataColumn: 'metal-weight', label: 'Weight' },
-        { dataColumn: 'carat', label: 'Carat' },
+        { dataColumn: 'carat', label: 'Karat' },
         { dataColumn: 'purity', label: 'Purity %' },
         { dataColumn: 'purity-wt', label: 'Purity Wt' },
         { dataColumn: 'rate', label: 'Rate' },
@@ -5738,6 +5882,9 @@ window.PB_PAGE_CONFIG = {
                 if (typeof applyProductModalColumnVisibilityForTab === 'function') {
                     applyProductModalColumnVisibilityForTab(currentMetalId || '');
                 }
+                if (typeof refreshProductModalCaratSelectsForVisibleRows === 'function') {
+                    refreshProductModalCaratSelectsForVisibleRows();
+                }
                 // Apply stored group image for this tab if any
                 var storedImage = window.productModalGroupImageByTab && window.productModalGroupImageByTab[currentMetalId || ''];
                 if (storedImage && typeof applyProductModalGroupImageToPhotoColumns === 'function') {
@@ -5790,6 +5937,7 @@ window.PB_PAGE_CONFIG = {
             var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
             if (filterRow) filterRow.style.display = isDiamond ? '' : 'none';
             if (typeof applyProductModalColumnVisibilityForTab === 'function') applyProductModalColumnVisibilityForTab(currentMetalId || '');
+            if (typeof refreshProductModalCaratSelectsForVisibleRows === 'function') refreshProductModalCaratSelectsForVisibleRows();
         }
     }
     window.switchToMetalTab = switchToMetalTab;
@@ -6074,7 +6222,7 @@ window.PB_PAGE_CONFIG = {
         // Populate dropdowns
         const caratSelect = row.querySelector('.carat-select');
         if (caratSelect) {
-            populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
+            populateCaratSelectForModalRow(caratSelect, row);
         }
         
         const locationSelect = row.querySelector('.location-select');
@@ -6614,6 +6762,7 @@ window.PB_PAGE_CONFIG = {
         var otherChargeSel = row.querySelector('[data-column="other-charge-type"] select');
         if (otherChargeSel && sj.other_charge_type) setModalSelectIfOptionExists(row, 'other-charge-type', sj.other_charge_type);
         var caratSel = row.querySelector('[data-column="carat"] select');
+        if (caratSel && typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(caratSel, row);
         if (caratSel && (sj.karat != null && sj.karat !== '')) selectCaratFromStockJournal(caratSel, sj.karat);
         if (sj.id) row.setAttribute('data-stock-journal-id', String(sj.id));
     }
@@ -6647,6 +6796,11 @@ window.PB_PAGE_CONFIG = {
         else row.removeAttribute('data-barcode-prefix');
         if (!isNaN(bdg) && bdg >= 1) row.setAttribute('data-barcode-digits', String(bdg));
         else row.removeAttribute('data-barcode-digits');
+        
+        var caratSelectPm = row.querySelector('.carat-select');
+        if (caratSelectPm && typeof populateCaratSelectForModalRow === 'function') {
+            populateCaratSelectForModalRow(caratSelectPm, row);
+        }
         
         // Update checkbox
         const checkbox = row.querySelector('.product-checkbox');
@@ -6793,6 +6947,9 @@ window.PB_PAGE_CONFIG = {
             // No journal row: still apply voucher default (Fix) for discount type
             var defDt = typeof getVoucherDefaultDiscountTypeForModalRow === 'function' ? getVoucherDefaultDiscountTypeForModalRow(row) : 'Fix';
             setModalSelectIfOptionExists(row, 'discount-type', defDt);
+            if (caratSelectPm && product.carat != null && product.carat !== '' && typeof selectCaratFromStockJournal === 'function') {
+                selectCaratFromStockJournal(caratSelectPm, product.carat);
+            }
         }
         // Journal apply can run before diamond options exist; re-apply saved Diamond Category from purchase / API.
         var dcAfterJournal = product.diamond_category || product.category || (product.stock_journal && product.stock_journal.category) || '';
@@ -6993,9 +7150,10 @@ window.PB_PAGE_CONFIG = {
                     if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
                         tbody.querySelectorAll('tr.product-row').forEach(function(r) { auragoldPopulateModalSpecSelectsForRow(r); });
                     }
-                    // Populate carat and location dropdowns
-                    tbody.querySelectorAll('.carat-select').forEach(function(select) {
-                        populateSelect(select, carats, 'id', 'name', 'Select Karat');
+                    // Populate carat and location dropdowns (carat options scoped per row metal / tab)
+                    tbody.querySelectorAll('tr.product-row').forEach(function(r) {
+                        var cs = r.querySelector('.carat-select');
+                        if (cs && typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(cs, r);
                     });
                     
                     tbody.querySelectorAll('.location-select').forEach(function(select) {
@@ -7224,9 +7382,10 @@ window.PB_PAGE_CONFIG = {
                         if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') {
                             tbody.querySelectorAll('tr.product-row').forEach(function(r) { auragoldPopulateModalSpecSelectsForRow(r); });
                         }
-                        // Populate carat and location dropdowns
-                        tbody.querySelectorAll('.carat-select').forEach(function(select) {
-                            populateSelect(select, carats, 'id', 'name', 'Select Karat');
+                        // Populate carat and location dropdowns (carat options scoped per row metal / tab)
+                        tbody.querySelectorAll('tr.product-row').forEach(function(r) {
+                            var cs = r.querySelector('.carat-select');
+                            if (cs && typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(cs, r);
                         });
                         
                         tbody.querySelectorAll('.location-select').forEach(function(select) {
@@ -10851,6 +11010,9 @@ window.PB_PAGE_CONFIG = {
         orderData.payments = (typeof collectPosPaymentsForSave === 'function')
             ? collectPosPaymentsForSave()
             : [];
+        if (typeof window.auragoldVoucherDiamondStoneAppendPendingToOrderData === 'function') {
+            window.auragoldVoucherDiamondStoneAppendPendingToOrderData(orderData);
+        }
         
         // Show loading
         const saveBtn = document.querySelector('.btn-save-invoice, .btn-purple');
@@ -10863,7 +11025,7 @@ window.PB_PAGE_CONFIG = {
         // Convert arrays to JSON strings for POST
         const postData = {};
         Object.keys(orderData).forEach(key => {
-            if (key === 'items' || key === 'payments') {
+            if (typeof window.auragoldVoucherDiamondStonePostDataShouldStringify === 'function' && window.auragoldVoucherDiamondStonePostDataShouldStringify(key)) {
                 postData[key] = JSON.stringify(orderData[key]);
             } else {
                 postData[key] = orderData[key];
@@ -10894,6 +11056,9 @@ window.PB_PAGE_CONFIG = {
                             if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(false);
                         }
                         const invoiceId = response.invoice_id || response.order_id;
+                        if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                            window.auragoldVoucherDiamondStoneOnSaveSuccess(invoiceId);
+                        }
                         showSaleInvoiceEwayUserFeedback(response, function() {
                             if (invoiceId) {
                                 window.pendingRedirectUrl = 'pos-sale-invoice.php';
@@ -10959,6 +11124,9 @@ window.PB_PAGE_CONFIG = {
                         if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(false);
                     }
                     const invoiceId = data.invoice_id || data.order_id;
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(invoiceId);
+                    }
                     showSaleInvoiceEwayUserFeedback(data, function() {
                         if (invoiceId) {
                             window.pendingRedirectUrl = 'pos-sale-invoice.php';
@@ -11426,8 +11594,8 @@ window.PB_PAGE_CONFIG = {
         
         // Populate dropdowns (location, carat, etc.)
         const caratSelect = row.querySelector('.carat-select');
-        if (caratSelect && typeof populateSelect === 'function') {
-            populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
+        if (caratSelect && typeof populateCaratSelectForModalRow === 'function') {
+            populateCaratSelectForModalRow(caratSelect, row);
             if (item.carat_id) {
                 caratSelect.value = item.carat_id;
             }
@@ -11662,6 +11830,10 @@ window.PB_PAGE_CONFIG = {
     // Populate form with order data (param loadedPayments to avoid shadowing global payments)
     function populateOrderForm(order, items, loadedPayments) {
         console.log('populateOrderForm executing', { orderId: order && order.id, itemsCount: (items && items.length) || 0, paymentsCount: (loadedPayments && loadedPayments.length) || 0 });
+
+        if (typeof window.auragoldVoucherDiamondStonePopulateFromOrder === 'function') {
+            window.auragoldVoucherDiamondStonePopulateFromOrder(order);
+        }
 
         var pfdBlock = !!(order && (order.purchase_fixing_blocks_save === true || order.purchase_fixing_blocks_save === 1 || order.purchase_fixing_blocks_save === '1'));
         updateSiSaveBlockedByPfd(pfdBlock);
@@ -12178,10 +12350,8 @@ window.PB_PAGE_CONFIG = {
         // Retry: if items/totals still empty after 1.2s, run again
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -12452,6 +12622,11 @@ window.PB_PAGE_CONFIG = {
             scrapProductInput.addEventListener('focus', function() {
                 if (scrapMetal && scrapMetal.value) searchScrapProducts();
             });
+            scrapProductInput.addEventListener('blur', function() {
+                if (scrapProductId && !String(scrapProductId.value || '').trim()) {
+                    scrapProductInput.value = '';
+                }
+            });
         }
         document.addEventListener('click', function(e) {
             if (scrapProductList && scrapProductList.style.display === 'block' && !scrapProductList.contains(e.target) && e.target !== scrapProductInput) {
@@ -12601,8 +12776,48 @@ window.PB_PAGE_CONFIG = {
             var inlineBankClr = document.getElementById('posInlineBankDepositInto');
             if (inlineBankClr) inlineBankClr.classList.remove('is-invalid');
         }
+
+        if (type === 'metal-exchange') {
+            var meM = document.getElementById('metalExchangeMetal');
+            var mePid = document.getElementById('metalExchangeProductId');
+            var mePin = document.getElementById('metalExchangeProductInput');
+            if (!meM || String(meM.value || '').trim() === '') {
+                alert('Please select a metal for metal exchange.');
+                if (meM) meM.focus();
+                return;
+            }
+            if (!mePid || String(mePid.value || '').trim() === '') {
+                alert('Please select a product from the list. Search and click a row — you cannot save a product name that is not in the system.');
+                if (mePin) {
+                    mePin.focus();
+                    mePin.classList.add('is-invalid');
+                }
+                return;
+            }
+            if (mePin) mePin.classList.remove('is-invalid');
+        }
+
+        if (type === 'scrap') {
+            var scM = document.getElementById('scrapMetal');
+            var scPid = document.getElementById('scrapProductId');
+            var scPin = document.getElementById('scrapProductInput');
+            if (!scM || String(scM.value || '').trim() === '') {
+                alert('Please select a metal for scrap payment.');
+                if (scM) scM.focus();
+                return;
+            }
+            if (!scPid || String(scPid.value || '').trim() === '') {
+                alert('Please select a product from the list. Search and click a row — you cannot save a product name that is not in the system.');
+                if (scPin) {
+                    scPin.focus();
+                    scPin.classList.add('is-invalid');
+                }
+                return;
+            }
+            if (scPin) scPin.classList.remove('is-invalid');
+        }
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }

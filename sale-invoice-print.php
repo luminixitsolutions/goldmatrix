@@ -411,6 +411,11 @@ if (!in_array($template, $structure_templates, true)) {
     $template = 'template_classic';
 }
 ?>
+<?php
+if (!empty($GLOBALS['AURAGOLD_SALE_INVOICE_MAIL_CAPTURE'])) {
+    ob_start();
+}
+?>
 <!DOCTYPE html>
 <html lang="<?php echo $lang === 'ar' ? 'ar' : 'en'; ?>" dir="<?php echo $lang === 'ar' ? 'rtl' : 'ltr'; ?>">
 <head>
@@ -504,3 +509,8 @@ if (!in_array($template, $structure_templates, true)) {
 <?php include(dirname(__FILE__) . '/invoice_templates/' . $template . '.php'); ?>
 </body>
 </html>
+<?php
+if (!empty($GLOBALS['AURAGOLD_SALE_INVOICE_MAIL_CAPTURE'])) {
+    $GLOBALS['auragold_sale_invoice_mail_html'] = (string) ob_get_clean();
+    return;
+}

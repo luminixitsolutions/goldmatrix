@@ -178,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ";
                     if (mysqli_query($conn, $update_sql)) {
                         $_SESSION['department_success'] = 'Department updated successfully.';
-                        header('Location: department.php?dept_id=' . $edit_department_id);
+                        header('Location: department.php');
                         exit;
                     } else {
                         $error_message = 'Failed to update department.';
@@ -192,9 +192,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ";
 
                     if (mysqli_query($conn, $insert_sql)) {
-                        $new_id = (int)mysqli_insert_id($conn);
                         $_SESSION['department_success'] = 'Department saved successfully.';
-                        header('Location: department.php?dept_id=' . $new_id);
+                        header('Location: department.php');
                         exit;
                     } else {
                         $error_message = 'Failed to save department.';

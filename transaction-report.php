@@ -311,6 +311,7 @@ $transaction_list_types = [
     'old_jewelry_scrap_invoice' => 'Old Jewelry Scrap Invoice',
     'payment_voucher' => 'Payment Voucher',
     'receipt_voucher' => 'Receipt Voucher',
+    'sale_receipt_voucher' => 'Sale Receipt Voucher',
     'advance_payment' => 'Advance Payment',
     'metal_to_amount' => 'Metal to Amount',
     'amount_to_metal' => 'Amount to Metal',
@@ -333,7 +334,7 @@ if ($pi_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($pi_has_br && $tr_branch_filter_sql !== '') {
         $pi_where .= $tr_branch_filter_sql;
     }
-    $pi_sel = 'id, invoice_no, supplier_name, invoice_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, purchase_person';
+    $pi_sel = 'id, invoice_no, supplier_name, invoice_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, purchase_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_purchase_invoices.supplier_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($pi_has_br) {
         $pi_sel .= ', branch_id';
     }
@@ -352,6 +353,7 @@ if ($pi_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'purchase-invoice.php?id=' . (int)$r['id'],
             'print_link' => 'purchase-invoice-print.php?id=' . (int)$r['id'],
             'branch_name' => $pi_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -448,7 +450,7 @@ if ($si_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($si_has_br && $tr_branch_filter_sql !== '') {
         $si_where .= $tr_branch_filter_sql;
     }
-    $si_sel = 'id, invoice_no, customer_name, invoice_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person';
+    $si_sel = 'id, invoice_no, customer_name, invoice_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_sale_invoices.customer_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($si_has_br) {
         $si_sel .= ', branch_id';
     }
@@ -467,6 +469,7 @@ if ($si_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'sale-invoice.php?id=' . (int)$r['id'],
             'print_link' => 'sale-invoice-print.php?id=' . (int)$r['id'],
             'branch_name' => $si_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -484,7 +487,7 @@ if ($so_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($so_has_br && $tr_branch_filter_sql !== '') {
         $so_where .= $tr_branch_filter_sql;
     }
-    $so_sel = 'id, order_no, customer_name, order_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person';
+    $so_sel = 'id, order_no, customer_name, order_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_sale_orders.customer_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($so_has_br) {
         $so_sel .= ', branch_id';
     }
@@ -503,6 +506,7 @@ if ($so_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'sale-order.php?id=' . (int)$r['id'],
             'print_link' => 'sale-order-print.php?id=' . (int)$r['id'],
             'branch_name' => $so_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -520,7 +524,7 @@ if ($sr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($sr_has_br && $tr_branch_filter_sql !== '') {
         $sr_where .= $tr_branch_filter_sql;
     }
-    $sr_sel = 'id, return_no, customer_name, return_date, grand_total, sales_person';
+    $sr_sel = 'id, return_no, customer_name, return_date, grand_total, sales_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_sale_returns.customer_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($sr_has_br) {
         $sr_sel .= ', branch_id';
     }
@@ -539,6 +543,7 @@ if ($sr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'sale-return.php?id=' . (int)$r['id'],
             'print_link' => 'sale-return.php?id=' . (int)$r['id'] . '&print=1',
             'branch_name' => $sr_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -556,7 +561,7 @@ if ($pr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($pr_has_br && $tr_branch_filter_sql !== '') {
         $pr_where .= $tr_branch_filter_sql;
     }
-    $pr_sel = 'id, return_no, supplier_name, return_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person';
+    $pr_sel = 'id, return_no, supplier_name, return_date, grand_total, COALESCE(balance_amt, 0) as balance_amt, sales_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_purchase_returns.supplier_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($pr_has_br) {
         $pr_sel .= ', branch_id';
     }
@@ -575,6 +580,7 @@ if ($pr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'purchase-return.php?id=' . (int)$r['id'],
             'print_link' => 'purchase-return.php?id=' . (int)$r['id'] . '&print=1',
             'branch_name' => $pr_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -592,7 +598,7 @@ if ($sq_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($sq_has_br && $tr_branch_filter_sql !== '') {
         $sq_where .= $tr_branch_filter_sql;
     }
-    $sq_sel = 'id, quotation_no, customer_name, quotation_date, grand_total, sales_person';
+    $sq_sel = 'id, quotation_no, customer_name, quotation_date, grand_total, sales_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_sale_quotations.customer_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($sq_has_br) {
         $sq_sel .= ', branch_id';
     }
@@ -611,6 +617,7 @@ if ($sq_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'sale-quotations.php?id=' . (int)$r['id'],
             'print_link' => 'sale-quotations.php?id=' . (int)$r['id'] . '&print=1',
             'branch_name' => $sq_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -628,7 +635,7 @@ if ($pq_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
     if ($pq_has_br && $tr_branch_filter_sql !== '') {
         $pq_where .= $tr_branch_filter_sql;
     }
-    $pq_sel = 'id, quotation_no, supplier_name, quotation_date, grand_total, purchase_person';
+    $pq_sel = 'id, quotation_no, supplier_name, quotation_date, grand_total, purchase_person, (SELECT TRIM(COALESCE(c.mail_id,\'\')) FROM tbl_customers c WHERE c.id = tbl_purchase_quotations.supplier_id AND (c.status IS NULL OR c.status = 1) LIMIT 1) AS party_email';
     if ($pq_has_br) {
         $pq_sel .= ', branch_id';
     }
@@ -647,6 +654,7 @@ if ($pq_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'link' => 'purchase-quotation.php?id=' . (int)$r['id'],
             'print_link' => 'purchase-quotation.php?id=' . (int)$r['id'] . '&print=1',
             'branch_name' => $pq_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
     }
 }
@@ -971,6 +979,7 @@ if ($rv_list_check) {
 if ($rv_list_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'receipt_voucher')) {
     $rv_l_has_br = auragold_tbl_has_column($conn, 'tbl_receipt_vouchers', 'branch_id');
     $rv_l_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    $rv_l_where .= " AND COALESCE(voucher_type,'') <> 'Sale Invoice Payment'";
     if (!empty($from_date)) {
         $rv_l_where .= " AND voucher_date >= '$from_date'";
     }
@@ -1009,6 +1018,56 @@ if ($rv_list_exists && ($transaction_voucher_filter === '' || $transaction_vouch
                 'link' => 'receipt-voucher.php?id=' . (int) ($r['id'] ?? 0),
                 'print_link' => 'receipt-voucher-print.php?id=' . (int) ($r['id'] ?? 0),
                 'branch_name' => $rv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+                'voucher_ex_col3' => $ex3,
+                'no_delete_from_report' => true,
+            ];
+        }
+    }
+}
+
+// Sale Receipt Vouchers (auto from sale / POS invoice — tbl_sale_receipt_vouchers)
+$srv_list_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+$srv_list_exists = $srv_list_check && mysqli_num_rows($srv_list_check) > 0;
+if ($srv_list_check) {
+    mysqli_free_result($srv_list_check);
+}
+if ($srv_list_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'sale_receipt_voucher')) {
+    $srv_l_has_br = auragold_tbl_has_column($conn, 'tbl_sale_receipt_vouchers', 'branch_id');
+    $srv_l_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $srv_l_where .= " AND voucher_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $srv_l_where .= " AND voucher_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $srv_l_where .= " AND (voucher_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(sale_invoice_no,'') LIKE '%$search%')";
+    }
+    if ($srv_l_has_br && $tr_branch_filter_sql !== '') {
+        $srv_l_where .= $tr_branch_filter_sql;
+    }
+    $srv_l_sel = 'id, voucher_no, customer_name, voucher_date, COALESCE(total_amount,0) AS total_amount, sales_person, sale_invoice_no';
+    if ($srv_l_has_br) {
+        $srv_l_sel .= ', branch_id';
+    }
+    $srv_l_rows = getList("SELECT $srv_l_sel FROM tbl_sale_receipt_vouchers WHERE $srv_l_where ORDER BY voucher_date DESC, id DESC");
+    if (is_array($srv_l_rows)) {
+        foreach ($srv_l_rows as $r) {
+            $sino = trim((string) ($r['sale_invoice_no'] ?? ''));
+            $ex3 = $sino !== '' ? $sino : 'NA';
+            $all_transactions[] = [
+                'type' => 'sale_receipt_voucher',
+                'type_label' => 'SALE RECEIPT VOUCHER',
+                'voucher_no' => $r['voucher_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['voucher_date'] ?? '',
+                'amount' => (float) ($r['total_amount'] ?? 0),
+                'balance' => 0,
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'sale-receipt-voucher.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'sale-receipt-voucher.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $srv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
                 'voucher_ex_col3' => $ex3,
                 'no_delete_from_report' => true,
             ];
@@ -1292,6 +1351,17 @@ if ($active_tab === 'transactions' && function_exists('auragold_si_invoice_nos_w
     $si_invoice_nos_with_pfd = auragold_si_invoice_nos_with_active_purchase_fixing();
 }
 
+// Sale orders linked to Job Work Order(s) — delete/update blocked until JWQ + JWO removed
+$so_ids_with_jwo = [];
+if ($active_tab === 'transactions') {
+    if (!function_exists('auragold_sale_order_ids_with_jobwork_orders') && is_file(__DIR__ . '/includes/auragold_sale_order_jobwork_lock.php')) {
+        require_once __DIR__ . '/includes/auragold_sale_order_jobwork_lock.php';
+    }
+    if (function_exists('auragold_sale_order_ids_with_jobwork_orders')) {
+        $so_ids_with_jwo = auragold_sale_order_ids_with_jobwork_orders($conn);
+    }
+}
+
 // Initialize totals variables
 $total_opening = 0;
 $total_debit = 0;
@@ -1434,6 +1504,7 @@ if ($active_tab == 'balance') {
                     WHEN l.transaction_type = 'payment' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
+                    WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
                     WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
                     WHEN l.transaction_type = 'advance' THEN 'Advance'
                     WHEN l.transaction_type = 'return' THEN 'Return'
@@ -1479,21 +1550,8 @@ if ($active_tab == 'balance') {
                     WHEN l.transaction_type = 'payment' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
+                    WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
                     WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
-                    WHEN l.transaction_type = 'advance' THEN 'Advance'
-                    WHEN l.transaction_type = 'return' THEN 'Return'
-                    WHEN l.transaction_type = 'opening' THEN 'OPENING'
-                    WHEN l.transaction_type = 'old_jewelry_scrap_invoice' THEN 'Old Jewelry - Scrap Invoice'
-                    WHEN l.transaction_type = 'old_jewelry_scrap_contra' THEN 'Old Jewelry - Scrap Invoice'
-                    ELSE l.transaction_type
-                END as type_of_voucher,
-                l.debit_amount,
-                l.credit_amount,
-                l.balance_amount as cl_amount,
-                l.debit_gold as gold_debit_wt,
-                l.credit_gold as gold_credit_wt,
-                l.balance_gold as gold_cl_wt,
-                '—' as branch_name,
                 CASE 
                     WHEN l.customer_id > 0 THEN 'Customer'
                     ELSE 'Account'
@@ -2319,6 +2377,7 @@ html, body {
 .voucher-old_jewelry_scrap_invoice { background: #7e22ce; }
 .voucher-payment_voucher { background: #0f766e; }
 .voucher-receipt_voucher { background: #1d4ed8; }
+.voucher-sale_receipt_voucher { background: #0f766e; }
 .voucher-advance_payment { background: #9d174d; }
 .voucher-metal_to_amount { background: #0f3d5c; }
 .voucher-amount_to_metal { background: #155e75; }
@@ -2505,6 +2564,22 @@ button.action-icon {
     line-height: 1;
 }
 
+.action-icon.action-icon-mail {
+    color: #11294b;
+    border-color: #cbd5e1;
+}
+
+.action-icon.action-icon-mail:hover:not(:disabled) {
+    background: #eff6ff;
+    border-color: #11294b;
+    color: #0f172a;
+}
+
+.action-icon.action-icon-mail i {
+    font-size: 16px;
+    line-height: 1;
+}
+
 .voucher-no-static {
     display: block;
     font-size: 18px;
@@ -2523,6 +2598,141 @@ button.action-icon {
     .transaction-card {
         min-width: 880px;
     }
+}
+
+/* Delete confirmation — custom modal (transaction report) */
+.tr-delete-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+.tr-delete-modal-overlay.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+.tr-delete-modal {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(148, 163, 184, 0.12);
+    padding: 2rem 1.75rem 1.75rem;
+    text-align: center;
+    transform: translateY(12px) scale(0.98);
+    transition: transform 0.24s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+.tr-delete-modal-overlay.active .tr-delete-modal {
+    transform: translateY(0) scale(1);
+}
+.tr-delete-modal-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.tr-delete-modal-close:hover {
+    background: #f1f5f9;
+    color: #475569;
+}
+.tr-delete-modal-illustr {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+}
+.tr-delete-modal-illustr-doc {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background: linear-gradient(145deg, #e9d5ff 0%, #ddd6fe 45%, #c4b5fd 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 20px rgba(139, 92, 246, 0.22);
+}
+.tr-delete-modal-illustr-doc i {
+    font-size: 28px;
+    color: #5b21b6;
+    stroke-width: 2;
+}
+.tr-delete-modal-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #11294b;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.02em;
+}
+.tr-delete-modal-desc {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: #64748b;
+    margin: 0 0 1.5rem;
+}
+.tr-delete-modal-desc strong {
+    color: #334155;
+    font-weight: 600;
+}
+.tr-delete-modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.tr-delete-modal-btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.7rem 1.1rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.15s ease;
+}
+.tr-delete-modal-btn:active {
+    transform: scale(0.98);
+}
+.tr-delete-modal-btn-primary {
+    background: #11294b;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(17, 41, 75, 0.35);
+}
+.tr-delete-modal-btn-primary:hover {
+    background: #0d1f3a;
+    box-shadow: 0 6px 18px rgba(17, 41, 75, 0.4);
+}
+.tr-delete-modal-btn-secondary {
+    background: #fdf2f8;
+    color: #be185d;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+.tr-delete-modal-btn-secondary:hover {
+    background: #fce7f3;
+    color: #9d174d;
 }
 </style>
 
@@ -2627,7 +2837,7 @@ button.action-icon {
     <div class="transaction-list-wrap">
     <div class="transaction-list">
         <?php
-        $tr_unified_voucher_types = ['payment_voucher', 'receipt_voucher', 'advance_payment'];
+        $tr_unified_voucher_types = ['payment_voucher', 'receipt_voucher', 'sale_receipt_voucher', 'advance_payment'];
         ?>
         <?php if (!empty($transactions_list)): ?>
             <?php foreach ($transactions_list as $t): ?>
@@ -2639,14 +2849,17 @@ button.action-icon {
                 $voucher_key_upper = strtoupper(trim((string)($t['voucher_no'] ?? '')));
                 $pi_delete_blocked = (($t['type'] ?? '') === 'purchase_invoice') && $voucher_key_upper !== '' && !empty($pi_invoice_nos_with_sfd[$voucher_key_upper]);
                 $si_delete_blocked = (($t['type'] ?? '') === 'sale_invoice') && $voucher_key_upper !== '' && !empty($si_invoice_nos_with_pfd[$voucher_key_upper]);
+                $so_delete_blocked = (($t['type'] ?? '') === 'sale_order') && !empty($so_ids_with_jwo[(int) ($t['id'] ?? 0)]);
                 $ojb_delete_blocked = $is_ojb && !empty($t['linked_from_purchase']);
-                $txn_delete_blocked = $pi_delete_blocked || $si_delete_blocked || $ojb_delete_blocked;
-                $txn_delete_title = $pi_delete_blocked ? 'Delete the sale fixing first' : ($si_delete_blocked ? 'Delete the purchase fixing first' : ($ojb_delete_blocked ? 'Remove scrap payment on Purchase Invoice or delete the PI' : 'Delete'));
+                $txn_delete_blocked = $pi_delete_blocked || $si_delete_blocked || $so_delete_blocked || $ojb_delete_blocked;
+                $txn_delete_title = $pi_delete_blocked ? 'Delete the sale fixing first' : ($si_delete_blocked ? 'Delete the purchase fixing first' : ($so_delete_blocked ? 'Delete Jobwork Queue, then Job Work Order, first' : ($ojb_delete_blocked ? 'Remove scrap payment on Purchase Invoice or delete the PI' : 'Delete')));
                 if (!empty($t['no_delete_from_report'])) {
                     $txn_delete_blocked = true;
                     $txn_delete_title = 'Open the voucher screen to delete or adjust this entry';
                 }
                 $is_unified_voucher = in_array($t['type'] ?? '', $tr_unified_voucher_types, true);
+                $tr_mail_supported = in_array(($t['type'] ?? ''), ['sale_invoice', 'sale_order', 'sale_return', 'sale_quotation', 'purchase_invoice', 'purchase_return', 'purchase_quotation'], true);
+                $tr_party_email = trim((string) ($t['party_email'] ?? ''));
             ?>
             <div class="transaction-card">
                 <div class="transaction-col transaction-col-1">
@@ -2681,6 +2894,16 @@ button.action-icon {
                     <div class="party-name"><?php echo htmlspecialchars($t['party_name']); ?></div>
                     <div class="party-meta"><i class="feather icon-phone"></i> NA</div>
                     <div class="party-meta"><i class="feather icon-map-pin"></i> NA</div>
+                    <?php if ($tr_mail_supported): ?>
+                    <div class="party-meta party-meta-mail" title="From customer / supplier master (tbl_customers.mail_id)">
+                        <i class="feather icon-mail"></i>
+                        <?php if ($tr_party_email !== ''): ?>
+                            <?php echo htmlspecialchars($tr_party_email); ?>
+                        <?php else: ?>
+                            <span class="text-muted" style="font-style:italic;">No email in master</span>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <div class="transaction-col transaction-col-3">
                     <div class="col3-party"><?php echo htmlspecialchars(transaction_report_sp_display($t['sales_person'] ?? '')); ?></div>
@@ -2728,7 +2951,9 @@ button.action-icon {
                         <?php
                             $edit_title = (($t['type'] ?? '') === 'sale_invoice' && !empty($si_delete_blocked))
                                 ? 'Edit (save disabled until purchase fixing is deleted)'
-                                : 'Edit';
+                                : ((($t['type'] ?? '') === 'sale_order' && !empty($so_delete_blocked))
+                                    ? 'Edit (save disabled until Job Work Order is deleted)'
+                                    : 'Edit');
                         ?>
                         <a href="<?php echo htmlspecialchars($t['link']); ?>" class="action-icon" title="<?php echo htmlspecialchars($edit_title); ?>"><i class="feather icon-edit"></i></a>
                         <?php endif; ?>
@@ -2736,6 +2961,15 @@ button.action-icon {
                         <button type="button" class="action-icon btn-delete-transaction<?php echo $txn_delete_blocked ? ' action-icon-disabled' : ''; ?>" title="<?php echo htmlspecialchars($txn_delete_title); ?>" data-type="<?php echo htmlspecialchars($t['type']); ?>" data-id="<?php echo (int)$t['id']; ?>" data-voucher="<?php echo htmlspecialchars($t['voucher_no']); ?>"<?php echo $txn_delete_blocked ? ' disabled' : ''; ?>><i class="feather icon-trash-2"></i></button>
                         <button type="button" class="action-icon action-icon-whatsapp" title="WhatsApp" onclick="alert('API integration work in progress');"><i class="fab fa-whatsapp"></i></button>
                         <button type="button" class="action-icon action-icon-sms" title="SMS" onclick="alert('API integration work in progress');"><i class="fas fa-sms"></i></button>
+                        <button type="button" class="action-icon action-icon-mail<?php echo $tr_mail_supported ? '' : ' action-icon-disabled'; ?>" title="<?php
+                            if (!$tr_mail_supported) {
+                                echo 'Email not available for this voucher type';
+                            } elseif ($tr_party_email !== '') {
+                                echo 'Send email to ', htmlspecialchars($tr_party_email, ENT_QUOTES, 'UTF-8');
+                            } else {
+                                echo 'No customer email — set Mail ID on the customer/supplier in Masters';
+                            }
+                        ?>"<?php echo $tr_mail_supported ? '' : ' disabled'; ?> data-type="<?php echo htmlspecialchars($t['type']); ?>" data-id="<?php echo (int) $t['id']; ?>" data-party-email="<?php echo htmlspecialchars($tr_party_email, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather icon-mail"></i></button>
                     </div>
                 </div>
             </div>
@@ -3156,6 +3390,23 @@ button.action-icon {
     </div>
 </div>
 
+<div id="trDeleteConfirmModal" class="tr-delete-modal-overlay" aria-hidden="true">
+    <div class="tr-delete-modal" role="dialog" aria-modal="true" aria-labelledby="trDeleteModalTitle">
+        <button type="button" class="tr-delete-modal-close" id="trDeleteModalClose" aria-label="Close">&times;</button>
+        <div class="tr-delete-modal-illustr">
+            <div class="tr-delete-modal-illustr-doc" aria-hidden="true">
+                <i class="feather icon-trash-2"></i>
+            </div>
+        </div>
+        <h2 id="trDeleteModalTitle" class="tr-delete-modal-title">Delete this record?</h2>
+        <p class="tr-delete-modal-desc" id="trDeleteModalDesc">This will remove the transaction and related ledger, payments, and stock links. This cannot be undone.</p>
+        <div class="tr-delete-modal-actions">
+            <button type="button" class="tr-delete-modal-btn tr-delete-modal-btn-primary" id="trDeleteModalConfirm">Delete</button>
+            <button type="button" class="tr-delete-modal-btn tr-delete-modal-btn-secondary" id="trDeleteModalCancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <script>
 function openFilterModal() {
     document.getElementById('filterModal').classList.add('active');
@@ -3467,6 +3718,7 @@ function exportToPDF() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    trDeleteModalBind();
     // Add event listeners for view transaction buttons using event delegation
     document.addEventListener('click', function(e) {
         if (e.target && e.target.classList.contains('view-transaction-btn')) {
@@ -3490,7 +3742,96 @@ document.addEventListener('click', function(e) {
     });
 });
 
-// Delete transaction (icon clicks resolve to parent button via closest)
+// Delete transaction — custom confirm modal (no native confirm)
+var trDeletePending = null;
+
+function trDeleteModalShow(btn, type, id, voucher) {
+    trDeletePending = { btn: btn, type: type, id: id, voucher: voucher };
+    var overlay = document.getElementById('trDeleteConfirmModal');
+    var desc = document.getElementById('trDeleteModalDesc');
+    if (!overlay || !desc) return;
+    if (voucher) {
+        desc.textContent = '';
+        desc.appendChild(document.createTextNode('This will remove the voucher and all related ledger entries, payments, stock history, and linked documents. '));
+        var strong = document.createElement('strong');
+        strong.textContent = 'Voucher: ';
+        desc.appendChild(strong);
+        desc.appendChild(document.createTextNode(voucher));
+    } else {
+        desc.textContent = 'This will remove the transaction and all related ledger entries, payments, and stock links. This cannot be undone.';
+    }
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    var confirmBtn = document.getElementById('trDeleteModalConfirm');
+    if (confirmBtn) confirmBtn.focus();
+}
+
+function trDeleteModalHide() {
+    var overlay = document.getElementById('trDeleteConfirmModal');
+    if (overlay) {
+        overlay.classList.remove('active');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+    document.body.style.overflow = '';
+    trDeletePending = null;
+}
+
+function trDeleteModalBind() {
+    var overlay = document.getElementById('trDeleteConfirmModal');
+    if (!overlay) return;
+    var closeBtn = document.getElementById('trDeleteModalClose');
+    var cancelBtn = document.getElementById('trDeleteModalCancel');
+    var confirmBtn = document.getElementById('trDeleteModalConfirm');
+    function onOverlayClick(ev) {
+        if (ev.target === overlay) trDeleteModalHide();
+    }
+    overlay.addEventListener('click', onOverlayClick);
+    if (closeBtn) closeBtn.addEventListener('click', trDeleteModalHide);
+    if (cancelBtn) cancelBtn.addEventListener('click', trDeleteModalHide);
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+            if (!trDeletePending || !trDeletePending.btn) return;
+            var btn = trDeletePending.btn;
+            var type = trDeletePending.type;
+            var id = trDeletePending.id;
+            trDeleteModalHide();
+            btn.disabled = true;
+            var formData = new FormData();
+            formData.append('type', type);
+            formData.append('id', id);
+            var req = new XMLHttpRequest();
+            req.open('POST', 'ajax/delete-transaction.php');
+            req.onload = function () {
+                try {
+                    var res = JSON.parse(req.responseText);
+                    if (res.status === 'success') {
+                        location.reload();
+                        return;
+                    } else {
+                        alert(res.message || 'Delete failed');
+                        btn.disabled = false;
+                    }
+                } catch (err) {
+                    alert('Delete failed. Please try again.');
+                    btn.disabled = false;
+                }
+            };
+            req.onerror = function () {
+                alert('Network error. Please try again.');
+                btn.disabled = false;
+            };
+            req.send(formData);
+        });
+    }
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape' && overlay.classList.contains('active')) {
+            ev.preventDefault();
+            trDeleteModalHide();
+        }
+    });
+}
+
 document.addEventListener('click', function(e) {
     var btn = (e.target && typeof e.target.closest === 'function') ? e.target.closest('button.btn-delete-transaction') : null;
     if (!btn) return;
@@ -3500,40 +3841,44 @@ document.addEventListener('click', function(e) {
     var id = btn.getAttribute('data-id');
     var voucher = btn.getAttribute('data-voucher') || '';
     if (!type || !id) return;
-    if (!confirm('Are you sure you want to delete this transaction?\n' + (voucher ? 'Voucher: ' + voucher : ''))) return;
-    btn.disabled = true;
-    var formData = new FormData();
-    formData.append('type', type);
-    formData.append('id', id);
-    var req = new XMLHttpRequest();
-    req.open('POST', 'ajax/delete-transaction.php');
-    req.onload = function() {
-        try {
-            var res = JSON.parse(req.responseText);
-            if (res.status === 'success') {
-                if (type === 'sale_fixing_direct' || type === 'purchase_fixing_direct') {
-                    location.reload();
-                    return;
+    trDeleteModalShow(btn, type, id, voucher);
+});
+
+document.addEventListener('click', function (e) {
+    var mbtn = (e.target && typeof e.target.closest === 'function') ? e.target.closest('button.action-icon-mail') : null;
+    if (!mbtn || mbtn.disabled) return;
+    e.preventDefault();
+    var type = mbtn.getAttribute('data-type');
+    var id = mbtn.getAttribute('data-id');
+    var pre = (mbtn.getAttribute('data-party-email') || '').trim();
+    if (!type || !id) return;
+    if (!pre) {
+        alert('Customer email not found');
+        return;
+    }
+    mbtn.disabled = true;
+    fetch('ajax/send-transaction-email.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ type: type, id: parseInt(id, 10) })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            mbtn.disabled = false;
+            if (res && res.ok) {
+                var msg = res.message || 'Message sent.';
+                if (res.recipient) {
+                    msg += '\n\nSent to: ' + res.recipient;
                 }
-                if (btn.closest && btn.closest('.transaction-card')) {
-                    btn.closest('.transaction-card').remove();
-                } else {
-                    location.reload();
-                }
+                alert(msg);
             } else {
-                alert(res.message || 'Delete failed');
-                btn.disabled = false;
+                alert((res && res.message) ? res.message : 'Could not send email.');
             }
-        } catch (err) {
-            alert('Delete failed. Please try again.');
-            btn.disabled = false;
-        }
-    };
-    req.onerror = function() {
-        alert('Network error. Please try again.');
-        btn.disabled = false;
-    };
-    req.send(formData);
+        })
+        .catch(function () {
+            mbtn.disabled = false;
+            alert('Network error. Please try again.');
+        });
 });
 </script>
 

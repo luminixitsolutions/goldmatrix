@@ -672,7 +672,7 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
                         Export <i class="feather icon-chevron-down" style="width:14px;height:14px;vertical-align:middle;"></i>
                     </button>
                     <div class="dropdown-menu dropdown-menu-right" aria-labelledby="ltBtnExport">
-                        <a class="dropdown-item" href="#" id="ltExportExcel"><i class="feather icon-download" style="width:16px;height:16px;"></i> Excel (CSV)</a>
+                        <a class="dropdown-item" href="#" id="ltExportExcel"><i class="feather icon-download" style="width:16px;height:16px;"></i> Excel</a>
                         <a class="dropdown-item" href="#" id="ltExportPdf"><i class="feather icon-file-text" style="width:16px;height:16px;"></i> PDF (Print)</a>
                     </div>
                 </div>
@@ -833,6 +833,7 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
 
     var defaultOrder = <?php echo json_encode(array_column($lt_columns, 'key')); ?>;
     var colDefs = <?php echo json_encode($lt_columns, JSON_UNESCAPED_UNICODE); ?>;
+    var ltExportDates = <?php echo json_encode(['from' => $use_from, 'to' => $use_to], JSON_UNESCAPED_UNICODE); ?>;
 
     function loadJson(key, fallback) {
         try {
@@ -1114,12 +1115,6 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
 
     recalcFooter();
 
-    function escapeCsv(val) {
-        var s = String(val != null ? val : '').replace(/\r\n/g, '\n');
-        if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-        return s;
-    }
-
     function getVisibleColKeys() {
         var keys = [];
         headerRow.querySelectorAll('th[data-col]').forEach(function (th) {
@@ -1129,42 +1124,72 @@ function lt_footer_cell(string $key, float $tot_out, float $tot_loss): string
         return keys;
     }
 
-    var ex = document.getElementById('ltExportExcel');
-    if (ex) ex.addEventListener('click', function (e) {
-        e.preventDefault();
+    function collectLossTrackingExportPayload() {
         var keys = getVisibleColKeys();
-        if (!keys.length) return;
-        var lines = [];
-        lines.push(keys.map(function (k) {
+        var columns = keys.map(function (k) {
             var th = headerRow.querySelector('th[data-col="' + k + '"]');
             var h = th ? (th.getAttribute('data-heading') || '').trim() : '';
             if (!h && th) h = th.textContent.replace(/\s+/g, ' ').trim();
-            return escapeCsv(h || k);
-        }).join(','));
-
+            return { key: k, label: h || k };
+        });
+        var rows = [];
         tbody.querySelectorAll('tr').forEach(function (tr) {
             if (tr.querySelector('.lt-empty')) return;
             if (!rowVisible(tr)) return;
-            var row = keys.map(function (k) {
+            var row = {};
+            keys.forEach(function (k) {
                 var td = tr.querySelector('td[data-col="' + k + '"]');
-                return escapeCsv(td ? String(td.textContent || '').trim() : '');
+                row[k] = td ? String(td.textContent || '').trim() : '';
             });
-            lines.push(row.join(','));
+            rows.push(row);
         });
-        var foot = keys.map(function (k) {
+        var footer = {};
+        keys.forEach(function (k) {
             var td = footerRow ? footerRow.querySelector('td[data-col="' + k + '"]') : null;
-            return escapeCsv(td ? String(td.textContent || '').trim() : '');
+            footer[k] = td ? String(td.textContent || '').trim() : '';
         });
-        lines.push(foot.join(','));
+        var dfInp = document.getElementById('ltFilterDateFrom');
+        var dtInp = document.getElementById('ltFilterDateTo');
+        var dateFrom = (dfInp && dfInp.value) ? dfInp.value : (ltExportDates.from || '');
+        var dateTo = (dtInp && dtInp.value) ? dtInp.value : (ltExportDates.to || '');
+        return { columns: columns, rows: rows, footer: footer, date_from: dateFrom, date_to: dateTo };
+    }
 
-        var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'loss-tracking-' + new Date().toISOString().slice(0, 10) + '.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
+    function runLossTrackingExcelExport() {
+        var pack = collectLossTrackingExportPayload();
+        if (!pack.columns.length) return;
+        fetch('ajax/export-loss-tracking-excel.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pack),
+            credentials: 'same-origin'
+        })
+            .then(function (res) {
+                if (!res.ok) throw new Error('bad');
+                var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+                if (ct.indexOf('spreadsheetml') === -1 && ct.indexOf('octet-stream') === -1) throw new Error('bad');
+                return res.blob();
+            })
+            .then(function (blob) {
+                var stamp = pack.date_to || pack.date_from || new Date().toISOString().slice(0, 10);
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'Loss_Tracking_Report_' + stamp + '.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            })
+            .catch(function () {
+                alert('Excel export failed. Please try again.');
+            });
+    }
+
+    var ex = document.getElementById('ltExportExcel');
+    if (ex) ex.addEventListener('click', function (e) {
+        e.preventDefault();
+        runLossTrackingExcelExport();
     });
     var pdf = document.getElementById('ltExportPdf');
     if (pdf) pdf.addEventListener('click', function (e) {

@@ -4,6 +4,7 @@
  */
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_mfg_jobwork_queue_line_weights.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -54,6 +55,14 @@ if (!empty($ji_cols['diamond_weight']) && !empty($ji_cols['diamond_wt'])) {
     $ji_diamond_expr = 'COALESCE(ji.diamond_wt, 0)';
 }
 $ji_diamond = $ji($ji_diamond_expr);
+
+/** First line loss saved from Jobwork Queue (manual loss); matches mp-save-jobwork-queue.php column choice. */
+$ji_line_loss = 'NULL';
+if (!empty($ji_cols['gold_loss_1'])) {
+    $ji_line_loss = $ji('COALESCE(ji.gold_loss_1, 0)');
+} elseif (!empty($ji_cols['loss_wt'])) {
+    $ji_line_loss = $ji('COALESCE(ji.loss_wt, 0)');
+}
 
 $mfg_sec = '';
 $sc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'manufacturing_time_seconds'");
@@ -153,7 +162,76 @@ function mp_mfg_diamond_wt($storedDiamond, $gross, $net, $less) {
     return mp_mfg_fmt_wt($d);
 }
 
+/**
+ * Order line diamond (first order line) when greater than zero, else total issued diamond weight for the jobwork order
+ * (material grid / tbl_jobwork_queue_diamond_stock_issue). Returns null when both are zero so
+ * mp_mfg_diamond_wt can infer from gross / net / less.
+ *
+ * @param array<string,mixed> $r
+ * @param array<int,float>    $sumByJwo jobwork_order_id to grams
+ */
+function mp_mfg_merged_stored_diamond_for_history(array $r, array $sumByJwo): ?float
+{
+    $jid = (int) ($r['jobwork_order_id'] ?? 0);
+    $raw = $r['item_diamond_wt'] ?? null;
+    $sv = ($raw !== null && $raw !== '') ? (float) $raw : 0.0;
+    if (!is_finite($sv) || $sv < 0) {
+        $sv = 0.0;
+    }
+    if ($sv > 0.00005) {
+        return $sv;
+    }
+    if ($jid > 0) {
+        $is = (float) ($sumByJwo[$jid] ?? 0.0);
+        if (is_finite($is) && $is > 0.00005) {
+            return $is;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Loss (grams) for manufacturing stock grid: saved line loss, else auto-loss adjustment match, else net − final.
+ */
+function mp_mfg_resolve_loss_grams($lineLossSaved, $transferLossAdj, $netWt, $finalWt) {
+    $ll = $lineLossSaved !== null && $lineLossSaved !== '' ? (float) $lineLossSaved : 0.0;
+    if (is_finite($ll) && $ll > 0.00001) {
+        return $ll;
+    }
+    $ta = $transferLossAdj !== null && $transferLossAdj !== '' ? (float) $transferLossAdj : 0.0;
+    if (is_finite($ta) && $ta > 0.00001) {
+        return $ta;
+    }
+    $n = $netWt !== null && $netWt !== '' ? (float) $netWt : null;
+    $f = $finalWt !== null && $finalWt !== '' ? (float) $finalWt : null;
+    if ($n !== null && $f !== null && is_finite($n) && is_finite($f) && $n > $f + 0.00001) {
+        return $n - $f;
+    }
+    return null;
+}
+
 $rows = [];
+
+/** Per jobwork_order_id: SUM(weight) from diamond stock issue rows (Jobwork Queue material grid). */
+$mp_jwq_diamond_sum_by_order = [];
+$diamond_issue_tbl = 'tbl_jobwork_queue_diamond_stock_issue';
+$diamond_chk = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $diamond_issue_tbl) . "'");
+if ($diamond_chk && mysqli_num_rows($diamond_chk) > 0) {
+    mysqli_free_result($diamond_chk);
+    $dSumSql = 'SELECT jobwork_order_id, COALESCE(SUM(`weight`),0) AS s FROM `' . $diamond_issue_tbl . '` WHERE jobwork_order_id IS NOT NULL AND jobwork_order_id > 0 GROUP BY jobwork_order_id';
+    $dSumList = function_exists('getList') ? @getList($dSumSql) : null;
+    if (is_array($dSumList)) {
+        foreach ($dSumList as $dr) {
+            $dj = (int) ($dr['jobwork_order_id'] ?? 0);
+            if ($dj > 0) {
+                $mp_jwq_diamond_sum_by_order[$dj] = (float) ($dr['s'] ?? 0);
+            }
+        }
+    }
+} elseif ($diamond_chk) {
+    mysqli_free_result($diamond_chk);
+}
 
 $wchk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_weight_adjustments'");
 $has_weight = ($wchk && mysqli_num_rows($wchk) > 0);
@@ -199,7 +277,9 @@ if ($has_weight) {
         ' . $ji_gross . ' AS item_gross_wt,
         ' . $ji_net . ' AS item_net_wt,
         ' . $ji_diamond . ' AS item_diamond_wt,
-        ' . $ji_net_amt . ' AS item_net_amount
+        ' . $ji_net_amt . ' AS item_net_amount,
+        ' . $ji_line_loss . ' AS item_line_loss_wt,
+        ' . $ji_final . ' AS item_final_wt
         FROM tbl_jobwork_weight_adjustments w
         INNER JOIN tbl_jobwork_orders j ON j.id = w.jobwork_order_id
         LEFT JOIN tbl_departments d ON d.id = COALESCE(w.source_department_id, j.department_id)
@@ -248,6 +328,8 @@ if ($has_weight) {
         $gross = $r['item_gross_wt'] ?? null;
         $netw = $r['item_net_wt'] ?? null;
         $lessw = $r['item_less_wt'] ?? null;
+        $finalAdj = $r['item_final_wt'] ?? null;
+        $lineLossSavedW = $r['item_line_loss_wt'] ?? null;
 
         $issueWt = '—';
         $recvWt = '—';
@@ -261,6 +343,12 @@ if ($has_weight) {
         $deptId = (int)($r['stock_dept_id'] ?? 0);
         $userId = (int)($r['stock_user_id'] ?? 0);
         $mfgSec = isset($r['manufacturing_time_seconds']) ? (int)$r['manufacturing_time_seconds'] : 0;
+
+        $lossGramsW = mp_mfg_resolve_loss_grams($lineLossSavedW, ($is_loss_reduce && $adj === 'reduce' && $w > 0.00001) ? $w : null, $netw, $finalAdj);
+        if (($lossGramsW === null || $lossGramsW <= 0.00001) && $adj === 'reduce' && $w > 0.00001) {
+            $lossGramsW = (float) $w;
+        }
+        $lossWtDisp = ($lossGramsW !== null && $lossGramsW > 0.00001) ? mp_mfg_fmt_wt($lossGramsW) : '—';
 
         $rows[] = [
             '_sort' => mp_mfg_sort_ts($ca),
@@ -286,12 +374,12 @@ if ($has_weight) {
             'metal' => mp_mfg_infer_metal($product),
             'description' => $product !== '' ? $product : '—',
             'dust_wastage_wt' => ($lessw !== null && $lessw !== '') ? mp_mfg_fmt_wt($lessw) : '—',
-            'loss_wt' => ($adj === 'reduce' && $w > 0) ? mp_mfg_fmt_wt($w) : '—',
+            'loss_wt' => $lossWtDisp,
             'profit_wt' => isset($r['item_net_amount']) ? mp_mfg_fmt_money($r['item_net_amount']) : '—',
             'tag_no' => $tag,
             'total_wt' => $wt_display,
             'metal_wt' => ($netw !== null && $netw !== '') ? mp_mfg_fmt_wt($netw) : '—',
-            'diamond_wt' => mp_mfg_diamond_wt(($r['item_diamond_wt'] ?? null), $gross, $netw, $lessw),
+            'diamond_wt' => mp_mfg_diamond_wt(mp_mfg_merged_stored_diamond_for_history($r, $mp_jwq_diamond_sum_by_order), $gross, $netw, $lessw),
             'purity_wt' => isset($r['item_purity_wt']) ? mp_mfg_fmt_wt($r['item_purity_wt']) : '—',
             'carat_name' => isset($r['item_carat']) && trim((string)$r['item_carat']) !== '' ? trim((string)$r['item_carat']) : '—',
             'total_quantity' => isset($r['item_qty']) ? mp_mfg_fmt_wt($r['item_qty']) : '—',
@@ -363,7 +451,8 @@ if ($has_activity) {
         ' . $ji_purity_w . ' AS item_purity_wt,
         ' . $ji_gross . ' AS item_gross_wt,
         ' . $ji_diamond . ' AS item_diamond_wt,
-        ' . $ji_net_amt . ' AS item_net_amount
+        ' . $ji_net_amt . ' AS item_net_amount,
+        ' . $ji_line_loss . ' AS item_line_loss_wt
         ' . $transfer_loss_sel . '
         FROM tbl_jobwork_queue_activity a
         INNER JOIN tbl_jobwork_orders j ON j.id = a.jobwork_order_id
@@ -414,23 +503,31 @@ if ($has_activity) {
         $lessw = $r['item_less_wt'] ?? null;
         $ca = $r['created_at'] ?? null;
 
-        // Inward/outward activity: prefer net (metal) and final (queue line total after transfer) over stale gross,
-        // so destination dept balance matches transferred weight (e.g. metal 19 after 1g loss, not gross 20).
-        $act_total_wt = '—';
-        if ($nw !== null && is_finite($nw) && (float)$nw > 0) {
-            $act_total_wt = mp_mfg_fmt_wt($nw);
-        } elseif ($fw !== null && is_finite($fw) && (float)$fw > 0) {
-            $act_total_wt = mp_mfg_fmt_wt($fw);
-        } elseif ($gw !== null && is_finite($gw) && (float)$gw > 0) {
-            $act_total_wt = mp_mfg_fmt_wt($gw);
-        }
+        $mergedLineDiamond = mp_mfg_merged_stored_diamond_for_history($r, $mp_jwq_diamond_sum_by_order);
+        $diamondForSynth = $mergedLineDiamond !== null ? $mergedLineDiamond : ($r['item_diamond_wt'] ?? null);
+
+        $actSynth = [
+            'final_weight' => ($fw !== null && is_finite($fw) && (float) $fw > 0.0000001) ? (float) $fw : null,
+            'net_weight' => $nw,
+            'gross_weight' => $gw,
+            'diamond_weight' => $diamondForSynth,
+            'diamond_wt' => $diamondForSynth,
+            'gold_loss_1' => $r['item_line_loss_wt'] ?? null,
+            'loss_wt' => $r['item_line_loss_wt'] ?? null,
+        ];
+        $actWtNum = function_exists('auragold_mfg_jobwork_line_calculated_total_wt')
+            ? auragold_mfg_jobwork_line_calculated_total_wt($actSynth, $ji_cols)
+            : 0.0;
+        $act_total_wt = mp_mfg_fmt_wt($actWtNum);
         $act_balance_wt = $act_total_wt;
 
         $tloss = isset($r['transfer_loss_wt']) ? (float)$r['transfer_loss_wt'] : 0.0;
         if (!is_finite($tloss)) {
             $tloss = 0.0;
         }
-        $activity_loss_wt = ($tloss > 0.00001) ? mp_mfg_fmt_wt($tloss) : '—';
+        $lineLossSaved = $r['item_line_loss_wt'] ?? null;
+        $lossGramsAct = mp_mfg_resolve_loss_grams($lineLossSaved, ($tloss > 0.00001 ? $tloss : null), $nw, $fw);
+        $activity_loss_wt = ($lossGramsAct !== null && $lossGramsAct > 0.00001) ? mp_mfg_fmt_wt($lossGramsAct) : '—';
 
         $jwoId = (int)($r['jobwork_order_id'] ?? 0);
         $jwoDeptId = (int)($r['department_id'] ?? 0);
@@ -464,7 +561,7 @@ if ($has_activity) {
             'tag_no' => $tag,
             'total_wt' => $act_total_wt,
             'metal_wt' => ($nw !== null && is_finite($nw)) ? mp_mfg_fmt_wt($nw) : '—',
-            'diamond_wt' => mp_mfg_diamond_wt(($r['item_diamond_wt'] ?? null), $gross, $nw, $lessw),
+            'diamond_wt' => mp_mfg_diamond_wt(mp_mfg_merged_stored_diamond_for_history($r, $mp_jwq_diamond_sum_by_order), $gross, $nw, $lessw),
             'purity_wt' => isset($r['item_purity_wt']) ? mp_mfg_fmt_wt($r['item_purity_wt']) : '—',
             'carat_name' => isset($r['item_carat']) && trim((string)$r['item_carat']) !== '' ? trim((string)$r['item_carat']) : '—',
             'total_quantity' => isset($r['item_qty']) ? mp_mfg_fmt_wt($r['item_qty']) : '—',
@@ -483,37 +580,8 @@ if ($has_activity) {
             || ($actAction === '' && $fromDeptId < 1);
         $isRealTransfer = ($fromDeptId > 0 && ($fromDeptId !== $toDeptId || $fromUserId !== $toUserId));
 
+        // Manufacturing floor inward/outward: department transfers only (not initial JWO jobwork_create).
         if ($isJobworkCreate) {
-            $commentCreate = 'Inward · Job work order · Source: Job Work Order';
-            $createDeptName = $srcdeptn !== '' ? $srcdeptn : $deptn;
-            $createUserName = $srcusrn !== '' ? $srcusrn : $usrn;
-            if ($createDeptName !== '') {
-                $commentCreate .= ' · ' . $createDeptName;
-            }
-            if ($createUserName !== '') {
-                $commentCreate .= ' · ' . $createUserName;
-            }
-            $jwFlowLabel = strtoupper(trim((string)($r['jobwork_no'] ?? '')));
-            if ($jwFlowLabel === '') {
-                $jwFlowLabel = 'JWO-' . $jwoId;
-            }
-            $deptFlowCreate = $jwFlowLabel . ' ==> ' . mp_mfg_flow_stage($createDeptName, $createUserName);
-            $rows[] = array_merge($common, [
-                'department_id' => $filterToDept,
-                'department_user_id' => $filterToUser,
-                'comment' => $commentCreate,
-                'department_name' => $createDeptName !== '' ? $createDeptName : '—',
-                'user_name' => $createUserName !== '' ? $createUserName : '—',
-                'activity_side' => 'in',
-                'stock_flow_type' => 'inward',
-                'flow_source' => 'job_work_order',
-                'total_wt' => mp_mfg_fmt_wt(0),
-                'metal_wt' => mp_mfg_fmt_wt(0),
-                'balance_wt' => mp_mfg_fmt_wt(0),
-                'diamond_wt' => '—',
-                'total_quantity' => mp_mfg_fmt_wt(0),
-                'department_flow' => $deptFlowCreate,
-            ]);
             continue;
         }
 
@@ -598,15 +666,40 @@ if ($has_mi) {
         LEFT JOIN tbl_departments d ON d.id = mi.department_id
         LEFT JOIN tbl_customers cu ON cu.id = mi.department_user_id
         WHERE mi.department_id IS NOT NULL AND mi.department_id > 0
-        AND COALESCE(mii.requested_wt, 0) > 0.00005
+        AND (
+            COALESCE(mii.requested_wt, 0) > 0.00005
+            OR COALESCE(mii.final_weight, 0) > 0.00005
+            OR COALESCE(mii.net_weight, 0) > 0.00005
+            OR COALESCE(mii.gross_weight, 0) > 0.00005
+        )
         ORDER BY COALESCE(mi.updated_at, mi.created_at) DESC, mii.id DESC
         LIMIT 300';
     $mil = function_exists('getList') ? @getList($mi_sql) : null;
     if (!is_array($mil)) {
         $mil = [];
     }
+    $resolve_mi_issue_wt = static function (array $row): float {
+        $fw = (float) ($row['final_weight'] ?? 0);
+        $nw = (float) ($row['net_weight'] ?? 0);
+        $gw = (float) ($row['gross_weight'] ?? 0);
+        $metal = $fw > 0.00005 ? $fw : ($nw > 0.00005 ? $nw : $gw);
+        $req = (float) ($row['requested_wt'] ?? 0);
+        $has_m = $metal > 0.00005;
+        $has_r = $req > 0.00005;
+        if ($has_m && $has_r) {
+            return $req;
+        }
+        if ($has_r) {
+            return $req;
+        }
+        if ($has_m) {
+            return $metal;
+        }
+
+        return 0.0;
+    };
     foreach ($mil as $r) {
-        $rw = isset($r['requested_wt']) ? (float)$r['requested_wt'] : 0.0;
+        $rw = $resolve_mi_issue_wt($r);
         if (!is_finite($rw) || $rw <= 0) {
             continue;
         }
@@ -664,7 +757,7 @@ if ($has_mi) {
             'tag_no' => $tag,
             'total_wt' => $wt_display,
             'metal_wt' => ($netw !== null && $netw !== '') ? mp_mfg_fmt_wt($netw) : '—',
-            'diamond_wt' => mp_mfg_diamond_wt(($r['item_diamond_wt'] ?? null), $gross, $netw, $lessw),
+            'diamond_wt' => mp_mfg_diamond_wt(mp_mfg_merged_stored_diamond_for_history($r, $mp_jwq_diamond_sum_by_order), $gross, $netw, $lessw),
             'purity_wt' => isset($r['purity_weight']) ? mp_mfg_fmt_wt($r['purity_weight']) : '—',
             'carat_name' => isset($r['carat']) && trim((string)$r['carat']) !== '' ? trim((string)$r['carat']) : '—',
             'total_quantity' => isset($r['quantity']) ? mp_mfg_fmt_wt($r['quantity']) : '—',
@@ -709,16 +802,32 @@ if ($has_items) {
     }
     $jloc_user_expr = $jloc_has_du ? 'COALESCE(j.department_user_id, 0)' : '0';
     $jloc_group_user = $jloc_has_du ? ', j.department_user_id' : '';
+    $jloc_dwt = '0';
+    if (!empty($ji_cols['diamond_weight']) && !empty($ji_cols['diamond_wt'])) {
+        $jloc_dwt = 'COALESCE(ji.diamond_weight, ji.diamond_wt, 0)';
+    } elseif (!empty($ji_cols['diamond_weight'])) {
+        $jloc_dwt = 'COALESCE(ji.diamond_weight, 0)';
+    } elseif (!empty($ji_cols['diamond_wt'])) {
+        $jloc_dwt = 'COALESCE(ji.diamond_wt, 0)';
+    }
+    $jloc_loss = '0';
+    if (!empty($ji_cols['gold_loss_1']) && !empty($ji_cols['loss_wt'])) {
+        $jloc_loss = 'COALESCE(NULLIF(ji.gold_loss_1, 0), ji.loss_wt, 0)';
+    } elseif (!empty($ji_cols['gold_loss_1'])) {
+        $jloc_loss = 'COALESCE(ji.gold_loss_1, 0)';
+    } elseif (!empty($ji_cols['loss_wt'])) {
+        $jloc_loss = 'COALESCE(ji.loss_wt, 0)';
+    }
+    $jloc_metal = '(CASE WHEN COALESCE(ji.net_weight,0) > 0.0000001 THEN ji.net_weight ELSE COALESCE(ji.gross_weight, 0) END)';
+    $jloc_fb = 'GREATEST(0, (' . $jloc_metal . ') - (' . $jloc_loss . ') + (' . $jloc_dwt . '))';
+    if (!empty($ji_cols['final_weight'])) {
+        $jloc_line_wt = '(CASE WHEN COALESCE(ji.final_weight,0) > 0.0000001 THEN ji.final_weight ELSE (' . $jloc_fb . ') END)';
+    } else {
+        $jloc_line_wt = $jloc_fb;
+    }
     $jloc_sql = 'SELECT j.id AS jobwork_order_id, j.department_id,
         ' . $jloc_user_expr . ' AS department_user_id,
-        SUM(
-            CASE
-                WHEN COALESCE(ji.final_weight, 0) > 0.0000001 THEN ji.final_weight
-                WHEN COALESCE(ji.net_weight, 0) > 0.0000001 THEN ji.net_weight
-                WHEN COALESCE(ji.gross_weight, 0) > 0.0000001 THEN ji.gross_weight
-                ELSE 0
-            END
-        ) AS total_wt,
+        SUM(' . $jloc_line_wt . ') AS total_wt,
         SUM(COALESCE(ji.quantity, 0)) AS total_qty
         FROM tbl_jobwork_orders j
         INNER JOIN tbl_jobwork_order_items ji ON ji.jobwork_order_id = j.id

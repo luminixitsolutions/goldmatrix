@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -8,6 +9,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['status' => 'error', 'message' => 'Invalid Request']);
     exit;
 }
+
+$jwi_pay_raw = $_POST['payments'] ?? '';
+$jwi_payments_arr = [];
+if (is_string($jwi_pay_raw) && trim($jwi_pay_raw) !== '') {
+    $jwi_payments_arr = json_decode($jwi_pay_raw, true);
+}
+if (!is_array($jwi_payments_arr)) {
+    $jwi_payments_arr = [];
+}
+$metal_exchange_barcodes_out = [];
 
 $tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_invoices'");
 if (!$tbl || mysqli_num_rows($tbl) === 0) {
@@ -126,6 +137,43 @@ if ($repair_jobwork_order_id > 0) {
                 throw new RuntimeException(mysqli_error($conn));
             }
         }
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'jobwork_invoice', (int) $newId, $invoice_no, date('Y-m-d'));
+        if (!empty($jwi_payments_arr)) {
+            foreach ($jwi_payments_arr as $__jp0) {
+                if (!is_array($__jp0)) {
+                    continue;
+                }
+                $__mj = auragold_payment_merge_stored_details($__jp0);
+                if (!auragold_payment_is_metal_exchange_inward($conn, $__mj)) {
+                    continue;
+                }
+                auragold_validate_metal_exchange_for_stock($conn, $__mj);
+            }
+            $___jwir_me_ref = auragold_metal_exchange_document_init($conn, $jwi_repair_row_existed, (int) $newId, 'jobwork_invoice_metal_exchange');
+            $__jwi_dt_j = substr(trim((string) date('Y-m-d')), 0, 10);
+            foreach ($jwi_payments_arr as $pay_seq => $__pay) {
+                if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $__pay)) {
+                    continue;
+                }
+                $___pm_jwi_r = auragold_payment_merge_stored_details($__pay);
+                auragold_post_metal_exchange_payment_to_stock(
+                    $conn,
+                    'jobwork_invoice_metal_exchange',
+                    (int) $newId,
+                    trim((string) $invoice_no),
+                    $__jwi_dt_j,
+                    $___pm_jwi_r,
+                    auragold_metal_exchange_default_branch_id(),
+                    is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                    $___jwir_me_ref,
+                    'Jobwork Invoice — Metal Exchange',
+                    'jwi_me',
+                    'JWI-ME-',
+                    $metal_exchange_barcodes_out
+                );
+            }
+        }
         mysqli_commit($conn);
     } catch (Throwable $e) {
         mysqli_rollback($conn);
@@ -149,6 +197,7 @@ if ($repair_jobwork_order_id > 0) {
         'invoice_no' => $invoice_no,
         'repair_jobwork_order_id' => $rid,
         'jobwork_order_id' => 0,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
     exit;
 }
@@ -236,6 +285,45 @@ try {
         }
     }
 
+    require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+    auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'jobwork_invoice', (int) $newId, $invoice_no, date('Y-m-d'));
+
+    if (!empty($jwi_payments_arr)) {
+        foreach ($jwi_payments_arr as $__jp1) {
+            if (!is_array($__jp1)) {
+                continue;
+            }
+            $__mj1 = auragold_payment_merge_stored_details($__jp1);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mj1)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mj1);
+        }
+        $___jwiso_me_ref = auragold_metal_exchange_document_init($conn, $jwi_so_row_existed, (int) $newId, 'jobwork_invoice_metal_exchange');
+        $__jwi_dt_so = substr(trim((string) date('Y-m-d')), 0, 10);
+        foreach ($jwi_payments_arr as $pay_seq => $__pay_so) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $__pay_so)) {
+                continue;
+            }
+            $___pm_jwi_so = auragold_payment_merge_stored_details($__pay_so);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'jobwork_invoice_metal_exchange',
+                (int) $newId,
+                trim((string) $invoice_no),
+                $__jwi_dt_so,
+                $___pm_jwi_so,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___jwiso_me_ref,
+                'Jobwork Invoice — Metal Exchange',
+                'jwi_me',
+                'JWI-ME-',
+                $metal_exchange_barcodes_out
+            );
+        }
+    }
+
     mysqli_commit($conn);
 } catch (Throwable $e) {
     mysqli_rollback($conn);
@@ -260,4 +348,5 @@ echo json_encode([
     'id' => (int) $newId,
     'invoice_no' => $invoice_no,
     'jobwork_order_id' => $jobwork_order_id,
+    'new_barcodes' => $metal_exchange_barcodes_out,
 ]);

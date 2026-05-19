@@ -519,7 +519,7 @@ if ($purchase_ledger_prev_balance && is_array($balance) && array_key_exists('bal
             // Match accountledger-report.php View All metal footer: hedging + payment + RV/PV party rows with weight (e.g. Metal Exchange on PI payment and sale auto receipt voucher).
             $hedging_metal_sql = "LOWER(COALESCE(description,'')) LIKE '%(hedging)%'";
             $payment_metal_sql = "(COALESCE(transaction_type,'') = 'payment' AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
-            $rv_pv_metal_sql = "(COALESCE(transaction_type,'') IN ('receipt_voucher','payment_voucher') AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
+            $rv_pv_metal_sql = "(COALESCE(transaction_type,'') IN ('receipt_voucher','sale_receipt_voucher','payment_voucher') AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
             $ledger_metal_view_sql = "($hedging_metal_sql OR $payment_metal_sql OR $rv_pv_metal_sql)";
             $metal_cl_row = getRecord("
                 SELECT

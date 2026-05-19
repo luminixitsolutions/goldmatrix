@@ -210,11 +210,8 @@ $inner_where = [
     // Sale invoices insert stock_type=outward rows; including them in SUM() keeps sold barcodes "positive". Only count on-hand rows.
     "(s.stock_type IS NULL OR LOWER(TRIM(s.stock_type)) <> 'outward')",
 ];
-mp_jwq_ensure_diamond_issue_table($conn);
-$issue_tbl = mp_jwq_diamond_issue_table_name();
-if ($jobwork_order_id > 0) {
-    $inner_where[] = 'NOT EXISTS (SELECT 1 FROM `' . $issue_tbl . '` jqds WHERE jqds.jobwork_order_id = ' . (int) $jobwork_order_id . ' AND jqds.stock_id = s.id)';
-}
+// Available list uses tbl_stock current_weight / current_qty (already reduced after partial jobwork issues).
+// Do not hide rows that were partially issued on this job — balance HAVING still applies below.
 
 // Match Stock History branch scope (adv_branch): tbl_stock.branch_id only — same barcodes as inward for that branch.
 if ($branch_id > 0) {
@@ -620,6 +617,7 @@ foreach ($list as $r) {
         'rfid_code' => (string) $rfid_disp,
         'barcode' => (string) ($r['barcode'] ?? ''),
         'qty' => $qty,
+        'balance_wt' => $fw,
         'location' => (string) ($r['sj_location'] ?? ''),
         'gross_wt' => $gross,
         'purity_wt' => $purity_wt,

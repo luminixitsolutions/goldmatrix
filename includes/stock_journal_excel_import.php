@@ -297,8 +297,16 @@ if (!function_exists('auragold_sj_excel_map_stock_journals_extended')) {
                 $caratCols[] = $c;
                 continue;
             }
-            if (preg_match('/product\\s*name/i', $r) !== 0) {
+            if (preg_match('/product\\s*name/i', $r) !== 0 && stripos($r, 'product id') === false) {
                 $put('product_name_in', $c);
+                continue;
+            }
+            if (preg_match('/product\\s*id/i', $r) !== 0) {
+                $put('product_id_in', $c);
+                continue;
+            }
+            if (preg_match('/characteristic\\s*id/i', $r) !== 0) {
+                $put('characteristic_id_in', $c);
                 continue;
             }
             $rU = strtoupper($r);
@@ -569,5 +577,93 @@ if (!function_exists('auragold_sj_excel_collect_drawings_by_row')) {
         }
 
         return $byRow;
+    }
+}
+
+if (!function_exists('auragold_sj_excel_resolve_sale_order_product_ids')) {
+    /**
+     * Resolve product_id + characteristic_id for voucher Excel rows (sale order / invoice import).
+     *
+     * @return array{0:int,1:int} [product_id, characteristic_id]
+     */
+    function auragold_sj_excel_resolve_sale_order_product_ids(mysqli $conn, int $product_id, int $characteristic_id, string $barcode, string $product_label = '', int $metal_id = 0): array
+    {
+        if ($product_id > 0 && $characteristic_id > 0) {
+            return [$product_id, $characteristic_id];
+        }
+        $product_label = trim($product_label);
+        if ($product_label !== '') {
+            if (preg_match('/\[(\d+)\]\s*$/', $product_label, $mCid)) {
+                $cidFromLabel = (int) ($mCid[1] ?? 0);
+                if ($cidFromLabel > 0) {
+                    $pcLbl = getRecord(
+                        'SELECT product_id, id AS characteristic_id
+                         FROM tbl_product_characteristics
+                         WHERE id = ' . $cidFromLabel . ' AND status = 1 LIMIT 1'
+                    );
+                    if ($pcLbl) {
+                        return [(int) ($pcLbl['product_id'] ?? 0), (int) ($pcLbl['characteristic_id'] ?? 0)];
+                    }
+                }
+                $product_label = trim((string) preg_replace('/\s*\[\d+\]\s*$/', '', $product_label));
+            }
+            if ($product_label !== '') {
+                $namePart = $product_label;
+                $metalPart = '';
+                $sep = strrpos($product_label, ' - ');
+                if ($sep !== false) {
+                    $namePart = trim(substr($product_label, 0, $sep));
+                    $metalPart = trim(substr($product_label, $sep + 3));
+                }
+                if ($namePart !== '') {
+                    require_once __DIR__ . '/auragold_product_metal_tab_match.php';
+                    $metalSql = $metal_id > 0 ? auragold_sql_pc_metal_matches_tab_metal($metal_id) : '';
+                    if ($metalPart !== '' && $metalSql === '') {
+                        $metalPartEsc = esc($metalPart);
+                        $metalSql = " AND pc.metal_id IN (SELECT id FROM tbl_metal WHERE status = 1 AND LOWER(TRIM(display_name)) = LOWER(TRIM('$metalPartEsc')))";
+                    }
+                    $nameEsc = esc($namePart);
+                    $pcByName = getRecord(
+                        "SELECT pc.product_id, pc.id AS characteristic_id
+                         FROM tbl_product_characteristics pc
+                         INNER JOIN tbl_products p ON p.id = pc.product_id
+                         WHERE p.status = 1 AND pc.status = 1 AND TRIM(p.name) = TRIM('$nameEsc')" . $metalSql . '
+                         ORDER BY pc.id ASC LIMIT 1'
+                    );
+                    if ($pcByName) {
+                        return [(int) ($pcByName['product_id'] ?? 0), (int) ($pcByName['characteristic_id'] ?? 0)];
+                    }
+                }
+            }
+        }
+        $barcode = trim($barcode);
+        if ($barcode === '') {
+            return [$product_id, $characteristic_id];
+        }
+        $bc = esc($barcode);
+        $sj = getRecord(
+            "SELECT product_id, product_characteristic_id AS characteristic_id
+             FROM tbl_stock_journal
+             WHERE TRIM(barcode) = TRIM('$bc') AND status = 'active'
+             ORDER BY id DESC LIMIT 1"
+        );
+        if ($sj) {
+            $pid = (int) ($sj['product_id'] ?? 0);
+            $cid = (int) ($sj['characteristic_id'] ?? 0);
+            if ($pid > 0 && $cid > 0) {
+                return [$pid, $cid];
+            }
+        }
+        $pc = getRecord(
+            "SELECT product_id, id AS characteristic_id
+             FROM tbl_product_characteristics
+             WHERE TRIM(barcode) = TRIM('$bc') AND status = 1
+             ORDER BY id DESC LIMIT 1"
+        );
+        if ($pc) {
+            return [(int) ($pc['product_id'] ?? 0), (int) ($pc['characteristic_id'] ?? 0)];
+        }
+
+        return [$product_id, $characteristic_id];
     }
 }

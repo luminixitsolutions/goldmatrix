@@ -3,6 +3,7 @@ session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -11,10 +12,25 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+if (!function_exists('purchase_return_validate_metal_exchange_payments')) {
+    /** @param array<int, array<string, mixed>> $payments */
+    function purchase_return_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = auragold_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
+        }
+    }
+}
+
 mysqli_begin_transaction($conn);
 
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
+    $metal_exchange_barcodes_out = [];
 
     $has_pr_branch = function_exists('auragold_ensure_table_branch_id_column') && auragold_ensure_table_branch_id_column($conn, 'tbl_purchase_returns');
     $hdr_branch    = function_exists('auragold_transaction_header_branch_id') ? auragold_transaction_header_branch_id() : 0;
@@ -661,7 +677,11 @@ try {
     }
     
     if (!empty($payments) && is_array($payments)) {
-        foreach ($payments as $payment) {
+        purchase_return_validate_metal_exchange_payments($conn, $payments);
+        $__pr_me_has_ref = auragold_metal_exchange_document_init($conn, $is_update, (int) $return_id, 'purchase_return_metal_exchange');
+        $__pr_bn = trim((string) ($_POST['order_no'] ?? ''));
+
+        foreach ($payments as $pay_seq => $payment) {
             $payment_type = esc($payment['payment_type'] ?? '');
             $deposit_into = esc($payment['deposit_into'] ?? '');
             $transaction_no = esc($payment['transaction_no'] ?? '');
@@ -672,53 +692,53 @@ try {
             $amount = $current_order_amount + $previous_balance_amount; // Total amount (current order + previous balance)
             $diamond_category = esc($payment['diamond_category'] ?? '');
             $quantity = (float)($payment['quantity'] ?? 0);
-            
-            if ($amount > 0) {
+
+            if (auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
                 // Try to insert with previous_balance_amount column (if it exists)
                 $payment_sql = "
-                    INSERT INTO tbl_purchase_return_payments (
-                        return_id, payment_type, deposit_into, transaction_no,
-                        cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity,
-                        status, created_at
-                    ) VALUES (
-                        $return_id, '$payment_type',
-                        " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
-                        " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
-                        " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
-                        " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
-                        $amount,
-                        $previous_balance_amount,
-                        " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
-                        $quantity,
-                        1, NOW()
-                    )
-                ";
-                
-                // If insert fails due to missing column, try without previous_balance_amount
+                        INSERT INTO tbl_purchase_return_payments (
+                            return_id, payment_type, deposit_into, transaction_no,
+                            cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity,
+                            status, created_at
+                        ) VALUES (
+                            $return_id, '$payment_type',
+                            " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                            " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                            " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                            " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                            $amount,
+                            $previous_balance_amount,
+                            " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                            $quantity,
+                            1, NOW()
+                        )
+                    ";
+
+                    // If insert fails due to missing column, try without previous_balance_amount
                 if (!mysqli_query($conn, $payment_sql)) {
                     $error = mysqli_error($conn);
                     // Check for various error messages related to missing column
-                    if (stripos($error, 'previous_balance_amount') !== false || 
-                        stripos($error, 'Unknown column') !== false ||
-                        stripos($error, "field list") !== false) {
+                    if (stripos($error, 'previous_balance_amount') !== false ||
+                                stripos($error, 'Unknown column') !== false ||
+                                stripos($error, "field list") !== false) {
                         // Column doesn't exist, insert without it (will need to add column to table)
                         $payment_sql = "
-                            INSERT INTO tbl_purchase_return_payments (
-                                return_id, payment_type, deposit_into, transaction_no,
-                                cheque_date, purity_carat, amount, diamond_category, quantity,
-                                status, created_at
-                            ) VALUES (
-                                $return_id, '$payment_type',
-                                " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
-                                " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
-                                " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
-                                " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
-                                $amount,
-                                " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
-                                $quantity,
-                                1, NOW()
-                            )
-                        ";
+                                INSERT INTO tbl_purchase_return_payments (
+                                    return_id, payment_type, deposit_into, transaction_no,
+                                    cheque_date, purity_carat, amount, diamond_category, quantity,
+                                    status, created_at
+                                ) VALUES (
+                                    $return_id, '$payment_type',
+                                    " . ($deposit_into ? "'$deposit_into'" : "NULL") . ",
+                                    " . ($transaction_no ? "'$transaction_no'" : "NULL") . ",
+                                    " . ($cheque_date ? "'$cheque_date'" : "NULL") . ",
+                                    " . ($purity_carat ? "'$purity_carat'" : "NULL") . ",
+                                    $amount,
+                                    " . ($diamond_category ? "'$diamond_category'" : "NULL") . ",
+                                    $quantity,
+                                    1, NOW()
+                                )
+                            ";
                         if (!mysqli_query($conn, $payment_sql)) {
                             throw new Exception("Payment insert failed: " . mysqli_error($conn));
                         }
@@ -727,9 +747,30 @@ try {
                     }
                 }
             }
+
+            $pm_saved_pr = auragold_payment_merge_stored_details($payment);
+            $__pr_rd = substr(trim(str_replace('\\', '', (string) $return_date)), 0, 10);
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__pr_rd)) {
+                $__pr_rd = date('Y-m-d');
+            }
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'purchase_return_metal_exchange',
+                (int) $return_id,
+                $__pr_bn !== '' ? $__pr_bn : trim(str_replace('\\', '', (string) $return_no)),
+                $__pr_rd,
+                $pm_saved_pr,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $__pr_me_has_ref,
+                'Purchase Return — Metal Exchange',
+                'pr_me',
+                'PR-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
     }
-    
+
     $against_type_trim = trim((string)$against_type);
     $is_pur_quot = (stripos($against_type_trim, 'quotation') !== false);
     $chk_pend = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_purchase_quotation_items LIKE 'pending_qty'");
@@ -795,6 +836,11 @@ try {
 
     require __DIR__ . '/includes/purchase_return_post_ledger.inc.php';
     
+    if ((int) $return_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'purchase_return', (int) $return_id, $return_no, $return_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -816,7 +862,8 @@ try {
         'invoice_id' => $return_id, // For compatibility
         'invoice_no' => $return_no, // For compatibility
         'order_id' => $return_id, // For compatibility
-        'order_no' => $return_no // For compatibility
+        'order_no' => $return_no, // For compatibility
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
     
 } catch (Exception $e) {

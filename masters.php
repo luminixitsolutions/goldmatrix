@@ -13,6 +13,8 @@ if (isset($conn) && $conn) {
     auragold_ensure_tbl_metal_dashboard_images($conn);
 }
 $masters_metal_has_dash_img = isset($conn) && $conn && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'dashboard_image_path');
+$masters_metal_show_dash = isset($conn) && $conn && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'show_on_dashboard');
+$masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($masters_metal_show_dash ? 1 : 0);
 ?>
 <!DOCTYPE html>
 
@@ -826,6 +828,7 @@ if (is_array($carats) && count($carats) > 0) {
                         <th>Display Name *</th>
                         <th>HSN Code</th>
                         <th>System Name</th>
+                        <?php if ($masters_metal_show_dash) { ?><th style="width:56px;">Dash</th><?php } ?>
                         <?php if ($masters_metal_has_dash_img) { ?><th style="width:44px;">Img</th><?php } ?>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -847,6 +850,11 @@ if (is_array($carats) && count($carats) > 0) {
                         <td><?php echo htmlspecialchars($r['display_name']); ?></td>
                         <td><?php echo htmlspecialchars($r['hsn_code']); ?></td>
                         <td><?php echo htmlspecialchars($r['system_name']); ?></td>
+                        <?php if ($masters_metal_show_dash) {
+                            $m_show_dash = !empty($r['show_on_dashboard']);
+                            ?>
+                        <td class="text-center"><?php echo $m_show_dash ? '<span class="text-success" title="Shown on dashboard">Yes</span>' : '<span class="text-muted">—</span>'; ?></td>
+                        <?php } ?>
                         <?php if ($masters_metal_has_dash_img) { ?>
                         <td class="text-center align-middle p-1"><?php if ($m_thumb_src !== '') { ?><img src="<?php echo htmlspecialchars($m_thumb_src, ENT_QUOTES, 'UTF-8'); ?>" alt="" style="max-width:36px;max-height:36px;object-fit:contain;"><?php } else { ?><span class="text-muted">—</span><?php } ?></td>
                         <?php } ?>
@@ -871,7 +879,7 @@ if (is_array($carats) && count($carats) > 0) {
                     </tr>
                 <?php } } else { ?>
                     <tr id="noMetalRow">
-                        <td colspan="<?php echo $masters_metal_has_dash_img ? 5 : 4; ?>" class="text-center text-muted">
+                        <td colspan="<?php echo (int) $masters_metal_table_cols; ?>" class="text-center text-muted">
                             No Metal Found
                         </td>
                     </tr>
@@ -2113,10 +2121,17 @@ if (is_array($carats) && count($carats) > 0) {
                 <label>System Name</label>
                 <input type="text" id="metalSystemName" class="form-control">
             </div>
+            <?php if ($masters_metal_show_dash) { ?>
+            <div class="form-group mb-2">
+                <div class="custom-control custom-checkbox">
+                  <input type="checkbox" class="custom-control-input" id="metalShowOnDashboard" value="1">
+                  <label class="custom-control-label" for="metalShowOnDashboard">Show on dashboard</label>
+                </div>
+            </div>
+            <?php } ?>
             <?php if ($masters_metal_has_dash_img) { ?>
             <div class="form-group mb-2">
                 <label>Dashboard image (optional)</label>
-                <div class="small text-muted mb-1">Shown on the live rates dashboard for this metal (Gold, Silver, Platinum, Diamond).</div>
                 <input type="file" class="form-control-file form-control-sm" id="metalImageFile" accept="image/jpeg,image/png,image/gif,image/webp">
                 <input type="url" class="form-control form-control-sm mt-2" id="metalImageUrl" placeholder="https://example.com/image.jpg" autocomplete="off">
                 <div class="custom-control custom-checkbox mt-2">
@@ -5647,28 +5662,46 @@ function resetMetalImageFields() {
 }
 
 function loadMetalImageForEdit(id) {
-    if (!$("#metalImageUrl").length) {
+    var needFetch = $("#metalImageUrl").length || $("#metalShowOnDashboard").length;
+    if (!needFetch) {
         return;
     }
-    $("#metalImageFile").val("");
-    $("#metalImageClear").prop("checked", false);
-    $("#metalImagePreview").hide().attr("src", "");
     var nid = parseInt(id, 10);
+    if ($("#metalImageUrl").length) {
+        $("#metalImageFile").val("");
+        $("#metalImageClear").prop("checked", false);
+        $("#metalImagePreview").hide().attr("src", "");
+        if (!nid || nid <= 0) {
+            $("#metalImageUrl").val("");
+        }
+    } else if ($("#metalShowOnDashboard").length && (!nid || nid <= 0)) {
+        $("#metalShowOnDashboard").prop("checked", false);
+        return;
+    }
     if (!nid || nid <= 0) {
-        $("#metalImageUrl").val("");
         return;
     }
     jQuery.getJSON("ajax/metal.php", { action: "get", id: nid })
         .done(function (res) {
             if (!res || res.status !== "success" || !res.row) {
-                $("#metalImageUrl").val("");
+                if ($("#metalImageUrl").length) {
+                    $("#metalImageUrl").val("");
+                }
                 return;
             }
             var r = res.row;
-            $("#metalImageUrl").val(r.dashboard_image_url || "");
-            var src = (r.dashboard_image_path || r.dashboard_image_url || "").trim();
-            if (src) {
-                $("#metalImagePreview").attr("src", src).show();
+            if ($("#metalImageUrl").length) {
+                $("#metalImageUrl").val(r.dashboard_image_url || "");
+                var src = (r.dashboard_image_path || r.dashboard_image_url || "").trim();
+                if (src) {
+                    $("#metalImagePreview").attr("src", src).show();
+                }
+            }
+            if ($("#metalShowOnDashboard").length) {
+                $("#metalShowOnDashboard").prop(
+                    "checked",
+                    !!(parseInt(String(r.show_on_dashboard || ""), 10) === 1)
+                );
             }
         });
 }
@@ -5679,6 +5712,9 @@ function openMetalModal(){
     resetMetalImageFields();
     $("#metalModal .modal-title").text("Add Metal");
     $("#metalModal").modal("show");
+    if ($("#metalShowOnDashboard").length) {
+        $("#metalShowOnDashboard").prop("checked", false);
+    }
 }
 
 function editMetal(id, name, hsn, system){
@@ -5703,7 +5739,7 @@ function saveMetal(){
         return;
     }
 
-    let useFormData = $("#metalImageUrl").length > 0;
+    let useFormData = <?php echo ($masters_metal_has_dash_img || $masters_metal_show_dash) ? 'true' : 'false'; ?>;
 
     let ajaxOpts = {
         url: "ajax/metal.php",
@@ -5718,6 +5754,15 @@ function saveMetal(){
                 let safeName = $('<div>').text(res.display_name).html();
                 let safeHSN  = $('<div>').text(res.hsn_code || '').html();
                 let safeSys  = $('<div>').text(res.system_name || '').html();
+
+                <?php if ($masters_metal_show_dash) { ?>
+                var dashTd = (typeof res.show_on_dashboard !== 'undefined'
+                    && (parseInt(res.show_on_dashboard, 10) === 1 || String(res.show_on_dashboard) === '1'))
+                    ? '<td class="text-center"><span class="text-success">Yes</span></td>'
+                    : '<td class="text-center"><span class="text-muted">—</span></td>';
+                <?php } else { ?>
+                var dashTd = '';
+                <?php } ?>
 
                 <?php if ($masters_metal_has_dash_img) { ?>
                 var thumbSrc = "";
@@ -5736,6 +5781,7 @@ function saveMetal(){
                         <td>${safeName}</td>
                         <td>${safeHSN}</td>
                         <td>${safeSys}</td>
+                        ${dashTd}
                         ${thumbTd}
                         <td class="text-center">
                             <a href="javascript:void(0)"
@@ -5786,13 +5832,18 @@ function saveMetal(){
         fd.append("display_name", name);
         fd.append("hsn_code", hsn);
         fd.append("system_name", system);
-        fd.append("dashboard_image_url", $("#metalImageUrl").val().trim());
-        if ($("#metalImageClear").is(":checked")) {
-            fd.append("clear_dashboard_image", "1");
+        if ($("#metalImageUrl").length) {
+            fd.append("dashboard_image_url", $("#metalImageUrl").val().trim());
+            if ($("#metalImageClear").is(":checked")) {
+                fd.append("clear_dashboard_image", "1");
+            }
+            let finp = $("#metalImageFile")[0];
+            if (finp && finp.files && finp.files[0]) {
+                fd.append("dashboard_image", finp.files[0]);
+            }
         }
-        let finp = $("#metalImageFile")[0];
-        if (finp && finp.files && finp.files[0]) {
-            fd.append("dashboard_image", finp.files[0]);
+        if ($("#metalShowOnDashboard").length) {
+            fd.append("show_on_dashboard", $("#metalShowOnDashboard").is(":checked") ? "1" : "0");
         }
         ajaxOpts.data = fd;
         ajaxOpts.processData = false;
@@ -5803,7 +5854,8 @@ function saveMetal(){
             id: id,
             display_name: name,
             hsn_code: hsn,
-            system_name: system
+            system_name: system,
+            show_on_dashboard: ($("#metalShowOnDashboard").length && $("#metalShowOnDashboard").is(":checked")) ? "1" : "0"
         };
     }
 
@@ -5832,7 +5884,7 @@ function deleteMetal(id){
                 if($("#metalTableBody tr").length === 0){
                     $("#metalTableBody").html(`
                         <tr id="noMetalRow">
-                            <td colspan="4" class="text-center text-muted">
+                            <td colspan="<?php echo (int) $masters_metal_table_cols; ?>" class="text-center text-muted">
                                 No Metal Found
                             </td>
                         </tr>

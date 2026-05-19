@@ -84,6 +84,9 @@ $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
 
+$auragold_voucher_ds_kind = 'purchase_invoice';
+$auragold_voucher_ds_db_id = (int) ($edit_order_id ?? 0);
+
 if (!empty($edit_order_id)) {
     $edit_order = getRecord("SELECT * FROM tbl_purchase_invoices WHERE id = " . intval($edit_order_id));
     if ($edit_order) {
@@ -942,6 +945,7 @@ text-transform: uppercase;
         transform: translateY(-1px);
         box-shadow: 0 4px 10px rgba(33, 150, 243, 0.4);
     }
+    @media (min-width: 992px) {
     .company-header {
         display: flex;
         justify-content: space-between;
@@ -949,6 +953,7 @@ text-transform: uppercase;
         padding: 4px;
         background-color: #F8F6F1;
         border-radius: 0;
+    }
     }
     .company-info {
         display: flex;
@@ -2598,6 +2603,158 @@ text-transform: uppercase;
         box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
         outline: none;
     }
+
+    /* —— Purchase Invoice: mobile / tablet (≤991.98px) —— */
+    @media (max-width: 991.98px) {
+        html {
+            height: auto;
+            min-height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        body {
+            height: auto;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        .layout-wrapper {
+            height: auto;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            overflow-y: visible;
+        }
+        .layout-content {
+            height: auto !important;
+            min-height: 0;
+            overflow-x: hidden;
+            overflow-y: visible !important;
+            padding-bottom: 88px !important;
+        }
+
+        .invoice-content-row.row {
+            margin-left: 0;
+            margin-right: 0;
+        }
+        .invoice-content-row > .col-lg-8,
+        .invoice-content-row > .col-lg-4 {
+            min-width: 0 !important;
+            max-width: 100%;
+            flex: 0 0 100%;
+        }
+        .invoice-content-row .card {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+        }
+
+        .summary-panel {
+            position: relative;
+            top: auto;
+            margin-top: 0.75rem;
+        }
+        .summary-panel .invoice-header[style*="margin"] {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            margin-top: 0 !important;
+            flex-wrap: wrap;
+            row-gap: 0.5rem;
+        }
+        .summary-panel .summary-label {
+            white-space: normal;
+            max-width: 58%;
+            line-height: 1.3;
+        }
+        .summary-row {
+            flex-wrap: wrap;
+            row-gap: 0.25rem;
+        }
+
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] {
+            flex: 0 0 100% !important;
+            max-width: 100% !important;
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group {
+            margin-bottom: 14px !important;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            position: relative;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 14px 10px 10px;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > label:first-of-type {
+            position: absolute;
+            top: 0;
+            left: 10px;
+            transform: translateY(-50%);
+            margin: 0;
+            padding: 0 6px;
+            background: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            color: #11294b;
+            letter-spacing: 0.04em;
+            line-height: 1;
+            max-width: calc(100% - 24px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > .d-flex,
+        .billing-form .auragold-mq-billing-grid > [class*="col-"] > .form-group > div:not(.input-group) {
+            width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .billing-form .auragold-mq-billing-grid .add-customer-icon,
+        .billing-form .auragold-mq-billing-grid .feather.icon-search {
+            top: 50% !important;
+        }
+
+        .payment-icons {
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .invoice-content-row .product-list-table-responsive {
+            min-height: 280px;
+            max-height: min(520px, 58vh);
+        }
+        .product-list-card .table-header-wrapper {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+        }
+        .product-list-card .table-header-wrapper h6 .text-muted {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.68rem !important;
+            line-height: 1.35;
+            font-weight: 500;
+        }
+        .product-list-card .table-settings-btn {
+            align-self: flex-start;
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .invoice-content-row .product-list-table-responsive {
+            min-height: 260px;
+            max-height: min(480px, 56vh);
+        }
+        .invoice-header h5 {
+            font-size: 0.8rem !important;
+        }
+        .invoice-header-actions {
+            flex-wrap: wrap;
+        }
+    }
 </style>
 </head>
 
@@ -2695,7 +2852,7 @@ text-transform: uppercase;
                             <!-- Transaction Details Form -->
                             <div class="card mb-4">
                                 <div class="card-body billing-form">
-                                        <div class="row">
+                                        <div class="row auragold-mq-billing-grid">
                                             <div class="col-md-6">
                                                 <div class="form-group">
                                                     <label>Search Purchase Invoice</label>
@@ -2895,6 +3052,7 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
                                     
                                     <!-- Comments: add multiple with date/time, edit, delete -->
                                     <div class="mt-3">
@@ -3054,11 +3212,14 @@ text-transform: uppercase;
     <div class="layout-overlay layout-sidenav-toggle"></div>
 </div>
 <!-- / Layout wrapper -->
-<?php include 'includes/common-modal.php'; ?>
-<link rel="stylesheet" href="assets/css/auragold-payment-cards.css">
-<script src="assets/js/auragold-payment-cards.js"></script>
-
+<?php
+$common_modal_show_excel_import = true;
+$common_modal_excel_sample_href = 'ajax/download-stock-journal-excel-sample.php?voucher=sale_order';
+include 'includes/common-modal.php';
+?>
 <?php include 'footer-script.php';?>
+
+<?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
@@ -3156,7 +3317,13 @@ window.PB_PAGE_CONFIG = {
             'discount_percent' => (float)($edit_order['discount_percent'] ?? 0),
             'comment' => $edit_order['comment'] ?? '',
             'payment_comments' => $edit_order['payment_comments'] ?? '[]',
+            'diamond_issues' => [],
+            'stone_issues' => [],
         ];
+        require_once __DIR__ . '/includes/auragold_voucher_diamond_stock.php';
+        require_once __DIR__ . '/includes/auragold_voucher_stone_stock.php';
+        $embed_order['diamond_issues'] = auragold_voucher_list_diamond_issue_rows_for_kind($conn, 'purchase_invoice', (int) ($edit_order['id'] ?? 0));
+        $embed_order['stone_issues'] = auragold_voucher_list_stone_issue_rows_for_kind($conn, 'purchase_invoice', (int) ($edit_order['id'] ?? 0));
         $embed_items = is_array($edit_items) ? $edit_items : [];
         $embed_payments = is_array($edit_payments) ? $edit_payments : [];
         // Convert saved image paths (images column) to full URLs for group_image so UI can display them
@@ -8334,7 +8501,254 @@ window.PB_PAGE_CONFIG = {
             }
         }
     }
-    
+
+    function mapSaleOrderExcelProductToModalRow(p) {
+        if (!p) p = {};
+        var tpaths = p.temp_image_paths;
+        if (!Array.isArray(tpaths)) tpaths = [];
+        return {
+            product_id: p.product_id,
+            characteristic_id: p.characteristic_id,
+            product_name: (p.product_name != null && String(p.product_name).trim() !== '') ? String(p.product_name).trim() : '',
+            quantity: p.quantity,
+            gross_wt: p.gross_weight,
+            less_wt: p.less_weight,
+            pkt_wt: p.pkt_wt,
+            pkt_less_wt: p.pkt_less_wt,
+            purity: p.purity,
+            final_wt: p.final_weight,
+            net_wt: p.net_weight,
+            pure_wt: p.pure_weight,
+            rate: p.rate,
+            making_amount: p.making_amount,
+            making_type: p.making_type,
+            making_rate: p.making_rate,
+            making_discount_amt: p.making_discount_amt,
+            making_actual_value: p.making_actual_value,
+            tax: p.tax_amount,
+            design_no: p.design_no,
+            stone_amount: p.stone_amount,
+            stone_weight: p.stone_weight,
+            other_amount: p.other_amount,
+            diamond_amount: p.diamond_amount,
+            amount: p.amount,
+            net_amt: p.net_amount,
+            net_amt_tax: p.net_amt_tax,
+            metal_value: p.metal_value,
+            discount: p.discount,
+            purchase_amount: p.purchase_amount,
+            sale_amount: p.sale_amount,
+            sale_amount_with: p.sale_amount_with,
+            reverse: p.reverse,
+            stone_charges: p.stone_charges,
+            other_charges: p.other_charges,
+            diamond_value: p.diamond_value,
+            gemstone_value: p.gemstone_value,
+            barcode: (p.barcode != null && String(p.barcode).trim() !== '') ? String(p.barcode).trim() : '',
+            from_excel: true,
+            metal_id: p.metal_id,
+            metal_name: p.metal_name,
+            carat_id: (p.karat != null && String(p.karat).trim() !== '') ? String(p.karat).trim() : '',
+            location_id: (p.location != null && String(p.location).trim() !== '') ? String(p.location).trim() : '',
+            calculation_type: (p.calculation != null && String(p.calculation).trim() !== '') ? String(p.calculation).trim() : '',
+            category: (p.category != null && String(p.category).trim() !== '') ? String(p.category).trim() : '',
+            excelTempImagePaths: tpaths,
+            excel_extra_columns: Array.isArray(p.excel_extra_columns) ? p.excel_extra_columns : []
+        };
+    }
+
+    function saleOrderExcelProductToItemProduct(p) {
+        var md = mapSaleOrderExcelProductToModalRow(p);
+        if (typeof getItemAndProductFromModalRowData !== 'function') {
+            return null;
+        }
+        var pair = getItemAndProductFromModalRowData(md);
+        var item = pair.item;
+        var product = pair.product;
+        item.barcode = item.barcode || md.barcode || '';
+        item.barcode_no = item.barcode_no || md.barcode || '';
+        item.calculation = md.calculation_type || item.calculation;
+        item.category = md.category || item.category;
+        item.rfid_code = p.rfid_code || item.rfid_code || '';
+        item.huid_no = p.huid_no || item.huid_no || '';
+        item.gold_loss1 = p.gold_loss1;
+        item.gold_loss2 = p.gold_loss2;
+        item.wastage_per = p.wastage_per;
+        item.wastage_weight = p.wastage_wt;
+        item.metal_rate = p.metal_rate || item.metal_rate;
+        item.setting_charge = p.setting_charge;
+        if (p.metal_id) {
+            item.metal_id = p.metal_id;
+        }
+        return { item: item, product: product };
+    }
+    window.saleOrderExcelProductToItemProduct = saleOrderExcelProductToItemProduct;
+
+    function clearMainRowBarcodeForReassign(mainRow) {
+        if (!mainRow) return;
+        mainRow.setAttribute('data-barcode', '');
+        var binp = mainRow.querySelector('[data-column="barcode"] input');
+        if (binp) binp.value = '';
+        var bsp = mainRow.querySelector('[data-column="barcode"] span');
+        if (bsp) bsp.textContent = '';
+        try {
+            var gi = mainRow.getAttribute('data-group-items');
+            if (gi) {
+                var arr = JSON.parse(gi);
+                if (Array.isArray(arr)) {
+                    arr.forEach(function(x) { if (x) x.barcode = ''; });
+                    mainRow.setAttribute('data-group-items', JSON.stringify(arr));
+                }
+            }
+        } catch (e) {}
+    }
+
+    function commitProductSelectionModalToMainTable(opts) {
+        opts = opts || {};
+        var forceNewBarcodes = !!opts.forceNewBarcodes;
+        var forceSeparateRows = !!opts.forceSeparateRows;
+        var closeModal = !!opts.closeModal;
+        var notifyEmpty = opts.notifyEmpty !== false;
+
+        var allProductRows = document.querySelectorAll('#productListBody .product-row');
+        if (allProductRows.length === 0) {
+            if (notifyEmpty) alert('No products available to add');
+            return { ok: false, reason: 'no_products' };
+        }
+
+        if (currentEditingRowId) {
+            if (forceNewBarcodes) {
+                alert('Excel lines are in the modal. Cancel or save the row you are editing, then click Add (Shift + A) to add them to the invoice.');
+                return { ok: false, reason: 'edit_mode' };
+            }
+            if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
+            if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+            var mainRowEd = document.getElementById(currentEditingRowId);
+            var groupItemsJsonEd = mainRowEd ? mainRowEd.getAttribute('data-group-items') : null;
+            if (groupItemsJsonEd) {
+                var modalRowsDataEd = [];
+                allProductRows.forEach(function(r) { modalRowsDataEd.push(getModalRowDataFromRow(r, true)); });
+                if (modalRowsDataEd.length > 0) {
+                    updateMergedRowFromModalRows(currentEditingRowId, modalRowsDataEd);
+                }
+            } else {
+                var firstRowEd = allProductRows[0];
+                if (firstRowEd) {
+                    updateProductListRowFromModalRow(currentEditingRowId, firstRowEd);
+                }
+            }
+            hideProductModal();
+            currentEditingRowId = null;
+            updateSummaryPanel();
+            return { ok: true, reason: 'edit_saved', mainRowsAdded: 0 };
+        }
+
+        var productRows = Array.from(allProductRows).filter(function(row) {
+            if (!row) return false;
+            return row.style.display !== 'none';
+        });
+        if (productRows.length === 0) {
+            if (notifyEmpty) {
+                alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
+            }
+            return { ok: false, reason: 'no_visible' };
+        }
+
+        if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
+        if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+
+        var byMetal = {};
+        var metalsTouched = {};
+        var mainRowsAdded = 0;
+        try {
+            if (typeof window.calculateModalRowNetWeight === 'function') {
+                productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
+            }
+            if (forceSeparateRows) {
+                var barcodeAssignPairs = [];
+                productRows.forEach(function(row) {
+                    var metalId = row.getAttribute('data-metal-id') || '';
+                    metalsTouched[metalId] = true;
+                    var d = getModalRowDataFromRow(row, false);
+                    if (forceNewBarcodes) d.barcode = '';
+                    var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
+                    addProductToTableFromModalRow(d, metalId);
+                    mainRowsAdded++;
+                    if (forceNewBarcodes) {
+                        var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
+                        if (afterRows.length > nBefore) {
+                            var newRow = afterRows[afterRows.length - 1];
+                            clearMainRowBarcodeForReassign(newRow);
+                            barcodeAssignPairs.push({ row: newRow, modalRowData: Object.assign({}, d, { barcode: '' }) });
+                        }
+                    }
+                });
+                if (forceNewBarcodes && barcodeAssignPairs.length && typeof window.assignUniqueBarcodesSequentialForProductListRows === 'function') {
+                    window.assignUniqueBarcodesSequentialForProductListRows(barcodeAssignPairs);
+                } else if (forceNewBarcodes && barcodeAssignPairs.length) {
+                    barcodeAssignPairs.forEach(function(p) {
+                        if (typeof window.assignUniqueBarcodeToProductListRow === 'function') {
+                            window.assignUniqueBarcodeToProductListRow(p.row, p.modalRowData);
+                        }
+                    });
+                }
+            } else {
+                productRows.forEach(function(row) {
+                    var metalId = row.getAttribute('data-metal-id') || '';
+                    if (!byMetal[metalId]) byMetal[metalId] = [];
+                    byMetal[metalId].push(row);
+                });
+                Object.keys(byMetal).forEach(function(metalId) {
+                    metalsTouched[metalId] = true;
+                    var rows = byMetal[metalId];
+                    var modalRowsData = [];
+                    rows.forEach(function(r) {
+                        var d = getModalRowDataFromRow(r, false);
+                        if (forceNewBarcodes) d.barcode = '';
+                        modalRowsData.push(d);
+                    });
+                    if (modalRowsData.length === 0) return;
+                    var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
+                    addMergedProductsToTable(modalRowsData, metalId);
+                    mainRowsAdded++;
+                    if (forceNewBarcodes) {
+                        var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
+                        if (afterRows.length > nBefore) {
+                            var newRow = afterRows[afterRows.length - 1];
+                            clearMainRowBarcodeForReassign(newRow);
+                            if (modalRowsData.length === 1 && typeof window.assignUniqueBarcodeToProductListRow === 'function') {
+                                window.assignUniqueBarcodeToProductListRow(newRow, Object.assign({}, modalRowsData[0], { barcode: '' }));
+                            } else if (modalRowsData.length > 1 && typeof window.assignUniqueBarcodesToMergedProductListRow === 'function') {
+                                var cleared = modalRowsData.map(function(d) { return Object.assign({}, d, { barcode: '' }); });
+                                window.assignUniqueBarcodesToMergedProductListRow(newRow, cleared);
+                            }
+                        }
+                    }
+                });
+            }
+        } finally {
+            var productListBody = document.getElementById('productListBody');
+            if (productListBody) {
+                productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
+            }
+            if (window.productModalGroupImageByTab && metalsTouched && typeof metalsTouched === 'object') {
+                Object.keys(metalsTouched).forEach(function(metalId) {
+                    delete window.productModalGroupImageByTab[String(metalId || '')];
+                });
+            }
+            var groupNameInput = document.getElementById('modalGroupName');
+            if (groupNameInput) groupNameInput.value = '';
+            var commentInput = document.getElementById('modalComment');
+            if (commentInput) commentInput.value = '';
+        }
+        updateSummaryPanel();
+        if (closeModal && typeof hideProductModal === 'function') {
+            hideProductModal();
+        }
+        return { ok: true, mainRowsAdded: mainRowsAdded };
+    }
+    window.commitProductSelectionModalToMainTable = commitProductSelectionModalToMainTable;
+
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
     if (modalProductSearchInput) {
@@ -8365,82 +8779,7 @@ window.PB_PAGE_CONFIG = {
     const modalAddBtn = document.getElementById('modalAddBtn');
     if (modalAddBtn) {
         modalAddBtn.addEventListener('click', function() {
-            // Get all product rows (not just checked ones)
-            const allProductRows = document.querySelectorAll('#productListBody .product-row');
-            
-            if (allProductRows.length === 0) {
-                alert('No products available to add');
-                return;
-            }
-            
-            // Check if we're in edit mode
-            if (currentEditingRowId) {
-                if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-                if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-                const mainRow = document.getElementById(currentEditingRowId);
-                const groupItemsJson = mainRow ? mainRow.getAttribute('data-group-items') : null;
-                if (groupItemsJson) {
-                    // Merged row: re-merge all modal rows and update main row
-                    const modalRowsData = [];
-                    allProductRows.forEach(function(r) { modalRowsData.push(getModalRowDataFromRow(r, true)); });
-                    if (modalRowsData.length > 0) {
-                        updateMergedRowFromModalRows(currentEditingRowId, modalRowsData);
-                    }
-                } else {
-                    // Single row: update from first modal row
-                    const firstRow = allProductRows[0];
-                    if (firstRow) {
-                        updateProductListRowFromModalRow(currentEditingRowId, firstRow);
-                    }
-                }
-                hideProductModal();
-                currentEditingRowId = null;
-                updateSummaryPanel();
-                return;
-            }
-            
-            // Add mode: Only add rows that are visible (current tab); ignore hidden rows from other tabs
-            const productRows = Array.from(allProductRows).filter(function(row) {
-                if (!row) return false;
-                return row.style.display !== 'none';
-            });
-            if (productRows.length === 0) {
-                alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
-                return;
-            }
-            if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-            if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-            try {
-                // Run modal row calculation so making-amount (and other calculated fields) are up to date before reading
-                if (typeof window.calculateModalRowNetWeight === 'function') {
-                    productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
-                }
-                var byMetal = {};
-                productRows.forEach(function(row) {
-                    var metalId = row.getAttribute('data-metal-id') || '';
-                    if (!byMetal[metalId]) byMetal[metalId] = [];
-                    byMetal[metalId].push(row);
-                });
-                Object.keys(byMetal).forEach(function(metalId) {
-                    var rows = byMetal[metalId];
-                    var modalRowsData = [];
-                    rows.forEach(function(r) {
-                        modalRowsData.push(getModalRowDataFromRow(r, false));
-                    });
-                    if (modalRowsData.length > 0) addMergedProductsToTable(modalRowsData, metalId);
-                });
-            } finally {
-                // Always clear modal product list after add so user can add more products (modal stays open)
-                const productListBody = document.getElementById('productListBody');
-                if (productListBody) {
-                    productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
-                }
-                var groupNameInput = document.getElementById('modalGroupName');
-                if (groupNameInput) groupNameInput.value = '';
-                var commentInput = document.getElementById('modalComment');
-                if (commentInput) commentInput.value = '';
-            }
-            updateSummaryPanel();
+            commitProductSelectionModalToMainTable({ forceNewBarcodes: false, closeModal: false, notifyEmpty: true });
         });
     }
     
@@ -9631,6 +9970,9 @@ window.PB_PAGE_CONFIG = {
         orderData.payments = (typeof collectPosPaymentsForSave === 'function')
             ? collectPosPaymentsForSave()
             : [];
+        if (typeof window.auragoldVoucherDiamondStoneAppendPendingToOrderData === 'function') {
+            window.auragoldVoucherDiamondStoneAppendPendingToOrderData(orderData);
+        }
 
         
         // Show loading
@@ -9644,7 +9986,7 @@ window.PB_PAGE_CONFIG = {
         // Convert arrays to JSON strings for POST
         const postData = {};
         Object.keys(orderData).forEach(key => {
-            if (key === 'items' || key === 'payments') {
+            if (typeof window.auragoldVoucherDiamondStonePostDataShouldStringify === 'function' && window.auragoldVoucherDiamondStonePostDataShouldStringify(key)) {
                 postData[key] = JSON.stringify(orderData[key]);
             } else {
                 postData[key] = orderData[key];
@@ -9668,6 +10010,9 @@ window.PB_PAGE_CONFIG = {
                     }
                     
                     if (response.status === 'success') {
+                        if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                            window.auragoldVoucherDiamondStoneOnSaveSuccess(response.invoice_id || response.order_id);
+                        }
                         const invoiceId = response.invoice_id || response.order_id;
                         if (invoiceId) {
                             // After save: go to create page (not edit) when user closes print modal
@@ -9717,6 +10062,9 @@ window.PB_PAGE_CONFIG = {
                 }
                 
                 if (data.status === 'success') {
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(data.invoice_id || data.order_id);
+                    }
                     const invoiceId = data.invoice_id || data.order_id;
                     if (invoiceId) {
                         // After save: go to create page (not edit) when user closes print modal
@@ -10240,6 +10588,10 @@ window.PB_PAGE_CONFIG = {
     // Populate form with order data (param loadedPayments to avoid shadowing global payments)
     function populateOrderForm(order, items, loadedPayments) {
         console.log('populateOrderForm executing', { orderId: order && order.id, itemsCount: (items && items.length) || 0, paymentsCount: (loadedPayments && loadedPayments.length) || 0 });
+
+        if (typeof window.auragoldVoucherDiamondStonePopulateFromOrder === 'function') {
+            window.auragoldVoucherDiamondStonePopulateFromOrder(order);
+        }
         
         // Update order number
         if (document.getElementById('currentOrderNo')) {
@@ -10702,10 +11054,8 @@ window.PB_PAGE_CONFIG = {
         // Retry: if items/totals still empty after 1.2s, run again
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -10986,7 +11336,7 @@ window.PB_PAGE_CONFIG = {
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }
@@ -11648,6 +11998,7 @@ window.PB_PAGE_CONFIG = {
         window.currentEditingRow = null;
     }
 </script>
+<script src="assets/js/product-modal-excel-import-sale-order-voucher.js"></script>
 <!-- Print Invoice Confirmation Modal -->
 <div id="printInvoiceModal" class="print-invoice-modal" style="display: none;">
     <div class="print-invoice-modal-content">

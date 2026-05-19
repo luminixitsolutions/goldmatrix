@@ -1402,7 +1402,8 @@ html, body {
     font-weight: 600;
 }
 
-/* Company header: light strip + GoldMatrix-style utilities */
+/* Company header: desktop only — mobile uses grid from newcss.css (sidebar) */
+@media (min-width: 992px) {
 .company-header {
     background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%);
     border-bottom: 1px solid #e2e8f0;
@@ -1411,6 +1412,7 @@ html, body {
     justify-content: space-between;
     align-items: center;
     color: #11294b;
+}
 }
 
 .company-info {
@@ -1638,6 +1640,61 @@ html, body {
 .tab-actions .btn-icon:hover {
     background: #f8fafc;
     border-color: #cbd5e1;
+}
+
+/* Mobile: tabs in one horizontal row + horizontal scroll; actions below */
+@media (max-width: 991.98px) {
+    .layout-content {
+        height: auto !important;
+        min-height: calc(100dvh - 120px);
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 72px !important;
+    }
+    .tabs-container {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        gap: 10px;
+        padding: 10px 12px !important;
+    }
+    .tabs-list {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        width: 100%;
+        max-width: 100%;
+        gap: 0;
+        margin: 0 !important;
+        padding: 0 0 6px 0 !important;
+        border-bottom: 1px solid #e2e8f0;
+        scrollbar-width: thin;
+    }
+    .tabs-list::-webkit-scrollbar {
+        height: 6px;
+    }
+    .tabs-list::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+    }
+    .tabs-list li {
+        display: flex !important;
+        flex-shrink: 0;
+    }
+    .tabs-list .tab-link {
+        white-space: nowrap;
+        padding: 10px 14px;
+        font-size: 0.78rem;
+    }
+    .tab-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 8px;
+    }
 }
 
 /* Column picker: popover under gear (sale-invoice style; fixed position avoids card overflow clip) */
@@ -2246,12 +2303,12 @@ html, body {
 
                                     <!-- 5 Tabs: Old Jewellery-Scrap, Summary, Refine, Received, Stocked -->
                                     <div class="tabs-container" role="navigation" style="display: flex !important; visibility: visible !important;">
-                                        <ul class="tabs-list" style="display: flex !important; flex-wrap: wrap; list-style: none; margin: 0; padding: 0;">
-                                            <li style="display: inline-block;"><a href="old-jewellery.php?tab=scrap<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'scrap' ? 'active' : '' ?>">Old Jewellery-Scrap</a></li>
-                                            <li style="display: inline-block;"><a href="old-jewellery.php?tab=summary<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'summary' ? 'active' : '' ?>">Summary</a></li>
-                                            <li style="display: inline-block;"><a href="old-jewellery.php?tab=refine<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'refine' ? 'active' : '' ?>">Refine</a></li>
-                                            <li style="display: inline-block;"><a href="old-jewellery.php?tab=received<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'received' ? 'active' : '' ?>">Received</a></li>
-                                            <li style="display: inline-block;"><a href="old-jewellery.php?tab=stocked<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'stocked' ? 'active' : '' ?>">Stocked</a></li>
+                                        <ul class="tabs-list" style="display: flex !important; flex-wrap: nowrap; list-style: none; margin: 0; padding: 0;">
+                                            <li style="display: flex; flex-shrink: 0;"><a href="old-jewellery.php?tab=scrap<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'scrap' ? 'active' : '' ?>">Old Jewellery-Scrap</a></li>
+                                            <li style="display: flex; flex-shrink: 0;"><a href="old-jewellery.php?tab=summary<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'summary' ? 'active' : '' ?>">Summary</a></li>
+                                            <li style="display: flex; flex-shrink: 0;"><a href="old-jewellery.php?tab=refine<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'refine' ? 'active' : '' ?>">Refine</a></li>
+                                            <li style="display: flex; flex-shrink: 0;"><a href="old-jewellery.php?tab=received<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'received' ? 'active' : '' ?>">Received</a></li>
+                                            <li style="display: flex; flex-shrink: 0;"><a href="old-jewellery.php?tab=stocked<?= $oj_tab_extra ?>" class="tab-link <?= $active_tab == 'stocked' ? 'active' : '' ?>">Stocked</a></li>
                                         </ul>
                                         <div class="tab-actions">
                                             <button type="button" id="ojBtnJobworkFromScrap" class="btn btn-sm btn-primary" style="margin-right:8px; background:#11294b; border:none;" disabled title="Select one or more scrap lines"><i class="feather icon-plus"></i> Job work order/Refinery</button>

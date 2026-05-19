@@ -2,6 +2,26 @@
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+
+if (!function_exists('advance_payment_validate_metal_exchange_items')) {
+    /**
+     * @param array<int, array<string, mixed>> $items
+     */
+    function advance_payment_validate_metal_exchange_items($conn, array $items): void
+    {
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $__mrg = auragold_payment_merge_stored_details($item);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mrg)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mrg);
+        }
+    }
+}
 
 header('Content-Type: application/json');
 
@@ -44,6 +64,7 @@ try {
     $comment = esc($_POST['comment'] ?? '');
     $items = isset($_POST['items']) ? $_POST['items'] : [];
     $created_by = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+    $metal_exchange_barcodes_out = [];
 
     // Validation
     if (empty($customer_name)) {
@@ -150,9 +171,17 @@ try {
         $voucher_id = mysqli_insert_id($conn);
     }
 
+    if (is_array($items)) {
+        advance_payment_validate_metal_exchange_items($conn, $items);
+    }
+    $___ap_me_has_ref = auragold_metal_exchange_document_init($conn, $advance_voucher_existed, (int) $voucher_id, 'advance_payment_metal_exchange');
+
     // Insert advance payment items
     if (is_array($items) && count($items) > 0) {
-        foreach ($items as $item) {
+        foreach ($items as $pay_seq => $item) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $item)) {
+                continue;
+            }
             $payment_type = esc($item['payment_type'] ?? '');
             $diamond_category = esc($item['diamond_category'] ?? '');
             $transaction_no = esc($item['transaction_no'] ?? '');
@@ -223,6 +252,24 @@ try {
                 'net_amt_with_tax' => $amount,
                 'category' => trim((string) ($item['diamond_category'] ?? '')),
             ]);
+
+            $ap_plain_no = trim((string) $voucher_no);
+            $ap_me_pm = auragold_payment_merge_stored_details($item);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'advance_payment_metal_exchange',
+                (int) $voucher_id,
+                $ap_plain_no,
+                substr(trim((string) $voucher_date), 0, 10),
+                $ap_me_pm,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___ap_me_has_ref,
+                'Advance Payment — Metal Exchange',
+                'ap_me',
+                'AP-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
     }
 
@@ -400,6 +447,11 @@ try {
         }
     }
 
+    if ((int) $voucher_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'advance_payment', (int) $voucher_id, $voucher_no, $voucher_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -417,7 +469,8 @@ try {
         'status' => 'success',
         'message' => 'Advance payment saved successfully',
         'voucher_id' => $voucher_id,
-        'voucher_no' => $voucher_no
+        'voucher_no' => $voucher_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
 
 } catch (Exception $e) {

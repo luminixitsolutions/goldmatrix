@@ -56,8 +56,20 @@ $branch_id = count($branch_ids) === 1 ? (int) $branch_ids[0] : 0;
  * - Else explicit ?branch_id[]= from Advance Filter (e.g. Select All = all branches).
  * - Else default to registry main branch so main/HQ sessions do not list every sub-branch in one report.
  */
-$al_main_branch_id = function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0;
+// Tree root for current company (e.g. Gold Matrix id 47), not always registry sort-first main (Super Branch id 1).
+$al_main_branch_id = function_exists('auragold_branch_stock_transfer_tree_root_id')
+    ? (int) auragold_branch_stock_transfer_tree_root_id()
+    : 0;
+if ($al_main_branch_id <= 0 && function_exists('auragold_settings_main_branch_id')) {
+    $al_main_branch_id = (int) auragold_settings_main_branch_id();
+}
 $tr_effective_branch_id = function_exists('auragold_effective_branch_id') ? auragold_effective_branch_id() : 0;
+if ($tr_effective_branch_id <= 0 && $al_main_branch_id <= 0) {
+    $al_wb = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
+    if ($al_wb > 0 && function_exists('auragold_branch_root_main_id_for_branch')) {
+        $al_main_branch_id = (int) auragold_branch_root_main_id_for_branch($al_wb);
+    }
+}
 if ($tr_effective_branch_id > 0) {
     $tr_resolved_branch_ids = [$tr_effective_branch_id];
 } elseif (!empty($branch_ids)) {
@@ -287,6 +299,7 @@ $voucher_types = [
     'payment' => 'Payment',
     'payment_voucher' => 'Payment Voucher',
     'receipt_voucher' => 'Receipt Voucher',
+    'sale_receipt_voucher' => 'Sale Receipt Voucher',
     'receipt' => 'Receipt',
     'advance' => 'Advance',
     'return' => 'Return',
@@ -400,19 +413,26 @@ $gc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_customer_ledger LIKE 'debit_go
 if ($gc && mysqli_num_rows($gc) > 0) { $has_gold_pure = true; }
 if ($gc) mysqli_free_result($gc);
 
+// Diamond weight columns on tbl_customer_ledger (optional).
+$ledger_has_diamond = false;
+$dc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_customer_ledger LIKE 'debit_diamond'");
+if ($dc && mysqli_num_rows($dc) > 0) { $ledger_has_diamond = true; }
+if ($dc) mysqli_free_result($dc);
+
 // Central condition: entry is Hedging (Fixing Type = Hedging) when description contains "(Hedging)" (case-insensitive).
 // Used everywhere we fetch, display, or total metal weight. Standard entries do not match; their metal is 0.
 $hedging_desc_condition = "LOWER(COALESCE(l.description,'')) LIKE '%(hedging)%'";
 // View All Ledger: also show metal on payment rows (e.g. Metal Exchange on PI) and RV/PV party rows (sale auto RV with metal exchange).
 $payment_metal_condition = "(COALESCE(l.transaction_type,'') = 'payment' AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0)) > 0.00001))";
-$rv_pv_metal_condition = "(COALESCE(l.transaction_type,'') IN ('receipt_voucher','payment_voucher') AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0)) > 0.00001))";
-$ledger_metal_view_condition = "($hedging_desc_condition OR $payment_metal_condition OR $rv_pv_metal_condition)";
-// For Balance tab: exclude 'opening' from metal sum; only Hedging entries contribute to metal.
-$hedging_case = "COALESCE(l.transaction_type,'') != 'opening' AND ($hedging_desc_condition)";
+$rv_pv_metal_condition = "(COALESCE(l.transaction_type,'') IN ('receipt_voucher','sale_receipt_voucher','payment_voucher') AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0)) > 0.00001))";
+$jobwork_ledger_metal_condition = "(COALESCE(l.transaction_type,'') = 'jobwork_order' AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0))" . ($ledger_has_diamond ? " + ABS(COALESCE(l.debit_diamond,0)) + ABS(COALESCE(l.credit_diamond,0))" : "") . " > 0.00001))";
+$ledger_metal_view_condition = "($hedging_desc_condition OR $payment_metal_condition OR $rv_pv_metal_condition OR $jobwork_ledger_metal_condition)";
+// For Balance tab: exclude 'opening' from metal sum; Hedging + Job Work Order lines contribute to metal/diamond columns.
+$hedging_case = "COALESCE(l.transaction_type,'') != 'opening' AND (($hedging_desc_condition) OR ($jobwork_ledger_metal_condition))";
 
 // For Balance Amounts tab - one row per ledger account (not per branch): group by customer_id + name
 // so mixed NULL/0/branch_id for the same party does not duplicate (legacy rows vs per-branch tag).
-// Metal weight: only from Hedging entries. Standard = amount only, metal columns show 0.
+// Metal weight (balance tab): Hedging descriptions + Job Work Order ledger rows with metal/diamond movement.
 if ($active_tab == 'balance') {
     // Ledger key: (customer_id > 0) ? one row per id; else nominal accounts (customer_id=0) per name
     $al_ledger_group_expr = '(CASE WHEN l.customer_id > 0 THEN l.customer_id ELSE 0 END), l.customer_name';
@@ -422,6 +442,13 @@ if ($active_tab == 'balance') {
     " : "
             0 as total_debit_gold_pure,
             0 as total_credit_gold_pure,
+    ";
+    $diamond_balance_sql = $ledger_has_diamond ? "
+                COALESCE(SUM(CASE WHEN $hedging_case THEN l.debit_diamond ELSE 0 END), 0) as total_debit_diamond,
+                COALESCE(SUM(CASE WHEN $hedging_case THEN l.credit_diamond ELSE 0 END), 0) as total_credit_diamond,
+    " : "
+                0 as total_debit_diamond,
+                0 as total_credit_diamond,
     ";
     if ($ledger_has_branch_id) {
         $al_bal_main_bid = (int) $al_main_branch_id;
@@ -442,11 +469,12 @@ if ($active_tab == 'balance') {
                 $gold_pure_sql
                 COALESCE(SUM(CASE WHEN $hedging_case THEN l.debit_silver ELSE 0 END), 0) as total_debit_silver,
                 COALESCE(SUM(CASE WHEN $hedging_case THEN l.credit_silver ELSE 0 END), 0) as total_credit_silver,
+                $diamond_balance_sql
                 CASE 
                     WHEN MAX(l.customer_id) > 0 THEN 'Customer'
                     ELSE 'Account'
                 END as ledger_type,
-                MAX(CASE WHEN ($hedging_desc_condition) THEN 1 ELSE 0 END) as has_hedging
+                MAX(CASE WHEN (($hedging_desc_condition) OR ($jobwork_ledger_metal_condition)) THEN 1 ELSE 0 END) as has_hedging
             FROM tbl_customer_ledger l
             LEFT JOIN tbl_branches b ON b.id = l.branch_id
             $al_bal_join_main
@@ -467,11 +495,12 @@ if ($active_tab == 'balance') {
                 $gold_pure_sql
                 COALESCE(SUM(CASE WHEN $hedging_case THEN l.debit_silver ELSE 0 END), 0) as total_debit_silver,
                 COALESCE(SUM(CASE WHEN $hedging_case THEN l.credit_silver ELSE 0 END), 0) as total_credit_silver,
+                $diamond_balance_sql
                 CASE 
                     WHEN MAX(l.customer_id) > 0 THEN 'Customer'
                     ELSE 'Account'
                 END as ledger_type,
-                MAX(CASE WHEN ($hedging_desc_condition) THEN 1 ELSE 0 END) as has_hedging
+                MAX(CASE WHEN (($hedging_desc_condition) OR ($jobwork_ledger_metal_condition)) THEN 1 ELSE 0 END) as has_hedging
             FROM tbl_customer_ledger l
             WHERE $where_clause
             GROUP BY $al_ledger_group_expr
@@ -581,6 +610,7 @@ if ($active_tab == 'balance') {
         $closing_gold = (float)$ledger['total_debit_gold'] - (float)$ledger['total_credit_gold'];
         $closing_gold_pure = (float)($ledger['total_debit_gold_pure'] ?? 0) - (float)($ledger['total_credit_gold_pure'] ?? 0);
         $closing_silver = (float)$ledger['total_debit_silver'] - (float)$ledger['total_credit_silver'];
+        $closing_diamond = (float)($ledger['total_debit_diamond'] ?? 0) - (float)($ledger['total_credit_diamond'] ?? 0);
         
         // Determine Cr/Dr (when opening is 0 show "0" for CrOrDr)
         $opening_crdr = ($opening_amt == 0) ? '0' : ($opening_amt > 0 ? 'Dr' : 'Cr');
@@ -597,6 +627,7 @@ if ($active_tab == 'balance') {
         $ledger['closing_gold'] = $closing_gold;
         $ledger['closing_gold_pure'] = $closing_gold_pure;
         $ledger['closing_silver'] = $closing_silver;
+        $ledger['closing_diamond'] = $closing_diamond;
         // When gold_pure columns don't exist in DB, use gross values for Pure row (same as purity wt stored in main gold cols)
         if (!$has_gold_pure) {
             $ledger['opening_gold_pure'] = $ledger['opening_gold'];
@@ -626,6 +657,7 @@ if ($active_tab == 'balance') {
     // View All Ledger tab - Transaction-level entries only, no JOINs (avoids row multiplication)
     // Show only entries where selected ledger (customer_name) is directly involved
     $gold_pure_select = $has_gold_pure ? "l.debit_gold_pure as gold_debit_pure, l.credit_gold_pure as gold_credit_pure, l.balance_gold_pure as gold_cl_pure," : "";
+    $diamond_select_va = $ledger_has_diamond ? "l.debit_diamond as diamond_debit_wt, l.credit_diamond as diamond_credit_wt,\n            " : "";
     $al_va_main_bid = (int) $al_main_branch_id;
     if ($ledger_has_branch_id) {
         $al_branch_name_expr = ($al_va_main_bid > 0) ? "COALESCE(b.name, b_main_lbl.name, '—')" : "COALESCE(b.name, '—')";
@@ -651,12 +683,20 @@ if ($active_tab == 'balance') {
                     (SELECT pv.voucher_no FROM tbl_payment_vouchers pv WHERE pv.ref_no = l.transaction_no ORDER BY pv.id DESC LIMIT 1),
                     l.transaction_no
                 )
+                WHEN l.transaction_type = 'sale_receipt_voucher' THEN COALESCE(
+                    (SELECT srv.voucher_no FROM tbl_sale_receipt_vouchers srv WHERE srv.id = l.transaction_id LIMIT 1),
+                    l.transaction_no
+                )
                 WHEN l.transaction_type = 'receipt_voucher' THEN COALESCE(
                     (SELECT rv.voucher_no FROM tbl_receipt_vouchers rv WHERE rv.id = l.transaction_id LIMIT 1),
                     l.transaction_no
                 )
                 WHEN l.transaction_type = 'payment_voucher' THEN COALESCE(
                     (SELECT pv2.voucher_no FROM tbl_payment_vouchers pv2 WHERE pv2.id = l.transaction_id LIMIT 1),
+                    l.transaction_no
+                )
+                WHEN l.transaction_type = 'jobwork_order' THEN COALESCE(
+                    (SELECT jwo.jobwork_no FROM tbl_jobwork_orders jwo WHERE jwo.id = l.transaction_id LIMIT 1),
                     l.transaction_no
                 )
                 ELSE l.transaction_no
@@ -684,6 +724,7 @@ if ($active_tab == 'balance') {
                 END
                 WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                 WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
+                WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
                 WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
                 WHEN l.transaction_type = 'advance' THEN 'Advance'
                 WHEN l.transaction_type = 'return' THEN 'Return'
@@ -693,6 +734,7 @@ if ($active_tab == 'balance') {
                 WHEN l.transaction_type = 'metal_to_amount' THEN 'Metal To Amount'
                 WHEN l.transaction_type = 'amount_to_metal' THEN 'Amount To Metal'
                 WHEN l.transaction_type = 'investment_fund_transfer' THEN 'Investment Fund Transfer'
+                WHEN l.transaction_type = 'jobwork_order' THEN 'Job Work Order'
                 ELSE l.transaction_type
             END as type_of_voucher,
             l.debit_amount,
@@ -704,7 +746,8 @@ if ($active_tab == 'balance') {
             $gold_pure_select
             l.debit_silver as silver_debit_wt,
             l.credit_silver as silver_credit_wt,
-            CASE WHEN LOWER(COALESCE(l.description,'')) LIKE '%(hedging)%' THEN 'Hedging' ELSE 'Standard' END as fixing_type_display,
+            $diamond_select_va
+            CASE WHEN COALESCE(l.transaction_type,'') = 'jobwork_order' THEN 'Jobwork' WHEN LOWER(COALESCE(l.description,'')) LIKE '%(hedging)%' THEN 'Hedging' ELSE 'Standard' END as fixing_type_display,
             $al_branch_name_expr as branch_name,
             CASE 
                 WHEN l.customer_id > 0 THEN 'Customer'
@@ -870,6 +913,9 @@ if ($active_tab == 'balance') {
     $total_silver_debit_wt_all = 0;
     $total_silver_credit_wt_all = 0;
     $total_silver_cl_wt_all = 0;
+    $total_diamond_debit_wt_all = 0;
+    $total_diamond_credit_wt_all = 0;
+    $total_diamond_cl_wt_all = 0;
     
     // Metal totals: Hedging lines + payment lines with stored weight (Metal Exchange, etc.).
     $hedging_metal_sql = "
@@ -881,6 +927,10 @@ if ($active_tab == 'balance') {
         " : "0 as total_gold_debit_pure_hedging, 0 as total_gold_credit_pure_hedging, ") . "
         SUM(CASE WHEN ($ledger_metal_view_condition) THEN l.debit_silver ELSE 0 END) as total_silver_debit_hedging,
         SUM(CASE WHEN ($ledger_metal_view_condition) THEN l.credit_silver ELSE 0 END) as total_silver_credit_hedging,
+        " . ($ledger_has_diamond ? "
+        SUM(CASE WHEN ($ledger_metal_view_condition) THEN l.debit_diamond ELSE 0 END) as total_diamond_debit_hedging,
+        SUM(CASE WHEN ($ledger_metal_view_condition) THEN l.credit_diamond ELSE 0 END) as total_diamond_credit_hedging,
+        " : "0 as total_diamond_debit_hedging, 0 as total_diamond_credit_hedging, ") . "
         MAX(CASE WHEN ($ledger_metal_view_condition) THEN 1 ELSE 0 END) as has_hedging
     ";
     if ($has_gold_pure) {
@@ -931,6 +981,9 @@ if ($active_tab == 'balance') {
         $total_silver_debit_wt_all = $is_hedging_ledger ? (float)($totals_result['total_silver_debit_hedging'] ?? 0) : 0;
         $total_silver_credit_wt_all = $is_hedging_ledger ? (float)($totals_result['total_silver_credit_hedging'] ?? 0) : 0;
         $total_silver_cl_wt_all = $is_hedging_ledger ? ($total_silver_debit_wt_all - $total_silver_credit_wt_all) : 0;
+        $total_diamond_debit_wt_all = ($is_hedging_ledger && $ledger_has_diamond) ? (float)($totals_result['total_diamond_debit_hedging'] ?? 0) : 0;
+        $total_diamond_credit_wt_all = ($is_hedging_ledger && $ledger_has_diamond) ? (float)($totals_result['total_diamond_credit_hedging'] ?? 0) : 0;
+        $total_diamond_cl_wt_all = ($is_hedging_ledger && $ledger_has_diamond) ? ($total_diamond_debit_wt_all - $total_diamond_credit_wt_all) : 0;
         // Totals row: align with displayed columns (PI scrap party lines shown under Credit, not Debit).
         $pi_scrap_party_sum_row = getRecord("
             SELECT COALESCE(SUM(l.debit_amount), 0) AS s
@@ -1901,6 +1954,11 @@ html, body {
                     <th data-col="16">Silver Debit Wt</th>
                     <th data-col="17">Silver Credit Wt</th>
                     <th data-col="18">Silver CL. Wt</th>
+                    <?php if ($ledger_has_diamond): ?>
+                    <th data-col="19">Diamond Debit Wt</th>
+                    <th data-col="20">Diamond Credit Wt</th>
+                    <th data-col="21">Diamond CL. Wt</th>
+                    <?php endif; ?>
                 <?php endif; ?>
             </tr>
         </thead>
@@ -1951,7 +2009,10 @@ html, body {
                         <td data-col="25">0.000</td><td data-col="26">0.000</td><td data-col="27">0.000</td><td data-col="28">0.000</td><td data-col="29">0.000</td><td data-col="30">0.000</td><td data-col="31">0.000</td><td data-col="32">0.000</td>
                         <td data-col="33">0.000</td><td data-col="34">0.000</td><td data-col="35">0.000</td><td data-col="36">0.000</td><td data-col="37">0.000</td><td data-col="38">0.000</td><td data-col="39">0.000</td><td data-col="40">0.000</td>
                         <td data-col="41">0.000</td><td data-col="42">0.000</td><td data-col="43">0.000</td><td data-col="44">0.000</td><td data-col="45">0.000</td><td data-col="46">0.000</td><td data-col="47">0.000</td><td data-col="48">0.000</td>
-                        <td data-col="49">0.000</td><td data-col="50">0.000</td><td data-col="51">0.000</td><td data-col="52">0.000</td>
+                        <td data-col="49"><?php echo number_format(0, 3); ?></td><td data-col="50"><?php echo number_format(($show_metal && $ledger_has_diamond) ? ($ledger['total_debit_diamond'] ?? 0) : 0, 3); ?></td><td data-col="51"><?php echo number_format(($show_metal && $ledger_has_diamond) ? ($ledger['total_credit_diamond'] ?? 0) : 0, 3); ?></td><td data-col="52"><?php
+                        $cdm = ($show_metal && $ledger_has_diamond) ? (float)($ledger['closing_diamond'] ?? 0) : 0;
+                        echo accountledger_fmt_red_paren($cdm, 3);
+                        ?></td>
                         <td data-col="53">0.000</td><td data-col="54">0.000</td><td data-col="55">0.000</td><td data-col="56">0.000</td>
                         <td data-col="57"><?php echo htmlspecialchars($ledger['ledger_type']); ?></td>
                     </tr>
@@ -1999,9 +2060,14 @@ html, body {
                         $entry_metal_wts = abs((float)($entry['gold_debit_wt'] ?? 0)) + abs((float)($entry['gold_credit_wt'] ?? 0))
                             + abs((float)($entry['silver_debit_wt'] ?? 0)) + abs((float)($entry['silver_credit_wt'] ?? 0));
                         $entry_payment_metal = (($entry['transaction_type'] ?? '') === 'payment') && ($entry_metal_wts > 0.00001);
-                        $entry_rv_pv_metal = in_array(($entry['transaction_type'] ?? ''), ['receipt_voucher', 'payment_voucher'], true)
+                        $entry_rv_pv_metal = in_array(($entry['transaction_type'] ?? ''), ['receipt_voucher', 'sale_receipt_voucher', 'payment_voucher'], true)
                             && ($entry_metal_wts > 0.00001);
-                        $show_metal_for_row = $entry_is_hedging || $entry_payment_metal || $entry_rv_pv_metal;
+                        $entry_jwo = (($entry['transaction_type'] ?? '') === 'jobwork_order');
+                        $entry_diamond_wts = ($ledger_has_diamond)
+                            ? (abs((float)($entry['diamond_debit_wt'] ?? 0)) + abs((float)($entry['diamond_credit_wt'] ?? 0)))
+                            : 0.0;
+                        $show_metal_for_row = $entry_is_hedging || $entry_payment_metal || $entry_rv_pv_metal
+                            || ($entry_jwo && (($entry_metal_wts > 0.00001) || ($entry_diamond_wts > 0.00001)));
                         ?>
                         <td data-col="10"><?php echo number_format($show_metal_for_row ? $entry['gold_debit_wt'] : 0, 3); ?></td>
                         <td data-col="11"><?php echo number_format($show_metal_for_row ? $entry['gold_credit_wt'] : 0, 3); ?></td>
@@ -2028,6 +2094,15 @@ html, body {
                         <td data-col="16"><?php echo number_format($sdw, 3); ?></td>
                         <td data-col="17"><?php echo number_format($scw, 3); ?></td>
                         <td data-col="18" style="background: #d1fae5;"><?php echo accountledger_fmt_red_paren($scl, 3); ?></td>
+                        <?php if ($ledger_has_diamond):
+                            $ddw = $show_metal_for_row ? (float)($entry['diamond_debit_wt'] ?? 0) : 0;
+                            $dcw = $show_metal_for_row ? (float)($entry['diamond_credit_wt'] ?? 0) : 0;
+                            $dcl = $ddw - $dcw;
+                        ?>
+                        <td data-col="19"><?php echo number_format($ddw, 3); ?></td>
+                        <td data-col="20"><?php echo number_format($dcw, 3); ?></td>
+                        <td data-col="21" style="background: #d1fae5;"><?php echo accountledger_fmt_red_paren($dcl, 3); ?></td>
+                        <?php endif; ?>
                     </tr>
                     <?php endforeach; ?>
                     <tr class="table-footer-total">
@@ -2054,10 +2129,15 @@ html, body {
                         <td data-col="16"><strong><?php echo number_format($show_metal_totals ? $total_silver_debit_wt_all : 0, 3); ?></strong></td>
                         <td data-col="17"><strong><?php echo number_format($show_metal_totals ? $total_silver_credit_wt_all : 0, 3); ?></strong></td>
                         <td data-col="18"><strong><?php echo accountledger_fmt_red_paren($show_metal_totals ? (float)$total_silver_cl_wt_all : 0, 3); ?></strong></td>
+                        <?php if ($ledger_has_diamond): ?>
+                        <td data-col="19"><strong><?php echo number_format($show_metal_totals ? $total_diamond_debit_wt_all : 0, 3); ?></strong></td>
+                        <td data-col="20"><strong><?php echo number_format($show_metal_totals ? $total_diamond_credit_wt_all : 0, 3); ?></strong></td>
+                        <td data-col="21"><strong><?php echo accountledger_fmt_red_paren($show_metal_totals ? (float)$total_diamond_cl_wt_all : 0, 3); ?></strong></td>
+                        <?php endif; ?>
                     </tr>
                 <?php else: ?>
                     <tr>
-                        <td colspan="<?php echo $has_gold_pure ? 20 : 17; ?>" style="text-align: center; padding: 40px; color: #64748b;">
+                        <td colspan="<?php echo ($has_gold_pure ? 20 : 17) + ($ledger_has_diamond ? 3 : 0); ?>" style="text-align: center; padding: 40px; color: #64748b;">
                             No ledger entries found
                         </td>
                     </tr>
@@ -2283,6 +2363,14 @@ html, body {
     </div>
 </div>
 
+<script>
+window.alReportExportMeta = <?php echo json_encode([
+    'tab' => $active_tab,
+    'fromDate' => $from_date,
+    'toDate' => $to_date,
+    'exportUrl' => 'ajax/export-accountledger-excel.php',
+], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
 <script>
 (function() {
     var STORAGE_KEY = 'accountledger_columns_<?php echo $active_tab; ?>';
@@ -2552,6 +2640,11 @@ function viewTransactionDetails(invoiceNo, transactionType, transactionId) {
         return;
     }
 
+    if (transactionType === 'sale_receipt_voucher' && transactionId > 0) {
+        window.location.href = 'sale-receipt-voucher.php?id=' + transactionId;
+        return;
+    }
+
     if (transactionType === 'receipt_voucher' && transactionId > 0) {
         window.location.href = 'receipt-voucher.php?id=' + transactionId;
         return;
@@ -2739,12 +2832,7 @@ function viewTransactionDetails(invoiceNo, transactionType, transactionId) {
 }
 
 function exportToExcel() {
-    // Trigger DataTables Excel export button
-    if ($.fn.DataTable.isDataTable('#ledgerTable')) {
-        $('#ledgerTable').DataTable().button('.buttons-excel').trigger();
-    } else {
-        alert('Table not initialized for export');
-    }
+    exportTableToExcel();
 }
 
 function exportToPDF() {
@@ -3126,45 +3214,162 @@ function initTableSorting() {
     console.log('Table sorting initialized');
 }
 
+function alVisibleLedgerColumnIndices() {
+    var out = [];
+    $('#ledgerTable thead tr:first th').each(function(i) {
+        if (i === 0) return;
+        if ($(this).hasClass('col-hidden')) return;
+        out.push(i);
+    });
+    return out;
+}
+
+function alTrToFullRowArray($tr, nCols) {
+    var arr = new Array(nCols);
+    for (var i = 0; i < nCols; i++) arr[i] = '';
+    var c = 0;
+    $tr.children('td,th').each(function() {
+        var cs = Math.max(1, parseInt($(this).attr('colspan') || '1', 10));
+        var txt = $(this).text().replace(/\s+/g, ' ').trim();
+        for (var k = 0; k < cs && c + k < nCols; k++) {
+            arr[c + k] = (k === 0) ? txt : '';
+        }
+        c += cs;
+    });
+    return arr;
+}
+
+/** Logical table column index (honours colspan). */
+function alGetTdAtTableIndex($tr, wantIndex) {
+    var pos = 0;
+    var $found = $();
+    $tr.children('td,th').each(function() {
+        var cs = Math.max(1, parseInt($(this).attr('colspan') || '1', 10));
+        if (wantIndex >= pos && wantIndex < pos + cs) {
+            $found = $(this);
+            return false;
+        }
+        pos += cs;
+    });
+    return $found;
+}
+
+function alCellKindFromTd($td) {
+    var $badge = $td.find('.crdr-badge');
+    if ($badge.hasClass('dr')) return 'dr';
+    if ($badge.hasClass('cr')) return 'cr';
+    if ($td.find('span[style*="#dc2626"], span[style*="#DC2626"]').length) return 'red';
+    if ($td.hasClass('col-pista')) return 'pista';
+    var st = ($td.attr('style') || '').replace(/\s/g, '');
+    if (st.indexOf('background:#f1edff') >= 0 || st.indexOf('background:rgb(241,237,255)') >= 0) return 'cl_bg';
+    if (st.indexOf('background:#d1fae5') >= 0 || st.indexOf('background:rgb(209,250,229)') >= 0) return 'pista_light';
+    if (st.indexOf('color:#11294b') >= 0 || st.indexOf('color:rgb(17,41,75)') >= 0) return 'blue';
+    return '';
+}
+
+function alExportedPistaFromIndex() {
+    var pistaAttr = parseInt($('#ledgerTable').attr('data-pista-from') || '-1', 10);
+    if (isNaN(pistaAttr) || pistaAttr < 0) return -1;
+    var expPos = 0;
+    var found = -1;
+    $('#ledgerTable thead tr:first th').each(function(i) {
+        if (i === 0) return;
+        if ($(this).hasClass('col-hidden')) return;
+        var raw = $(this).attr('data-col');
+        var n = raw !== undefined && raw !== null ? parseInt(raw, 10) : NaN;
+        if (!isNaN(n) && n >= pistaAttr && found < 0) found = expPos;
+        expPos++;
+    });
+    return found;
+}
+
 function exportTableToExcel() {
-    var csv = [];
-    var headers = [];
-    
-    // Get headers (skip first column which is View button)
-    $('#ledgerTable thead th').each(function(i) {
-        if (i > 0) {
-            headers.push('"' + $(this).text().trim().replace(/"/g, '""') + '"');
-        }
+    var meta = window.alReportExportMeta || {};
+    var url = meta.exportUrl || 'ajax/export-accountledger-excel.php';
+    var visIdx = alVisibleLedgerColumnIndices();
+    if (!visIdx.length) {
+        alert('No columns to export.');
+        return;
+    }
+
+    var headers = visIdx.map(function(ti) {
+        return $('#ledgerTable thead tr:first th').eq(ti).text().trim();
     });
-    csv.push(headers.join(','));
-    
-    // Get visible rows data
+
+    var nTh = $('#ledgerTable thead tr:first th').length;
+    var rows = [];
     $('#ledgerTable tbody tr:visible').each(function() {
-        var rowData = [];
-        $(this).find('td').each(function(i) {
-            if (i > 0) {
-                var cellText = $(this).text().trim().replace(/"/g, '""');
-                rowData.push('"' + cellText + '"');
-            }
+        var $tr = $(this);
+        if ($tr.hasClass('table-footer-total')) return;
+        var full = alTrToFullRowArray($tr, nTh);
+        var row = visIdx.map(function(ti) {
+            var v = (full[ti] !== undefined && full[ti] !== null) ? String(full[ti]).trim() : '';
+            var $td = alGetTdAtTableIndex($tr, ti);
+            var k = $td.length ? alCellKindFromTd($td) : '';
+            return { v: v, k: k };
         });
-        if (rowData.length > 0) {
-            csv.push(rowData.join(','));
-        }
+        rows.push(row);
     });
-    
-    // Create and download file
-    var csvContent = csv.join('\n');
-    var blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    var link = document.createElement('a');
-    var url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'Account_Ledger_Report_' + new Date().toISOString().slice(0,10) + '.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    alert('Excel/CSV file exported successfully!');
+
+    var footer = null;
+    var tab = meta.tab || $('#ledgerTable').attr('data-al-tab') || 'balance';
+    if (tab === 'balance') {
+        var $ft = $('#transactionTable tbody tr.table-footer-total').first();
+        if ($ft.length) {
+            var fullF = alTrToFullRowArray($ft, nTh);
+            footer = visIdx.map(function(ti) {
+                var v = (fullF[ti] !== undefined && fullF[ti] !== null) ? String(fullF[ti]) : '';
+                return { v: v, k: '' };
+            });
+        }
+    } else {
+        var $ft2 = $('#ledgerTable tbody tr.table-footer-total').first();
+        if ($ft2.length && $ft2.is(':visible')) {
+            var fullF2 = alTrToFullRowArray($ft2, nTh);
+            footer = visIdx.map(function(ti) {
+                var v = (fullF2[ti] !== undefined && fullF2[ti] !== null) ? String(fullF2[ti]) : '';
+                return { v: v, k: '' };
+            });
+        }
+    }
+
+    var payload = {
+        tab: tab,
+        fromDate: meta.fromDate || '',
+        toDate: meta.toDate || '',
+        headers: headers,
+        rows: rows,
+        footer: footer,
+        pistaFrom: alExportedPistaFromIndex()
+    };
+
+    var $btn = $('#exportExcelBtn');
+    $btn.prop('disabled', true);
+
+    fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) {
+        if (!res.ok) {
+            return res.text().then(function(t) { throw new Error(t || ('HTTP ' + res.status)); });
+        }
+        return res.blob();
+    }).then(function(blob) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'Account_Ledger_Report_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+    }).catch(function(err) {
+        console.error(err);
+        alert('Export failed: ' + (err && err.message ? err.message : String(err)));
+    }).finally(function() {
+        $btn.prop('disabled', false);
+    });
 }
 
 function printTable() {

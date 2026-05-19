@@ -673,6 +673,7 @@ if (empty($jwq_diamond_scope_metal_ids)) {
 (function () {
     if (window.__jwqDiamondModalInit) return;
     window.__jwqDiamondModalInit = true;
+    jwqBindDiamondIssueInputGuards();
     var diamondMetalId = <?php echo (int)$jwq_diamond_metal_id; ?>;
     var jwqDiamondScopeMetalIds = <?php echo json_encode($jwq_diamond_scope_metal_ids); ?>;
     var isAddNewMode = false;
@@ -718,7 +719,134 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         var s = jwqDiamondCellText(tr, col);
         return parseFloat(String(s).replace(/,/g, '')) || 0;
     }
-    /** All checked diamond rows: read ONLY from each checked row's <tr data-*> (checkbox is not source of truth). */
+    function jwqSanitizeDecimalInputValue(raw) {
+        if (raw == null) {
+            return '';
+        }
+        var s = String(raw).replace(/,/g, '');
+        if (s === '') {
+            return '';
+        }
+        var out = '';
+        var dot = false;
+        for (var i = 0; i < s.length; i++) {
+            var c = s.charAt(i);
+            if (c >= '0' && c <= '9') {
+                out += c;
+            } else if (c === '.' && !dot) {
+                dot = true;
+                out += c;
+            }
+        }
+        return out;
+    }
+    function jwqParseDecimalInput(val) {
+        var n = parseFloat(String(jwqSanitizeDecimalInputValue(val)));
+        return isFinite(n) ? n : NaN;
+    }
+    function jwqDiamondRowBalanceWt(tr) {
+        var b = parseFloat(String(tr.getAttribute('data-balance-wt') || '').replace(/,/g, ''));
+        if (isFinite(b) && b >= 0) {
+            return b;
+        }
+        return jwqDiamondCellNum(tr, 'weight');
+    }
+    function jwqDiamondRowBalanceQty(tr) {
+        var b = parseFloat(String(tr.getAttribute('data-balance-qty') || '').replace(/,/g, ''));
+        if (isFinite(b) && b >= 0) {
+            return b;
+        }
+        var q = jwqDiamondCellNum(tr, 'quantity');
+        return q > 0 ? q : 0;
+    }
+    function jwqSyncDiamondRowIssueFromInputs(tr) {
+        if (!tr) {
+            return;
+        }
+        var balWt = jwqDiamondRowBalanceWt(tr);
+        var balQty = jwqDiamondRowBalanceQty(tr);
+        var wtInp = tr.querySelector('.jwq-dia-issue-wt');
+        var qtyInp = tr.querySelector('.jwq-dia-issue-qty');
+        var wt = wtInp ? jwqParseDecimalInput(wtInp.value) : NaN;
+        var qty = qtyInp ? jwqParseDecimalInput(qtyInp.value) : NaN;
+        if (!isFinite(wt) || wt < 0) {
+            wt = 0;
+        }
+        if (!isFinite(qty) || qty < 0) {
+            qty = 0;
+        }
+        if (wt > balWt + 0.0001) {
+            wt = balWt;
+        }
+        if (qty > balQty + 0.0001) {
+            qty = balQty;
+        }
+        if (wtInp) {
+            wtInp.value = wt > 0.0000001 ? num(wt, 3) : '';
+        }
+        if (qtyInp) {
+            qtyInp.value = qty > 0.0000001 ? num(qty, 3) : '';
+        }
+        tr.setAttribute('data-weight', String(wt));
+        tr.setAttribute('data-qty', String(qty));
+        if (tr._rowData) {
+            tr._rowData.gross_weight = wt;
+            tr._rowData.quantity = qty > 0 ? qty : 0;
+        }
+    }
+    function jwqBindDiamondIssueInputGuards() {
+        var tb = document.getElementById('jwqDiamondTbody');
+        if (!tb || tb._jwqIssueInputBound) {
+            return;
+        }
+        tb._jwqIssueInputBound = true;
+        tb.addEventListener('input', function (e) {
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            if (!inp || !tb.contains(inp)) {
+                return;
+            }
+            var tr = inp.closest('tr');
+            if (!tr) {
+                return;
+            }
+            var clean = jwqSanitizeDecimalInputValue(inp.value);
+            if (clean !== inp.value) {
+                inp.value = clean;
+            }
+            jwqSyncDiamondRowIssueFromInputs(tr);
+        });
+        tb.addEventListener('change', function (e) {
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            if (!inp || !tb.contains(inp)) {
+                return;
+            }
+            var tr = inp.closest('tr');
+            if (tr) {
+                jwqSyncDiamondRowIssueFromInputs(tr);
+            }
+        });
+        tb.addEventListener('keydown', function (e) {
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            if (!inp || !tb.contains(inp)) {
+                return;
+            }
+            var k = e.key;
+            if (!k || k.length !== 1) {
+                return;
+            }
+            if (e.ctrlKey || e.metaKey || e.altKey) {
+                return;
+            }
+            if (k >= '0' && k <= '9') {
+                return;
+            }
+            if (k === '.' && String(inp.value).indexOf('.') < 0) {
+                return;
+            }
+            e.preventDefault();
+        });
+    }
+    /** All checked diamond rows: issue wt/qty from editable inputs (clamped to stock balance on row). */
     function readAllSelectedDiamondRows() {
         var out = [];
         document.querySelectorAll('#jwqDiamondTbody input.jwq-dia-row:checked').forEach(function (cb) {
@@ -726,22 +854,29 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             if (!tr) {
                 return;
             }
+            jwqSyncDiamondRowIssueFromInputs(tr);
             var stockId = parseInt(tr.dataset.stockId || tr.dataset.id || '0', 10) || 0;
             var barcode = String(tr.dataset.barcode || '').trim();
             var productName = String(tr.dataset.productName || '').trim();
-            var weight = parseFloat(tr.dataset.weight || '0') || 0;
-            var qty = parseFloat(tr.dataset.qty || '0') || 0;
+            var balWt = jwqDiamondRowBalanceWt(tr);
+            var balQty = jwqDiamondRowBalanceQty(tr);
+            var weight = parseFloat(tr.getAttribute('data-weight') || '0') || 0;
+            var qty = parseFloat(tr.getAttribute('data-qty') || '0') || 0;
             if (!stockId || !barcode) {
                 return;
             }
-            if (weight <= 0) {
-                weight = jwqDiamondCellNum(tr, 'weight');
+            if (weight <= 0.0000001) {
+                alert('Enter issue weight for barcode ' + barcode + ' (balance ' + num(balWt, 3) + ' g).');
+                return;
             }
-            if (qty <= 0) {
-                qty = jwqDiamondCellNum(tr, 'quantity');
+            if (qty <= 0.0000001) {
+                qty = balQty > 0 ? balQty : 1;
             }
-            if (qty <= 0) {
-                qty = 1;
+            if (weight > balWt + 0.0001) {
+                weight = balWt;
+            }
+            if (qty > balQty + 0.0001) {
+                qty = balQty;
             }
             var rd = tr._rowData;
             out.push({
@@ -842,7 +977,23 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             if (!sidNum || !bcDisp) {
                 return;
             }
-            if (existingStock[String(sidNum)]) {
+            var existTr = matBody.querySelector('tr.jwq-material-diamond-row[data-stock-id="' + String(sidNum) + '"]');
+            if (existTr) {
+                var wtRawUp = parseFloat(r.gross_weight) || 0;
+                var qtyRawUp = parseFloat(r.quantity) || 0;
+                if (qtyRawUp <= 0) {
+                    qtyRawUp = 1;
+                }
+                existTr.setAttribute('data-weight', String(wtRawUp));
+                existTr.setAttribute('data-qty', String(qtyRawUp));
+                var wtTd = existTr.querySelector('.jwq-mat-wt');
+                var qtyTd = existTr.querySelector('.jwq-mat-qty');
+                if (wtTd) {
+                    wtTd.textContent = num(wtRawUp, 3);
+                }
+                if (qtyTd) {
+                    qtyTd.textContent = num(qtyRawUp, 3);
+                }
                 return;
             }
             existingStock[String(sidNum)] = true;
@@ -900,7 +1051,7 @@ if (empty($jwq_diamond_scope_metal_ids)) {
                 '<td class="jwq-mat-actions text-center">'
                 + '<button type="button" class="btn btn-link btn-sm text-danger p-0 jwq-mat-diamond-remove" title="Remove from list" aria-label="Remove diamond from list">'
                 + '<i class="feather icon-trash-2"></i></button></td>';
-            tr.innerHTML = '<td>' + cat + '</td><td>' + prod + '</td><td class="jwq-mat-wt">' + wtDisp + '</td><td>' + metal + '</td><td>' + qtyDisp + '</td><td>' + esc(caratStr) + '</td><td></td>' + delTd;
+            tr.innerHTML = '<td>' + cat + '</td><td>' + prod + '</td><td class="jwq-mat-wt">' + wtDisp + '</td><td>' + metal + '</td><td class="jwq-mat-qty">' + qtyDisp + '</td><td>' + esc(caratStr) + '</td><td></td>' + delTd;
             matBody.appendChild(tr);
         });
         jwqRefreshJobworkMaterialTotalWt();
@@ -977,14 +1128,31 @@ if (empty($jwq_diamond_scope_metal_ids)) {
                 onMaterialGrid = true;
             }
         }
-        var wtNum = parseFloat(r.gross_weight) || 0;
-        var qtyNum = parseFloat(r.quantity) || 0;
-        var wtAttr = String(wtNum);
-        var qtyAttr = String(qtyNum > 0 ? qtyNum : 0);
+        var balWt = parseFloat(r.gross_weight) || 0;
+        var balQty = parseFloat(r.quantity) || 0;
+        if (balQty <= 0) {
+            balQty = 1;
+        }
+        var issueWt = balWt;
+        var issueQty = balQty;
+        var wtAttr = String(issueWt);
+        var qtyAttr = String(issueQty);
         var prodNameAttr = esc(String(r.product_name || ''));
+        var wtCell;
+        var qtyCell;
+        if (editable) {
+            wtCell = '<td data-col="weight"' + editAttr + '>' + esc(num(r.gross_weight, 3)) + '</td>';
+            qtyCell = '<td data-col="quantity"' + editAttr + '>' + esc(num(r.quantity, 3)) + '</td>';
+        } else {
+            var wtTitle = 'Stock balance ' + num(balWt, 3) + ' g — enter issue weight';
+            var qtyTitle = 'Stock balance ' + num(balQty, 3) + ' — enter issue qty';
+            wtCell = '<td data-col="weight"><input type="text" class="form-control form-control-sm jwq-dia-issue-wt" inputmode="decimal" autocomplete="off" value="' + esc(num(issueWt, 3)) + '" title="' + esc(wtTitle) + '" style="min-width:76px;"></td>';
+            qtyCell = '<td data-col="quantity"><input type="text" class="form-control form-control-sm jwq-dia-issue-qty" inputmode="decimal" autocomplete="off" value="' + esc(num(issueQty, 3)) + '" title="' + esc(qtyTitle) + '" style="min-width:64px;"></td>';
+        }
         var trOpen = '<tr class="jwq-diamond-stock-modal-row"'
             + (sidForTr > 0 ? ' data-stock-id="' + String(sidForTr) + '" data-id="' + String(sidForTr) + '"' : '')
             + (bcForTr !== '' ? ' data-barcode="' + esc(bcForTr) + '"' : '')
+            + ' data-balance-wt="' + esc(String(balWt)) + '" data-balance-qty="' + esc(String(balQty)) + '"'
             + ' data-weight="' + esc(wtAttr) + '" data-qty="' + esc(qtyAttr) + '"'
             + (prodNameAttr !== '' ? ' data-product-name="' + prodNameAttr + '"' : '')
             + '>';
@@ -996,9 +1164,9 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             + '<td data-col="diamond_category">Diamond</td>'
             + '<td data-col="calculation_type">' + calcCell + '</td>'
             + '<td data-col="product"' + editAttr + cls + '>' + esc(r.product_name || '') + '</td>'
-            + '<td data-col="weight"' + editAttr + '>' + esc(num(r.gross_weight, 3)) + '</td>'
+            + wtCell
             + '<td data-col="diamond_carat"' + editAttr + '>' + esc(r.carat || '0') + '</td>'
-            + '<td data-col="quantity"' + editAttr + '>' + esc(num(r.quantity, 3)) + '</td>'
+            + qtyCell
             + '<td data-col="rate"' + editAttr + '>' + esc(num(r.rate, 2)) + '</td>'
             + '<td data-col="certificate_no"' + editAttr + '>' + esc(r.certificate_no || '') + '</td>'
             + '<td data-col="cut" data-master-field="cut"' + masterCls + '>' + esc(r.cut || '') + '</td>'
@@ -1026,6 +1194,9 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         applyDiamondColumnVisibility();
         if (!isAddNew) {
             jwqSyncExistingDiamondModalChecksFromMaterial();
+            Array.prototype.forEach.call(tb.querySelectorAll('tr.jwq-diamond-stock-modal-row'), function (tr) {
+                jwqSyncDiamondRowIssueFromInputs(tr);
+            });
         } else {
             jwqSyncDiamondCheckAllHeader();
         }
@@ -1279,9 +1450,13 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         jwqSyncDiamondCheckAllHeader();
     }
     function rfidRowToDiamondRow(r) {
-        var gw = parseFloat(r.gross_wt);
-        if (isNaN(gw) || gw <= 0) {
-            gw = parseFloat(r.final_wt) || 0;
+        /* Balance weight = SUM(tbl_stock.current_weight) via API final_wt; gross_wt is opening/SJ gross and must not override balance. */
+        var gw = parseFloat(r.final_wt);
+        if (isNaN(gw) || gw < 0) {
+            gw = 0;
+        }
+        if (gw <= 0.0000001) {
+            gw = parseFloat(r.gross_wt) || 0;
         }
         var ct = String(r.carat != null ? r.carat : '').trim();
         if (!ct || ct === '0' || ct === '0.000') {
@@ -1431,7 +1606,7 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             e.preventDefault();
             var drows = readAllSelectedDiamondRows();
             if (!drows.length) {
-                alert('Select one or more diamond rows first.');
+                alert('Select one or more diamond rows and enter issue weight (not more than balance).');
                 return;
             }
             jwqAppendDiamondRowsToJobworkMaterialTable(drows);

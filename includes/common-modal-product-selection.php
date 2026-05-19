@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Product selection modal markup. Included from includes/common-modal.php and other screens (e.g. stock journal).
  * Optional flags (all have defaults; set only what you need before include):
@@ -9,6 +9,9 @@
  *   $common_modal_table_settings_btn_id, $common_modal_table_settings_dropdown_id, $common_modal_table_settings_dropdown_class
  *   $common_modal_omit_table_settings_search_id, $common_modal_table_settings_search_extra_class
  *   $common_modal_modal_body_attr, $common_modal_pl_table_class_extra, $common_modal_pl_table_style
+ *   $common_modal_show_excel_import — show Import dropdown (Import + Sample) beside Add Product (only honored on sale-order.php and purchase-invoice.php)
+ *   $common_modal_excel_sample_href — download URL for Sample menu item
+ *   $common_modal_excel_import_file_id, $common_modal_excel_import_trigger_class — optional element ids/classes
  */
 if (!isset($common_modal_show_images_column)) {
     $common_modal_show_images_column = false;
@@ -58,6 +61,25 @@ if (!isset($common_modal_omit_table_settings_search_id)) {
 if (!isset($common_modal_table_settings_search_extra_class)) {
     $common_modal_table_settings_search_extra_class = '';
 }
+if (!isset($common_modal_show_excel_import)) {
+    $common_modal_show_excel_import = false;
+}
+/* Excel import UI is only allowed on these screens (even if another page mistakenly sets the flag). */
+$__auragoldExcelImportScript = basename((string) ($_SERVER['SCRIPT_FILENAME'] ?? $_SERVER['PHP_SELF'] ?? ''));
+$__auragoldExcelImportAllowedPages = ['sale-order.php', 'purchase-invoice.php'];
+if (!empty($common_modal_show_excel_import) && !in_array($__auragoldExcelImportScript, $__auragoldExcelImportAllowedPages, true)) {
+    $common_modal_show_excel_import = false;
+}
+unset($__auragoldExcelImportScript, $__auragoldExcelImportAllowedPages);
+if (!isset($common_modal_excel_sample_href)) {
+    $common_modal_excel_sample_href = 'ajax/download-stock-journal-excel-sample.php?voucher=sale_order';
+}
+if (!isset($common_modal_excel_import_file_id)) {
+    $common_modal_excel_import_file_id = 'productModalExcelImportFile';
+}
+if (!isset($common_modal_excel_import_trigger_class)) {
+    $common_modal_excel_import_trigger_class = 'js-product-modal-excel-import-trigger';
+}
 $common_modal_empty_row_colspan = !empty($common_modal_show_images_column) ? 104 : 103;
 if (empty($common_modal_show_checkbox_column)) {
     $common_modal_empty_row_colspan--;
@@ -67,6 +89,14 @@ if (empty($common_modal_show_checkbox_column)) {
 <div class="modal fade" id="productSelectionModal" tabindex="-1" role="dialog" aria-labelledby="productSelectionModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl" role="document" style="max-width: 95%;">
         <div class="modal-content">
+            <?php if (!empty($common_modal_show_excel_import)): ?>
+            <div id="productModalExcelImportLoader" class="product-modal-excel-import-loader" aria-hidden="true">
+                <div class="product-modal-excel-import-loader__panel">
+                    <div class="product-modal-excel-import-loader__spinner" aria-hidden="true"></div>
+                    <p class="product-modal-excel-import-loader__text">Uploading file… Please wait.</p>
+                </div>
+            </div>
+            <?php endif; ?>
             <!-- <div class="modal-header" style="background: #ffffff; border-bottom: 2px solid #e2e8f0; padding: 1rem;">
                 <div style="width: 100%; position: relative;">
                     <input type="text" class="form-control form-control-lg" id="modalProductSearchInput" placeholder="Enter your item" style="border: 2px solid #c5a864; border-radius: 6px; padding-right: 40px;">
@@ -177,6 +207,18 @@ if (empty($common_modal_show_checkbox_column)) {
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #1e293b;">Product Selection</h6>
                     <div class="d-flex align-items-center" style="gap: 0.5rem;">
+                        <?php if (!empty($common_modal_show_excel_import)): ?>
+                        <div class="dropdown product-modal-excel-import-wrap">
+                            <button type="button" class="btn btn-purple btn-sm dropdown-toggle" data-toggle="dropdown" aria-expanded="false" title="Import lines from Excel">
+                                <i class="feather icon-upload" style="font-size: 0.85rem;"></i> Import
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-right">
+                                <a class="dropdown-item <?php echo htmlspecialchars($common_modal_excel_import_trigger_class); ?>" href="#"><i class="feather icon-upload mr-2"></i>Import</a>
+                                <a class="dropdown-item js-product-modal-excel-sample-download" href="<?php echo htmlspecialchars($common_modal_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>" data-sample-base="<?php echo htmlspecialchars($common_modal_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather icon-corner-down-left mr-2"></i>Sample</a>
+                            </div>
+                        </div>
+                        <input type="file" id="<?php echo htmlspecialchars($common_modal_excel_import_file_id); ?>" accept=".xlsx,.xls" style="display: none;" tabindex="-1">
+                        <?php endif; ?>
                         <?php if (!empty($common_modal_show_add_product_in_header)): ?>
                         <button type="button" class="<?php echo htmlspecialchars($common_modal_add_row_btn_class); ?>" id="<?php echo htmlspecialchars($common_modal_add_row_btn_id); ?>" style="background: #c5a864; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; gap: 0.25rem;">
                             <i class="feather icon-plus"></i> Add Product
@@ -602,6 +644,54 @@ if (empty($common_modal_show_checkbox_column)) {
                 </div>
                 
                 <style>
+                /* Excel import overlay (sale order / purchase invoice only when flag is on) */
+                #productSelectionModal .modal-content {
+                    position: relative;
+                }
+                #productModalExcelImportLoader.product-modal-excel-import-loader {
+                    display: none;
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 1080;
+                    align-items: center;
+                    justify-content: center;
+                    flex-direction: column;
+                    background: rgba(15, 23, 42, 0.5);
+                    border-radius: 0.3rem;
+                }
+                #productModalExcelImportLoader.product-modal-excel-import-loader.is-visible {
+                    display: flex;
+                }
+                #productModalExcelImportLoader .product-modal-excel-import-loader__panel {
+                    text-align: center;
+                    padding: 1.5rem 2rem;
+                    background: #1e293b;
+                    color: #f8fafc;
+                    border-radius: 8px;
+                    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+                    max-width: 90%;
+                }
+                #productModalExcelImportLoader .product-modal-excel-import-loader__spinner {
+                    width: 2.5rem;
+                    height: 2.5rem;
+                    margin: 0 auto 1rem;
+                    border: 3px solid rgba(248, 250, 252, 0.25);
+                    border-top-color: #c5a864;
+                    border-radius: 50%;
+                    animation: productModalExcelImportSpin 0.7s linear infinite;
+                }
+                #productModalExcelImportLoader .product-modal-excel-import-loader__text {
+                    margin: 0;
+                    font-size: 0.95rem;
+                    font-weight: 600;
+                    color: #f1f5f9;
+                }
+                @keyframes productModalExcelImportSpin {
+                    to { transform: rotate(360deg); }
+                }
                 /* Show/Hide Columns: hidden by default; flex layout + scroll only when .show (see page .table-settings-dropdown). */
                 #productSelectionModal .table-settings-dropdown.show {
                     display: flex;
@@ -969,3 +1059,4 @@ if (empty($common_modal_show_checkbox_column)) {
         </div>
     </div>
 </div>
+<?php $GLOBALS['auragold_common_modal_product_selection_included'] = true; ?>

@@ -1,8 +1,10 @@
 <?php
 /**
- * Bulk Excel import for Product Opening stock journal only.
- * POST: excel_file (xlsx), product_id, characteristic_id, voucher=product_opening,
- *       optional: date, group_name, comment
+ * Bulk Excel import for stock journal (preview loads rows into the page; optional direct save when preview_only off).
+ * POST: excel_file (xlsx), voucher=product_opening|purchase_invoice|sale_order,
+ *       product_opening: product_id, characteristic_id
+ *       purchase_invoice: item_id (required), optional product_id / characteristic_id (must match line)
+ *       sale_order: preview_only (each row: Barcode and/or Product ID + Characteristic ID)
  */
 session_start();
 
@@ -14,17 +16,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $voucher = isset($_POST['voucher']) ? trim((string) $_POST['voucher']) : '';
-if ($voucher !== 'product_opening') {
-    echo json_encode(['status' => 'error', 'message' => 'Excel import is only available for product opening']);
+$item_id_imp = isset($_POST['item_id']) ? (int) $_POST['item_id'] : 0;
+if ($voucher !== 'product_opening' && $voucher !== 'purchase_invoice' && $voucher !== 'sale_order') {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid voucher type for Excel import']);
     exit;
 }
 
 $product_id = isset($_POST['product_id']) ? (int) $_POST['product_id'] : 0;
 $characteristic_id = isset($_POST['characteristic_id']) ? (int) $_POST['characteristic_id'] : 0;
-if ($product_id <= 0 || $characteristic_id <= 0) {
-    echo json_encode(['status' => 'error', 'message' => 'product_id and characteristic_id are required']);
-    exit;
-}
+$metal_id_sample = isset($_POST['metal_id']) ? (int) $_POST['metal_id'] : 0;
 
 if (empty($_SESSION['Admin']['id']) && empty($_SESSION['user_id'])) {
     echo json_encode(['status' => 'error', 'message' => 'Session expired']);
@@ -33,6 +33,41 @@ if (empty($_SESSION['Admin']['id']) && empty($_SESSION['user_id'])) {
 
 require_once __DIR__ . '/../config.php';
 
+if ($voucher === 'sale_order') {
+    $product_id = 0;
+    $characteristic_id = 0;
+} elseif ($voucher === 'purchase_invoice') {
+    if ($item_id_imp <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'item_id is required for purchase invoice Excel import']);
+        exit;
+    }
+    $piiImp = getRecord('SELECT product_id, product_characteristic_id FROM tbl_purchase_invoice_items WHERE id = ' . $item_id_imp . ' LIMIT 1');
+    if (!$piiImp) {
+        echo json_encode(['status' => 'error', 'message' => 'Purchase invoice line not found']);
+        exit;
+    }
+    $dbPid = (int) ($piiImp['product_id'] ?? 0);
+    $dbCid = (int) ($piiImp['product_characteristic_id'] ?? 0);
+    if ($product_id > 0 && $dbPid > 0 && $product_id !== $dbPid) {
+        echo json_encode(['status' => 'error', 'message' => 'product_id does not match this invoice line']);
+        exit;
+    }
+    if ($characteristic_id > 0 && $dbCid > 0 && $characteristic_id !== $dbCid) {
+        echo json_encode(['status' => 'error', 'message' => 'characteristic_id does not match this invoice line']);
+        exit;
+    }
+    $product_id = $dbPid > 0 ? $dbPid : $product_id;
+    $characteristic_id = $dbCid > 0 ? $dbCid : $characteristic_id;
+} elseif ($voucher !== 'sale_order' && ($product_id <= 0 || $characteristic_id <= 0)) {
+    echo json_encode(['status' => 'error', 'message' => 'product_id and characteristic_id are required']);
+    exit;
+}
+
+if ($voucher !== 'sale_order' && ($product_id <= 0 || $characteristic_id <= 0)) {
+    echo json_encode(['status' => 'error', 'message' => 'Could not resolve product_id and characteristic_id for import']);
+    exit;
+}
+
 @ini_set('display_errors', '1');
 @ini_set('display_startup_errors', '1');
 @error_reporting(E_ALL);
@@ -40,7 +75,13 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stock_journal_excel_import.php';
 
-$preview_only = !empty($_POST['preview_only']) && ((string) $_POST['preview_only'] === '1' || strcasecmp((string) $_POST['preview_only'], 'true') === 0 || strcasecmp((string) $_POST['preview_only'], 'yes') === 0);
+$preview_only = $voucher === 'sale_order' || (
+    !empty($_POST['preview_only']) && (
+        (string) $_POST['preview_only'] === '1'
+        || strcasecmp((string) $_POST['preview_only'], 'true') === 0
+        || strcasecmp((string) $_POST['preview_only'], 'yes') === 0
+    )
+);
 
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -73,18 +114,21 @@ if ($ext === 'xlsx' && !class_exists('ZipArchive', false)) {
 @set_time_limit(0);
 @ini_set('memory_limit', '512M');
 
-$pcSelect = "id, product_id, barcode_prefix, barcode_digits, opening_purity";
-if (function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_product_characteristics', 'metal_id')) {
-    $pcSelect .= ", metal_id";
+$pc = null;
+$product_name = '';
+if ($voucher !== 'sale_order') {
+    $pcSelect = "id, product_id, barcode_prefix, barcode_digits, opening_purity";
+    if (function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_product_characteristics', 'metal_id')) {
+        $pcSelect .= ", metal_id";
+    }
+    $pc = getRecord("SELECT $pcSelect FROM tbl_product_characteristics WHERE id = $characteristic_id AND product_id = $product_id AND status = 1 LIMIT 1");
+    if (!$pc) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid product / characteristic combination']);
+        exit;
+    }
+    $prod = getRecord("SELECT id, name FROM tbl_products WHERE id = $product_id LIMIT 1");
+    $product_name = $prod ? trim((string) ($prod['name'] ?? '')) : '';
 }
-$pc = getRecord("SELECT $pcSelect FROM tbl_product_characteristics WHERE id = $characteristic_id AND product_id = $product_id AND status = 1 LIMIT 1");
-if (!$pc) {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid product / characteristic combination']);
-    exit;
-}
-
-$prod = getRecord("SELECT id, name FROM tbl_products WHERE id = $product_id LIMIT 1");
-$product_name = $prod ? trim((string) ($prod['name'] ?? '')) : '';
 
 $tmpPath = $_FILES['excel_file']['tmp_name'];
 
@@ -183,9 +227,16 @@ try {
     $drawingsByRow = [];
 }
 
-$openingPurity = (float) ($pc['opening_purity'] ?? 0);
+$openingPurity = $pc ? (float) ($pc['opening_purity'] ?? 0) : 1.0;
 if ($openingPurity <= 0) {
     $openingPurity = 1.0;
+}
+
+$defaultExcelVoucherType = 'product_opening';
+if ($voucher === 'purchase_invoice') {
+    $defaultExcelVoucherType = 'purchase_invoice';
+} elseif ($voucher === 'sale_order') {
+    $defaultExcelVoucherType = 'sale_order';
 }
 
 $products = [];
@@ -262,10 +313,38 @@ for ($r = 2; $r <= $highestRow; $r++) {
     } elseif (trim($pname) === '' && $product_name !== '') {
         $pname = $product_name;
     }
-    $vt = $sjS($cM, 'voucher_type', $sheet, $r) !== '' ? $sjS($cM, 'voucher_type', $sheet, $r) : 'product_opening';
+    $vt = $sjS($cM, 'voucher_type', $sheet, $r) !== '' ? $sjS($cM, 'voucher_type', $sheet, $r) : $defaultExcelVoucherType;
+    $rowPid = $product_id;
+    $rowCid = $characteristic_id;
+    if ($voucher === 'sale_order') {
+        if (!empty($col['product_id_in'])) {
+            $rowPid = (int) $sjS($col, 'product_id_in', $sheet, $r);
+        }
+        if (!empty($col['characteristic_id_in'])) {
+            $rowCid = (int) $sjS($col, 'characteristic_id_in', $sheet, $r);
+        }
+        $rowBc = !empty($map['barcode']) ? auragold_sj_excel_sj_cell_s($sheet, (int) $map['barcode'], $r) : '';
+        [$rowPid, $rowCid] = auragold_sj_excel_resolve_sale_order_product_ids(
+            $conn,
+            $rowPid,
+            $rowCid,
+            $rowBc,
+            $pname,
+            $metal_id_sample
+        );
+        if ($rowPid <= 0 || $rowCid <= 0) {
+            continue;
+        }
+        if ($pname === '' && $rowPid > 0) {
+            $prRow = getRecord('SELECT name FROM tbl_products WHERE id = ' . (int) $rowPid . ' LIMIT 1');
+            if ($prRow && trim((string) ($prRow['name'] ?? '')) !== '') {
+                $pname = trim((string) $prRow['name']);
+            }
+        }
+    }
     $row = [
-        'product_id' => $product_id,
-        'characteristic_id' => $characteristic_id,
+        'product_id' => $rowPid,
+        'characteristic_id' => $rowCid,
         'product_name' => $pname,
         'code' => $sjS($cM, 'excel_id', $sheet, $r),
         'quantity' => $qty,
@@ -278,7 +357,7 @@ for ($r = 2; $r <= $highestRow; $r++) {
         'design_no' => $sjS($cM, 'design_no', $sheet, $r),
         'huid_no' => $sjS($cM, 'huid_no', $sheet, $r),
         'rfid_code' => $sjS($cM, 'rfid_code', $sheet, $r),
-        'barcode' => $sjS($cM, 'barcode', $sheet, $r),
+        'barcode' => !empty($map['barcode']) ? auragold_sj_excel_sj_cell_s($sheet, (int) $map['barcode'], $r) : $sjS($cM, 'barcode', $sheet, $r),
         'voucher_type' => $vt,
         'category' => $sjS($cM, 'category', $sheet, $r),
         'calculation' => $sjS($cM, 'calculation', $sheet, $r),
@@ -486,37 +565,83 @@ foreach ($products as &$p) {
 unset($p);
 
 if (!empty($preview_only)) {
-    $metal_id = (int) ($pc['metal_id'] ?? 0);
-    $metal_name = '';
-    if ($metal_id > 0) {
-        $mi = getRecord("SELECT display_name, system_name FROM tbl_metal WHERE id = $metal_id LIMIT 1");
-        if ($mi) {
-            $metal_name = trim((string) ($mi['display_name'] ?? $mi['system_name'] ?? ''));
-        }
-    }
-    $bp = trim((string) ($pc['barcode_prefix'] ?? ''));
-    $bdg = (int) ($pc['barcode_digits'] ?? 0);
-    if ($bdg < 1) {
-        $bdg = 5;
-    }
+    $previewUsed = [];
     foreach ($products as &$p) {
-        $p['barcode'] = '';
+        $bcRaw = trim((string) ($p['barcode'] ?? ''));
+        if ($voucher === 'sale_order') {
+            if ($bcRaw !== '' && in_array($bcRaw, $previewUsed, true)) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Barcode "' . $bcRaw . '" appears more than once in this Excel file.',
+                ]);
+                exit;
+            }
+            if ($bcRaw !== '') {
+                $previewUsed[] = $bcRaw;
+            }
+            $cidSo = (int) ($p['characteristic_id'] ?? 0);
+            $metal_id_so = 0;
+            $metal_name_so = '';
+            if ($cidSo > 0 && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_product_characteristics', 'metal_id')) {
+                $pcSo = getRecord('SELECT metal_id FROM tbl_product_characteristics WHERE id = ' . $cidSo . ' LIMIT 1');
+                $metal_id_so = (int) ($pcSo['metal_id'] ?? 0);
+            }
+            if ($metal_id_so > 0) {
+                $miSo = getRecord("SELECT display_name, system_name FROM tbl_metal WHERE id = $metal_id_so LIMIT 1");
+                if ($miSo) {
+                    $metal_name_so = trim((string) ($miSo['display_name'] ?? $miSo['system_name'] ?? ''));
+                }
+            }
+            $p['metal_id'] = $metal_id_so;
+            $p['metal_name'] = $metal_name_so;
+            $p['barcode_prefix'] = '';
+            $p['barcode_digits'] = 0;
+            continue;
+        }
+        if ($bcRaw !== '') {
+            if (!auragold_sj_excel_validate_barcode($conn, $bcRaw, $previewUsed)) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Barcode "' . $bcRaw . '" is duplicated in this Excel file or already exists in stock. Remove duplicates or use a new code.',
+                ]);
+                exit;
+            }
+            $p['barcode'] = $bcRaw;
+            $previewUsed[] = $bcRaw;
+        } else {
+            $p['barcode'] = '';
+        }
+        $metal_id = (int) ($pc['metal_id'] ?? 0);
+        $metal_name = '';
+        if ($metal_id > 0) {
+            $mi = getRecord("SELECT display_name, system_name FROM tbl_metal WHERE id = $metal_id LIMIT 1");
+            if ($mi) {
+                $metal_name = trim((string) ($mi['display_name'] ?? $mi['system_name'] ?? ''));
+            }
+        }
         $p['metal_id'] = $metal_id;
         $p['metal_name'] = $metal_name;
-        $p['barcode_prefix'] = $bp;
-        $p['barcode_digits'] = $bdg;
+        $p['barcode_prefix'] = trim((string) ($pc['barcode_prefix'] ?? ''));
+        $p['barcode_digits'] = (int) ($pc['barcode_digits'] ?? 0);
+        if ($p['barcode_digits'] < 1) {
+            $p['barcode_digits'] = 5;
+        }
     }
     unset($p);
     $_SESSION['excel_import_data'] = [
-        'voucher' => 'product_opening',
+        'voucher' => $voucher,
+        'item_id' => ($voucher === 'purchase_invoice') ? $item_id_imp : 0,
         'product_id' => $product_id,
         'characteristic_id' => $characteristic_id,
         'rows' => $products,
         'imported_at' => time(),
     ];
+    $previewMessage = $voucher === 'sale_order'
+        ? 'Excel loaded into the product list. Review rows, then click Add (Shift + A) to add lines to the order.'
+        : 'Excel loaded into preview. Barcodes are assigned in the list; click Save Stock Journal to post to stock.';
     echo json_encode([
         'status' => 'success',
-        'message' => 'Excel loaded into preview. Barcodes are assigned in the list; click Save Stock Journal to post to stock.',
+        'message' => $previewMessage,
         'products' => $products,
         'imported_rows' => count($products),
     ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -544,32 +669,54 @@ foreach ($products as &$p) {
 }
 unset($p);
 
-// Balance check (same logic as stock-journal-create balance display)
+// Balance check: product opening uses characteristic opening_*; purchase invoice uses PI line totals vs item_id stock journal usage
 $sumQty = 0.0;
 $sumGw = 0.0;
 foreach ($products as $p) {
     $sumQty += (float) ($p['quantity'] ?? 0);
     $sumGw += (float) ($p['gross_weight'] ?? 0);
 }
-$sj_used = getRecord("
-    SELECT COALESCE(SUM(sj.quantity), 0) AS used_qty, COALESCE(SUM(sj.gross_weight), 0) AS used_gross_wt
-    FROM tbl_stock_journal sj
-    WHERE sj.product_characteristic_id = $characteristic_id AND sj.status = 'active'
-        AND (sj.item_id IS NULL OR sj.item_id = 0)
-        AND (sj.comment IS NULL OR sj.comment NOT LIKE 'auragold_doc|src=pi|%')
-");
-$used_q = (float) ($sj_used['used_qty'] ?? 0);
-$used_w = (float) ($sj_used['used_gross_wt'] ?? 0);
-$pcRow = getRecord("SELECT COALESCE(opening_qty,0) AS opening_qty, COALESCE(opening_weight,0) AS opening_weight FROM tbl_product_characteristics WHERE id = $characteristic_id LIMIT 1");
-$tot_q = (float) ($pcRow['opening_qty'] ?? 0);
-$tot_w = (float) ($pcRow['opening_weight'] ?? 0);
-if ($tot_q > 0 && $sumQty + $used_q > $tot_q + 0.0001) {
-    echo json_encode(['status' => 'error', 'message' => 'Excel total quantity exceeds balance for this product opening']);
-    exit;
-}
-if ($tot_w > 0 && $sumGw + $used_w > $tot_w + 0.0001) {
-    echo json_encode(['status' => 'error', 'message' => 'Excel total gross weight exceeds balance for this product opening']);
-    exit;
+if ($voucher === 'product_opening') {
+    $sj_used = getRecord("
+        SELECT COALESCE(SUM(sj.quantity), 0) AS used_qty, COALESCE(SUM(sj.gross_weight), 0) AS used_gross_wt
+        FROM tbl_stock_journal sj
+        WHERE sj.product_characteristic_id = $characteristic_id AND sj.status = 'active'
+            AND (sj.item_id IS NULL OR sj.item_id = 0)
+            AND (sj.comment IS NULL OR sj.comment NOT LIKE 'auragold_doc|src=pi|%')
+    ");
+    $used_q = (float) ($sj_used['used_qty'] ?? 0);
+    $used_w = (float) ($sj_used['used_gross_wt'] ?? 0);
+    $pcRow = getRecord("SELECT COALESCE(opening_qty,0) AS opening_qty, COALESCE(opening_weight,0) AS opening_weight FROM tbl_product_characteristics WHERE id = $characteristic_id LIMIT 1");
+    $tot_q = (float) ($pcRow['opening_qty'] ?? 0);
+    $tot_w = (float) ($pcRow['opening_weight'] ?? 0);
+    if ($tot_q > 0 && $sumQty + $used_q > $tot_q + 0.0001) {
+        echo json_encode(['status' => 'error', 'message' => 'Excel total quantity exceeds balance for this product opening']);
+        exit;
+    }
+    if ($tot_w > 0 && $sumGw + $used_w > $tot_w + 0.0001) {
+        echo json_encode(['status' => 'error', 'message' => 'Excel total gross weight exceeds balance for this product opening']);
+        exit;
+    }
+} elseif ($voucher === 'purchase_invoice' && $item_id_imp > 0) {
+    $piLine = getRecord('SELECT COALESCE(metal_qty, quantity, 0) AS tq, COALESCE(gross_weight, 0) AS tw FROM tbl_purchase_invoice_items WHERE id = ' . $item_id_imp . ' LIMIT 1');
+    $tot_q_pi = (float) ($piLine['tq'] ?? 0);
+    $tot_w_pi = (float) ($piLine['tw'] ?? 0);
+    $sj_used_pi = getRecord("
+        SELECT COALESCE(SUM(sj.quantity), 0) AS used_qty, COALESCE(SUM(sj.gross_weight), 0) AS used_gross_wt
+        FROM tbl_stock_journal sj
+        WHERE sj.item_id = $item_id_imp AND sj.status = 'active'
+            AND (sj.comment IS NULL OR sj.comment NOT LIKE 'auragold_doc|src=pi|%')
+    ");
+    $used_q_pi = (float) ($sj_used_pi['used_qty'] ?? 0);
+    $used_w_pi = (float) ($sj_used_pi['used_gross_wt'] ?? 0);
+    if ($tot_q_pi > 0 && $sumQty + $used_q_pi > $tot_q_pi + 0.0001) {
+        echo json_encode(['status' => 'error', 'message' => 'Excel total quantity exceeds balance for this purchase invoice line']);
+        exit;
+    }
+    if ($tot_w_pi > 0 && $sumGw + $used_w_pi > $tot_w_pi + 0.0001) {
+        echo json_encode(['status' => 'error', 'message' => 'Excel total gross weight exceeds balance for this purchase invoice line']);
+        exit;
+    }
 }
 
 $journal_date = isset($_POST['date']) && $_POST['date'] !== '' ? esc($_POST['date']) : date('Y-m-d');
@@ -578,7 +725,7 @@ $comment = isset($_POST['comment']) ? esc($_POST['comment']) : '';
 
 $payload = [
     'date' => $journal_date,
-    'item_id' => 0,
+    'item_id' => ($voucher === 'purchase_invoice') ? $item_id_imp : 0,
     'products' => $products,
     'group_name' => $group_name,
     'comment' => $comment,

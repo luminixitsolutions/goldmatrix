@@ -42,6 +42,28 @@ if (!function_exists('auragold_effective_branch_id')) {
     }
 }
 
+if (!function_exists('auragold_branch_root_main_id_for_branch')) {
+    /**
+     * Top-level main tbl_branches.id for a row: the row itself when main_branch_id is 0, otherwise main_branch_id.
+     */
+    function auragold_branch_root_main_id_for_branch(int $branchId): int {
+        if ($branchId <= 0 || !function_exists('getRecordMaster')) {
+            return 0;
+        }
+        $row = @getRecordMaster(
+            'SELECT id, IFNULL(main_branch_id, 0) AS mb FROM tbl_branches WHERE id = ' . (int) $branchId . ' AND status = 1 LIMIT 1'
+        );
+        if (!$row || empty($row['id'])) {
+            return 0;
+        }
+        $mb = (int) ($row['mb'] ?? 0);
+        if ($mb === 0) {
+            return (int) $row['id'];
+        }
+        return $mb;
+    }
+}
+
 if (!function_exists('auragold_resolve_branch_id_for_session')) {
     /**
      * When the session has a working/login branch (effective id &gt; 0), APIs must use that branch_id
@@ -315,6 +337,62 @@ if (!function_exists('auragold_settings_main_branch_id')) {
         $main = @getRecordMaster('SELECT id FROM tbl_branches WHERE IFNULL(main_branch_id, 0) = 0 ORDER BY id ASC LIMIT 1');
         $cached = ($main && !empty($main['id'])) ? (int) $main['id'] : 0;
         return $cached;
+    }
+}
+
+if (!function_exists('auragold_branch_stock_transfer_tree_root_id')) {
+    /**
+     * Root main branch for stock transfer scope: follows session working/login branch so users in
+     * e.g. Gold Matrix (db goldmatrix_gm_1) are not tied to whichever main sorts first by id in the registry.
+     * Falls back to auragold_settings_main_branch_id() when there is no effective branch.
+     */
+    function auragold_branch_stock_transfer_tree_root_id(): int {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        $cached = 0;
+        if (function_exists('auragold_effective_branch_id') && function_exists('auragold_branch_root_main_id_for_branch')) {
+            $eff = (int) auragold_effective_branch_id();
+            if ($eff > 0) {
+                $cached = auragold_branch_root_main_id_for_branch($eff);
+            }
+        }
+        if ($cached <= 0 && function_exists('auragold_settings_main_branch_id')) {
+            $cached = (int) auragold_settings_main_branch_id();
+        }
+        return $cached;
+    }
+}
+
+if (!function_exists('auragold_branch_is_main_or_sub_of_settings_main')) {
+    /**
+     * True when the branch is the session stock-transfer tree root or a sub-branch linked via main_branch_id.
+     * Other top-level mains (different companies / DB contexts) are excluded.
+     */
+    function auragold_branch_is_main_or_sub_of_settings_main(int $branchId): bool {
+        if ($branchId <= 0) {
+            return false;
+        }
+        if (!function_exists('getRecordMaster')) {
+            return true;
+        }
+        $main = function_exists('auragold_branch_stock_transfer_tree_root_id')
+            ? (int) auragold_branch_stock_transfer_tree_root_id()
+            : (function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0);
+        if ($main <= 0) {
+            return true;
+        }
+        if ($branchId === $main) {
+            return true;
+        }
+        $row = @getRecordMaster(
+            'SELECT IFNULL(main_branch_id, 0) AS mb FROM tbl_branches WHERE id = ' . (int) $branchId . ' AND status = 1 LIMIT 1'
+        );
+        if (!$row) {
+            return false;
+        }
+        return (int) ($row['mb'] ?? 0) === $main;
     }
 }
 

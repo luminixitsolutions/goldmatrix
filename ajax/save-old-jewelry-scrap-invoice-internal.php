@@ -17,6 +17,7 @@ error_reporting(0);
 
 session_start();
 require_once '../config.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 require_once __DIR__ . '/../includes/old_jewelry_scrap_stock_balance.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
@@ -114,6 +115,7 @@ try {
     $payments = isset($_POST['payments']) ? $_POST['payments'] : [];
     if (is_string($payments)) $payments = json_decode($payments, true);
     if (!is_array($payments)) $payments = [];
+    $metal_exchange_barcodes_out = [];
 
     if (empty($customer_name)) {
         throw new Exception('Name is required.');
@@ -534,25 +536,53 @@ try {
         mysqli_free_result($_ojpdc2);
     }
 
-    foreach ($payments as $pm) {
+    if ($oj_scrap_save_do_stock_mirror) {
+        $__oj_me_rt = 'old_jewellery_scrap_stock_in_metal_exchange';
+        $__oj_me_hist = 'Old Jewellery Scrap Stock In — Metal Exchange';
+        $__oj_me_aud = 'ojstk_me';
+        $__oj_me_pfx = 'OJSTK-ME-';
+    } else {
+        $__oj_me_rt = 'old_jewelry_scrap_invoice_metal_exchange';
+        $__oj_me_hist = 'Old Jewelry Scrap Invoice — Metal Exchange';
+        $__oj_me_aud = 'ojsi_me';
+        $__oj_me_pfx = 'OJSI-ME-';
+    }
+    foreach ($payments as $__pme_ok) {
+        if (!is_array($__pme_ok)) {
+            continue;
+        }
+        $___mrg_oj = auragold_payment_merge_stored_details($__pme_ok);
+        if (!auragold_payment_is_metal_exchange_inward($conn, $___mrg_oj)) {
+            continue;
+        }
+        auragold_validate_metal_exchange_for_stock($conn, $___mrg_oj);
+    }
+    $__oj_me_has_ref = auragold_metal_exchange_document_init($conn, $oj_invoice_existed, (int) $invoice_id, $__oj_me_rt);
+
+    foreach ($payments as $pay_seq => $pm) {
         if (!is_array($pm)) {
             continue;
         }
+        $__pt_chk = strtolower(trim((string) ($pm['payment_type'] ?? '')));
+        $__amt_chk = (float) ($pm['current_order_amount'] ?? $pm['amount'] ?? 0);
+        if ($__amt_chk <= 0 && isset($pm['amount'])) {
+            $__amt_chk = (float) $pm['amount'];
+        }
+        if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $pm)) {
+            if ($__pt_chk === '' && $__amt_chk <= 0) {
+                continue;
+            }
+        }
+
         $pt = esc($pm['payment_type'] ?? '');
         $deposit = esc($pm['deposit_into'] ?? '');
         $trans_no = esc($pm['transaction_no'] ?? '');
         $cheque_dt = !empty($pm['cheque_date']) ? "'" . esc($pm['cheque_date']) . "'" : 'NULL';
         $purity_carat = esc($pm['purity_carat'] ?? '');
-        $amt = (float) ($pm['current_order_amount'] ?? $pm['amount'] ?? 0);
-        if ($amt <= 0 && isset($pm['amount'])) {
-            $amt = (float) $pm['amount'];
-        }
+        $amt = $__amt_chk;
         $diamond_cat = esc($pm['diamond_category'] ?? '');
-        $qty = (float)($pm['quantity'] ?? 0);
+        $qty = (float) ($pm['quantity'] ?? 0);
         $card_no = esc($pm['card_no'] ?? '');
-        if ($pt === '' && $amt <= 0) {
-            continue;
-        }
         if ($pt === '') {
             $pt = 'Cash';
         }
@@ -570,6 +600,23 @@ try {
         if (!mysqli_query($conn, $qp)) {
             throw new Exception('Payment insert failed: ' . mysqli_error($conn));
         }
+
+        $oj_pm_m = auragold_payment_merge_stored_details($pm);
+        auragold_post_metal_exchange_payment_to_stock(
+            $conn,
+            $__oj_me_rt,
+            (int) $invoice_id,
+            trim((string) $invoice_no),
+            substr(trim((string) $invoice_date), 0, 10),
+            $oj_pm_m,
+            auragold_metal_exchange_default_branch_id(),
+            is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+            $__oj_me_has_ref,
+            $__oj_me_hist,
+            $__oj_me_aud,
+            $__oj_me_pfx,
+            $metal_exchange_barcodes_out
+        );
     }
 
     // Customer ledger: standalone OJB only. If ref_no = PI:{id} (auto from purchase invoice), scrap is already posted as Payment Debit
@@ -845,7 +892,16 @@ try {
             $barcodes_unique[] = $sb;
         }
     }
-    echo json_encode(['status' => 'success', 'message' => 'Saved successfully.', 'invoice_id' => $invoice_id, 'order_id' => $invoice_id, 'invoice_no' => $invoice_no, 'order_no' => $invoice_no, 'barcodes' => $barcodes_unique]);
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Saved successfully.',
+        'invoice_id' => $invoice_id,
+        'order_id' => $invoice_id,
+        'invoice_no' => $invoice_no,
+        'order_no' => $invoice_no,
+        'barcodes' => $barcodes_unique,
+        'new_barcodes' => $metal_exchange_barcodes_out,
+    ]);
 } catch (Exception $e) {
     if (isset($conn)) @mysqli_rollback($conn);
     echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);

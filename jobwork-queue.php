@@ -648,9 +648,16 @@ if ($mp_department_users_json === false) {
     font-weight: 700;
     text-align: left;
     padding: 8px 10px;
+    padding-right: 18px;
     border-bottom: 1px solid #d8deeb;
     border-right: 1px solid #c8d4e8;
     white-space: nowrap;
+}
+#jwqOrderLinesTable.acr-col-table thead th .acr-th-drag {
+    color: #64748b;
+}
+#jwqOrderLinesTable.acr-col-table thead th .acr-th-drag:hover {
+    color: #c9a962;
 }
 .jwq-table th:last-child { border-right: 0; }
 .jwq-table td {
@@ -665,6 +672,44 @@ if ($mp_department_users_json === false) {
 .jwq-table tr:last-child td { border-bottom: 0; }
 .jwq-table th.col-hidden,
 .jwq-table td.col-hidden { display: none !important; }
+.jwq-table td .jwq-cell-input {
+    width: 100%;
+    min-width: 88px;
+    max-width: 140px;
+    border: 1px solid #cfd8e3;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.25;
+    background: #fff;
+    color: #0f172a;
+    box-sizing: border-box;
+}
+.jwq-table td .jwq-cell-input:focus {
+    outline: none;
+    border-color: #7aa2ff;
+    box-shadow: 0 0 0 2px rgba(122, 162, 255, 0.18);
+}
+.jwq-table td .jwq-cell-input--decimal {
+    min-width: 96px;
+    max-width: 150px;
+}
+.jwq-table td[data-col="total_wt"],
+.jwq-table td[data-col="metal_wt"],
+.jwq-table td[data-col="diamond_wt"],
+.jwq-table td[data-col="total_purity"],
+.jwq-table td[data-col="total_qty"],
+.jwq-table td[data-col="loss"],
+.jwq-table td[data-col="price"] {
+    min-width: 108px;
+}
+.jwq-table td .jwq-cell-input--readonly,
+.jwq-table td .jwq-cell-input[readonly] {
+    background: #f1f5f9;
+    color: #334155;
+    cursor: default;
+    border-color: #e2e8f0;
+}
 .jwq-lines-toolbar {
     display: flex;
     justify-content: flex-end;
@@ -1463,6 +1508,8 @@ window.JWQ_PREVIEW_QUEUE_NO = <?php echo json_encode($jwq_preview_queue_no, JSON
 </script>
 <?php include 'footer-script.php'; ?>
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
-<script src="includes/jobwork-queue-page.js?v=38"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="assets/js/auragold-col-reorder.js"></script>
+<script src="includes/jobwork-queue-page.js?v=42"></script>
 </body>
 </html>

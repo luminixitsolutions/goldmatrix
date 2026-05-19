@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once '../config.php';
+if (is_file(__DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php')) {
+    require_once __DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php';
+}
 
 header('Content-Type: application/json');
 
@@ -174,6 +177,59 @@ if ($type === 'old_jewelry_scrap_invoice') {
     exit;
 }
 
+// Sale Order: block while Job Work Order exists; remove items/payments/issues then master.
+if ($type === 'sale_order') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $so_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_orders'");
+    if (!$so_chk || mysqli_num_rows($so_chk) == 0) {
+        if ($so_chk) {
+            mysqli_free_result($so_chk);
+        }
+        echo json_encode(['status' => 'error', 'message' => 'Table not found']);
+        exit;
+    }
+    mysqli_free_result($so_chk);
+    $so = getRecord('SELECT id, order_no FROM tbl_sale_orders WHERE id = ' . $id . ' LIMIT 1');
+    if (!$so) {
+        echo json_encode(['status' => 'error', 'message' => 'Sale order not found']);
+        exit;
+    }
+    if (function_exists('auragold_sale_order_has_linked_jobwork_order')
+        && auragold_sale_order_has_linked_jobwork_order($conn, $id)) {
+        $tip = function_exists('auragold_sale_order_jobwork_save_blocked_tip')
+            ? auragold_sale_order_jobwork_save_blocked_tip($conn, $id)
+            : 'Delete Jobwork Queue records, then the Job Work Order, before deleting this sale order.';
+        echo json_encode(['status' => 'error', 'message' => $tip]);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        mysqli_query($conn, 'DELETE FROM tbl_sale_order_items WHERE order_id = ' . $id);
+        mysqli_query($conn, 'DELETE FROM tbl_sale_order_payments WHERE order_id = ' . $id);
+        foreach (['tbl_sale_order_diamond_stock_issue', 'tbl_sale_order_stone_stock_issue'] as $iss_tbl) {
+            $tq = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $iss_tbl) . "'");
+            if ($tq && mysqli_num_rows($tq) > 0) {
+                mysqli_free_result($tq);
+                mysqli_query($conn, 'DELETE FROM `' . $iss_tbl . '` WHERE order_id = ' . $id);
+            } elseif ($tq) {
+                mysqli_free_result($tq);
+            }
+        }
+        if (!mysqli_query($conn, 'DELETE FROM tbl_sale_orders WHERE id = ' . $id . ' LIMIT 1')) {
+            throw new Exception(mysqli_error($conn));
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Sale order deleted successfully.']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
 $allowed_types = [
     'purchase_invoice' => 'tbl_purchase_invoices',
     'sale_invoice' => 'tbl_sale_invoices',
@@ -275,6 +331,26 @@ try {
         }
         if ($si_row && !empty($si_row['invoice_no'])) {
             $si_no_esc = mysqli_real_escape_string($conn, (string) $si_row['invoice_no']);
+            if (function_exists('auragold_ensure_tbl_sale_receipt_vouchers')) {
+                auragold_ensure_tbl_sale_receipt_vouchers($conn);
+            }
+            $srv_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+            if ($srv_chk && mysqli_num_rows($srv_chk) > 0) {
+                mysqli_free_result($srv_chk);
+                $srv_rows = getList("SELECT id FROM tbl_sale_receipt_vouchers WHERE sale_invoice_no = '$si_no_esc'");
+                if (is_array($srv_rows)) {
+                    foreach ($srv_rows as $srvr) {
+                        $srvid = (int) ($srvr['id'] ?? 0);
+                        if ($srvid <= 0) {
+                            continue;
+                        }
+                        mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'sale_receipt_voucher' AND transaction_id = $srvid AND status = 1");
+                        mysqli_query($conn, "DELETE FROM tbl_sale_receipt_vouchers WHERE id = $srvid");
+                    }
+                }
+            } elseif ($srv_chk) {
+                mysqli_free_result($srv_chk);
+            }
             $rv_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
             if ($rv_chk && mysqli_num_rows($rv_chk) > 0) {
                 mysqli_free_result($rv_chk);
@@ -321,6 +397,85 @@ try {
             }
         } elseif ($ojb_si_chk) {
             mysqli_free_result($ojb_si_chk);
+        }
+
+        // Child rows, stock reversal, and stock history (mirrors ajax/save-sale-invoice.php on edit — soft-delete alone left orphans)
+        $invoice_id_si = (int) $id;
+        $tbl_stock_has_reference_si = false;
+        $__stk_ref_del = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type')");
+        $__stk_ref_del_n = ($__stk_ref_del ? mysqli_num_rows($__stk_ref_del) : 0);
+        if ($__stk_ref_del) {
+            mysqli_free_result($__stk_ref_del);
+        }
+        if ($__stk_ref_del_n >= 2) {
+            $tbl_stock_has_reference_si = true;
+        }
+        if ($tbl_stock_has_reference_si) {
+            $rev_rows = getList("SELECT barcode, opening_weight, opening_qty, product_id, product_characteristic_id, branch_id FROM tbl_stock WHERE stock_type = 'outward' AND reference_id = $invoice_id_si AND reference_type = 'sale_invoice'");
+            if (is_array($rev_rows)) {
+                foreach ($rev_rows as $rv) {
+                    $ow = (float) ($rv['opening_weight'] ?? 0);
+                    $oq = (float) ($rv['opening_qty'] ?? 0);
+                    if ($ow <= 0 && $oq <= 0) {
+                        continue;
+                    }
+                    $b = trim((string) ($rv['barcode'] ?? ''));
+                    $target_id = 0;
+                    if ($b !== '') {
+                        $be = mysqli_real_escape_string($conn, $b);
+                        $tr = getRecord("SELECT id FROM tbl_stock WHERE barcode = '$be' AND status = 1 AND stock_type IN ('inward','balance') ORDER BY id DESC LIMIT 1");
+                        if ($tr && !empty($tr['id'])) {
+                            $target_id = (int) $tr['id'];
+                        }
+                    }
+                    if ($target_id <= 0) {
+                        $pid = (int) ($rv['product_id'] ?? 0);
+                        $bid = (int) ($rv['branch_id'] ?? 0);
+                        if ($pid > 0 && $bid > 0) {
+                            $cid_raw = $rv['product_characteristic_id'] ?? null;
+                            if ($cid_raw !== null && $cid_raw !== '') {
+                                $cid = (int) $cid_raw;
+                                $tr = getRecord("SELECT id FROM tbl_stock WHERE product_id = $pid AND product_characteristic_id = $cid AND branch_id = $bid AND status = 1 AND stock_type IN ('inward','balance') ORDER BY id DESC LIMIT 1");
+                            } else {
+                                $tr = getRecord("SELECT id FROM tbl_stock WHERE product_id = $pid AND product_characteristic_id IS NULL AND branch_id = $bid AND status = 1 AND stock_type IN ('inward','balance') ORDER BY id DESC LIMIT 1");
+                            }
+                            if ($tr && !empty($tr['id'])) {
+                                $target_id = (int) $tr['id'];
+                            }
+                        }
+                    }
+                    if ($target_id > 0) {
+                        if (!mysqli_query($conn, "UPDATE tbl_stock SET current_weight = COALESCE(current_weight, 0) + $ow, current_qty = COALESCE(current_qty, 0) + $oq WHERE id = $target_id")) {
+                            throw new Exception('Stock restore failed: ' . mysqli_error($conn));
+                        }
+                    }
+                }
+            }
+            if (!mysqli_query($conn, "DELETE FROM tbl_stock WHERE stock_type = 'outward' AND reference_id = $invoice_id_si AND reference_type = 'sale_invoice'")) {
+                throw new Exception('Outward stock delete failed: ' . mysqli_error($conn));
+            }
+        }
+        $sj_tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_stock_journal'");
+        if ($sj_tbl && mysqli_num_rows($sj_tbl) > 0) {
+            mysqli_free_result($sj_tbl);
+            if (!mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=si|iid=" . $invoice_id_si . "|%'")) {
+                throw new Exception('Stock journal delete failed: ' . mysqli_error($conn));
+            }
+        } elseif ($sj_tbl) {
+            mysqli_free_result($sj_tbl);
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_sale_invoice_payments WHERE invoice_id = $invoice_id_si")) {
+            throw new Exception('Sale invoice payments delete failed: ' . mysqli_error($conn));
+        }
+        if (!mysqli_query($conn, "DELETE FROM tbl_sale_invoice_items WHERE invoice_id = $invoice_id_si")) {
+            throw new Exception('Sale invoice items delete failed: ' . mysqli_error($conn));
+        }
+        $ew_log_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_ewaybill_generate_logs'");
+        if ($ew_log_chk && mysqli_num_rows($ew_log_chk) > 0) {
+            mysqli_free_result($ew_log_chk);
+            @mysqli_query($conn, "DELETE FROM tbl_ewaybill_generate_logs WHERE invoice_id = $invoice_id_si");
+        } elseif ($ew_log_chk) {
+            mysqli_free_result($ew_log_chk);
         }
     }
 

@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once '../config.php';
+if (is_file(__DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php')) {
+    require_once __DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php';
+}
 
 header('Content-Type: application/json');
 
@@ -38,6 +41,47 @@ foreach ($items as &$item) {
 $payments = getList("SELECT * FROM tbl_sale_order_payments WHERE order_id = $order_id ORDER BY id ASC");
 require_once __DIR__ . '/../includes/auragold_payment_details_merge.php';
 auragold_merge_payment_details_into_payments($payments);
+
+$diamond_issues = [];
+$tDiamondIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_diamond_stock_issue'");
+if ($tDiamondIss && mysqli_num_rows($tDiamondIss) > 0) {
+    mysqli_free_result($tDiamondIss);
+    $tmp_di = getList(
+        'SELECT id, order_id, stock_id, barcode, product_name, diamond_category, weight, qty, created_at '
+        . "FROM tbl_sale_order_diamond_stock_issue WHERE order_id = $order_id ORDER BY id ASC"
+    );
+    $diamond_issues = is_array($tmp_di) ? $tmp_di : [];
+} elseif ($tDiamondIss) {
+    mysqli_free_result($tDiamondIss);
+}
+$order['diamond_issues'] = $diamond_issues;
+
+$stone_issues = [];
+$tStoneIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_stone_stock_issue'");
+if ($tStoneIss && mysqli_num_rows($tStoneIss) > 0) {
+    mysqli_free_result($tStoneIss);
+    $tmp_si = getList(
+        'SELECT id, order_id, stock_id, barcode, product_name, stone_category, weight, qty, created_at '
+        . "FROM tbl_sale_order_stone_stock_issue WHERE order_id = $order_id ORDER BY id ASC"
+    );
+    $stone_issues = is_array($tmp_si) ? $tmp_si : [];
+} elseif ($tStoneIss) {
+    mysqli_free_result($tStoneIss);
+}
+$order['stone_issues'] = $stone_issues;
+
+$order['jobwork_order_blocks_save'] = false;
+$order['jobwork_order_save_blocked_tip'] = '';
+$order['linked_jobwork_orders'] = [];
+if (function_exists('auragold_sale_order_has_linked_jobwork_order') && auragold_sale_order_has_linked_jobwork_order($conn, $order_id)) {
+    $order['jobwork_order_blocks_save'] = true;
+    if (function_exists('auragold_sale_order_jobwork_save_blocked_tip')) {
+        $order['jobwork_order_save_blocked_tip'] = auragold_sale_order_jobwork_save_blocked_tip($conn, $order_id);
+    }
+    if (function_exists('auragold_sale_order_linked_jobwork_orders')) {
+        $order['linked_jobwork_orders'] = auragold_sale_order_linked_jobwork_orders($conn, $order_id);
+    }
+}
 
 echo json_encode([
     'status' => 'success',

@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -34,6 +35,16 @@ if (is_string($items_json) && $items_json !== '') {
 if (!is_array($items)) {
     $items = [];
 }
+
+$jwo_payments_raw = isset($_POST['payments']) ? $_POST['payments'] : '';
+$jwo_payments = [];
+if (is_string($jwo_payments_raw) && $jwo_payments_raw !== '') {
+    $jwo_payments = json_decode($jwo_payments_raw, true);
+}
+if (!is_array($jwo_payments)) {
+    $jwo_payments = [];
+}
+$metal_exchange_barcodes_out = [];
 
 if ($sale_order_id < 1) {
     echo json_encode(['status' => 'error', 'message' => 'Sale order ID required']);
@@ -312,6 +323,148 @@ function auragold_jwo_log_manufacturing_queue_activity($conn, $jobwork_order_id,
         . $jid . ', \'' . $qn_esc . '\', NULL, NULL, ' . $td . ', ' . $tu_sql . ", 'jobwork_create')");
 }
 
+/** Emit JSON error and stop (keeps AJAX response parseable when validation throws). */
+function auragold_jwo_json_error_and_exit(string $message): void
+{
+    if (ob_get_length()) {
+        ob_clean();
+    }
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode(['status' => 'error', 'message' => $message]);
+    exit;
+}
+
+/** Optional POS-style payments JSON: persists tagged rows on tbl_sale_order_payments + posts ME stock keyed by jobwork order id. */
+function auragold_jobwork_order_persist_sale_order_payments_and_post_me(mysqli $conn, int $sale_order_id, int $jwo_id, bool $jwo_is_update, string $jobwork_no_plain, string $doc_date_ymd, array $payments, array &$metal_exchange_barcodes_out): void
+{
+    if ($sale_order_id < 1 || $jwo_id < 1 || empty($payments)) {
+        return;
+    }
+
+    foreach ($payments as $__jp) {
+        if (!is_array($__jp)) {
+            continue;
+        }
+        $__mjp = auragold_payment_merge_stored_details($__jp);
+        if (!auragold_payment_is_metal_exchange_inward($conn, $__mjp)) {
+            continue;
+        }
+        try {
+            auragold_validate_metal_exchange_for_stock($conn, $__mjp);
+        } catch (Throwable $e) {
+            auragold_jwo_json_error_and_exit($e->getMessage());
+        }
+    }
+
+    $___jwo_me_ref = auragold_metal_exchange_document_init($conn, $jwo_is_update, $jwo_id, 'jobwork_order_metal_exchange');
+
+    if ($jwo_is_update) {
+        $__res_pd = mysqli_query($conn, 'SELECT id, payment_details FROM tbl_sale_order_payments WHERE order_id=' . (int) $sale_order_id);
+        if ($__res_pd) {
+            while ($__rw = mysqli_fetch_assoc($__res_pd)) {
+                $__jd = isset($__rw['payment_details']) ? json_decode((string) $__rw['payment_details'], true) : null;
+                if (is_array($__jd) && !empty($__jd['jobwork_order_metal_exchange']) && (int) ($__jd['jobwork_order_id'] ?? 0) === $jwo_id) {
+                    mysqli_query($conn, 'DELETE FROM tbl_sale_order_payments WHERE id=' . (int) $__rw['id']);
+                }
+            }
+            mysqli_free_result($__res_pd);
+        }
+    }
+
+    $sop_pd_chk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'payment_details'");
+    $sop_has_payment_details = ($sop_pd_chk && mysqli_num_rows($sop_pd_chk) > 0);
+    if ($sop_pd_chk) {
+        mysqli_free_result($sop_pd_chk);
+    }
+    if (!$sop_has_payment_details) {
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_order_payments ADD COLUMN payment_details TEXT NULL COMMENT 'JSON'");
+        $__sopc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'payment_details'");
+        $sop_has_payment_details = ($__sopc && mysqli_num_rows($__sopc) > 0);
+        if ($__sopc) {
+            mysqli_free_result($__sopc);
+        }
+    }
+    $__spc_pb = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_order_payments LIKE 'previous_balance_amount'");
+    $sop_has_prev_bal = ($__spc_pb && mysqli_num_rows($__spc_pb) > 0);
+    if ($__spc_pb) {
+        mysqli_free_result($__spc_pb);
+    }
+
+    foreach ($payments as $pay_seq => $payment) {
+        if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+            continue;
+        }
+
+        $payment_merged = auragold_payment_merge_stored_details($payment);
+        $payment_type_esc = mysqli_real_escape_string($conn, (string) ($payment_merged['payment_type'] ?? ''));
+        $deposit_into_esc = mysqli_real_escape_string($conn, (string) ($payment_merged['deposit_into'] ?? ''));
+        $transaction_no_esc = mysqli_real_escape_string($conn, (string) ($payment_merged['transaction_no'] ?? ''));
+        $cheque_date_esc = isset($payment_merged['cheque_date']) && $payment_merged['cheque_date']
+            ? mysqli_real_escape_string($conn, (string) $payment_merged['cheque_date']) : '';
+        $purity_carat_esc = mysqli_real_escape_string($conn, (string) ($payment_merged['purity_carat'] ?? ''));
+        $amount = (float) ($payment_merged['amount'] ?? 0);
+        $previous_balance_amount = (float) ($payment_merged['previous_balance_amount'] ?? 0);
+        $diamond_category_esc = mysqli_real_escape_string($conn, (string) ($payment_merged['diamond_category'] ?? ''));
+        $quantity = (float) ($payment_merged['quantity'] ?? 0);
+
+        $pd_wrap = array_merge(['jobwork_order_metal_exchange' => 1, 'jobwork_order_id' => $jwo_id], $payment_merged);
+        unset($pd_wrap['id'], $pd_wrap['payment_details']);
+        $pd_sql_part = 'NULL';
+        if ($sop_has_payment_details) {
+            $pd_sql_part = "'" . mysqli_real_escape_string($conn, json_encode($pd_wrap, JSON_UNESCAPED_UNICODE)) . "'";
+        }
+
+        $dep_sql = $deposit_into_esc !== '' ? "'$deposit_into_esc'" : 'NULL';
+        $txn_sql = $transaction_no_esc !== '' ? "'$transaction_no_esc'" : 'NULL';
+        $ch_sql = $cheque_date_esc !== '' ? "'$cheque_date_esc'" : 'NULL';
+        $pur_sql = $purity_carat_esc !== '' ? "'$purity_carat_esc'" : 'NULL';
+        $dia_sql = $diamond_category_esc !== '' ? "'$diamond_category_esc'" : 'NULL';
+
+        $payment_sql = '';
+        if ($sop_has_payment_details && $sop_has_prev_bal) {
+            $payment_sql = "INSERT INTO tbl_sale_order_payments (order_id, payment_type, deposit_into, transaction_no, cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity, payment_details, status, created_at) VALUES ("
+                . (int) $sale_order_id . ", '$payment_type_esc', $dep_sql, $txn_sql, $ch_sql, $pur_sql, $amount, $previous_balance_amount, $dia_sql, $quantity, $pd_sql_part, 1, NOW())";
+        } elseif ($sop_has_payment_details) {
+            $payment_sql = "INSERT INTO tbl_sale_order_payments (order_id, payment_type, deposit_into, transaction_no, cheque_date, purity_carat, amount, diamond_category, quantity, payment_details, status, created_at) VALUES ("
+                . (int) $sale_order_id . ", '$payment_type_esc', $dep_sql, $txn_sql, $ch_sql, $pur_sql, $amount, $dia_sql, $quantity, $pd_sql_part, 1, NOW())";
+        } elseif ($sop_has_prev_bal) {
+            $payment_sql = "INSERT INTO tbl_sale_order_payments (order_id, payment_type, deposit_into, transaction_no, cheque_date, purity_carat, amount, previous_balance_amount, diamond_category, quantity, status, created_at) VALUES ("
+                . (int) $sale_order_id . ", '$payment_type_esc', $dep_sql, $txn_sql, $ch_sql, $pur_sql, $amount, $previous_balance_amount, $dia_sql, $quantity, 1, NOW())";
+        } else {
+            $payment_sql = "INSERT INTO tbl_sale_order_payments (order_id, payment_type, deposit_into, transaction_no, cheque_date, purity_carat, amount, diamond_category, quantity, status, created_at) VALUES ("
+                . (int) $sale_order_id . ", '$payment_type_esc', $dep_sql, $txn_sql, $ch_sql, $pur_sql, $amount, $dia_sql, $quantity, 1, NOW())";
+        }
+
+        if (!mysqli_query($conn, $payment_sql)) {
+            echo json_encode(['status' => 'error', 'message' => 'Jobwork order payment save failed: ' . mysqli_error($conn)]);
+            exit;
+        }
+
+        $pm_saved = auragold_payment_merge_stored_details($payment_merged);
+        try {
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'jobwork_order_metal_exchange',
+                (int) $jwo_id,
+                $jobwork_no_plain,
+                substr(trim((string) $doc_date_ymd), 0, 10),
+                $pm_saved,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___jwo_me_ref,
+                'Jobwork Order — Metal Exchange',
+                'jwo_me',
+                'JWO-ME-',
+                $metal_exchange_barcodes_out
+            );
+        } catch (Throwable $e) {
+            auragold_jwo_json_error_and_exit($e->getMessage());
+        }
+    }
+}
+
 $sale_order_no = mysqli_real_escape_string($conn, $sale_order['order_no']);
 $customer_name = mysqli_real_escape_string($conn, $sale_order['customer_name'] ?? '');
 $order_date = !empty($sale_order['order_date']) ? mysqli_real_escape_string($conn, $sale_order['order_date']) : 'NULL';
@@ -442,9 +595,47 @@ if ($jwo_id > 0) {
             }
         }
     }
-    if ($log_activity) {
+    // Assigned to dept + user on JWO: no manufacturing queue inward row (transfers only on manufacturing-process).
+    if ($log_activity && !($new_dept > 0 && $new_user > 0)) {
         auragold_jwo_log_manufacturing_queue_activity($conn, $jwo_id, $new_dept, $department_user_id);
     }
+    require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+    $rjw_apply_upd = @getRecord('SELECT jobwork_no, order_date FROM tbl_jobwork_orders WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+    if ($rjw_apply_upd && (int) $jwo_id > 0) {
+        $od_jwu = substr(trim((string) ($rjw_apply_upd['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od_jwu)) {
+            $od_jwu = date('Y-m-d');
+        }
+        try {
+            auragold_voucher_apply_pending_diamond_stone_from_post(
+                $conn,
+                'jobwork_order',
+                (int) $jwo_id,
+                trim((string) ($rjw_apply_upd['jobwork_no'] ?? '')),
+                $od_jwu
+            );
+        } catch (Throwable $e) {
+            auragold_jwo_json_error_and_exit($e->getMessage());
+        }
+    }
+    if (!empty($jwo_payments) && isset($rjw_apply_upd) && is_array($rjw_apply_upd)) {
+        $__jwo_pay_dt = substr(trim((string) ($rjw_apply_upd['order_date'] ?? '')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__jwo_pay_dt)) {
+            $__jwo_pay_dt = date('Y-m-d');
+        }
+        auragold_jobwork_order_persist_sale_order_payments_and_post_me(
+            $conn,
+            (int) $sale_order_id,
+            (int) $jwo_id,
+            true,
+            trim((string) ($rjw_apply_upd['jobwork_no'] ?? '')),
+            $__jwo_pay_dt,
+            $jwo_payments,
+            $metal_exchange_barcodes_out
+        );
+    }
+    require_once __DIR__ . '/../includes/auragold_jobwork_order_customer_ledger.php';
+    auragold_jobwork_order_sync_customer_ledger($conn, (int) $sale_order_id, (int) $jwo_id);
     require_once __DIR__ . '/../includes/auragold_notifications.php';
     $rjw = @getRecord('SELECT jobwork_no, customer_name, order_date, due_date FROM tbl_jobwork_orders WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
     if (is_array($rjw)) {
@@ -464,7 +655,7 @@ if ($jwo_id > 0) {
             'ref_id' => (int) $jwo_id,
         ]);
     }
-    echo json_encode(['status' => 'success', 'message' => 'Job work order updated', 'jwo_id' => $jwo_id]);
+    echo json_encode(['status' => 'success', 'message' => 'Job work order updated', 'jwo_id' => $jwo_id, 'new_barcodes' => $metal_exchange_barcodes_out]);
     exit;
 }
 
@@ -578,9 +769,51 @@ auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
 auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
 mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'processing' WHERE id = $sale_order_id");
 
-if ($department_id !== null && (int)$department_id > 0) {
-    auragold_jwo_log_manufacturing_queue_activity($conn, $new_jwo_id, (int)$department_id, $department_user_id);
+$new_jwo_dept = ($department_id !== null && (int)$department_id > 0) ? (int)$department_id : 0;
+$new_jwo_user = ($department_user_id !== null && (int)$department_user_id > 0) ? (int)$department_user_id : 0;
+if ($new_jwo_dept > 0 && $new_jwo_user < 1) {
+    auragold_jwo_log_manufacturing_queue_activity($conn, $new_jwo_id, $new_jwo_dept, $department_user_id);
 }
+
+require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+$rjw_apply_ins = @getRecord('SELECT jobwork_no, order_date FROM tbl_jobwork_orders WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+if ($rjw_apply_ins && (int) $new_jwo_id > 0) {
+    $od_jwi = substr(trim((string) ($rjw_apply_ins['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $od_jwi)) {
+        $od_jwi = date('Y-m-d');
+    }
+    try {
+        auragold_voucher_apply_pending_diamond_stone_from_post(
+            $conn,
+            'jobwork_order',
+            (int) $new_jwo_id,
+            trim((string) ($rjw_apply_ins['jobwork_no'] ?? '')),
+            $od_jwi
+        );
+    } catch (Throwable $e) {
+        auragold_jwo_json_error_and_exit($e->getMessage());
+    }
+}
+
+if (!empty($jwo_payments) && isset($rjw_apply_ins) && is_array($rjw_apply_ins)) {
+    $__jwo_ins_pay_dt = substr(trim((string) ($rjw_apply_ins['order_date'] ?? '')), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__jwo_ins_pay_dt)) {
+        $__jwo_ins_pay_dt = date('Y-m-d');
+    }
+    auragold_jobwork_order_persist_sale_order_payments_and_post_me(
+        $conn,
+        (int) $sale_order_id,
+        (int) $new_jwo_id,
+        false,
+        trim((string) ($rjw_apply_ins['jobwork_no'] ?? $jobwork_no)),
+        $__jwo_ins_pay_dt,
+        $jwo_payments,
+        $metal_exchange_barcodes_out
+    );
+}
+
+require_once __DIR__ . '/../includes/auragold_jobwork_order_customer_ledger.php';
+auragold_jobwork_order_sync_customer_ledger($conn, (int) $sale_order_id, (int) $new_jwo_id);
 
 require_once __DIR__ . '/../includes/auragold_notifications.php';
 $rjw_new = @getRecord('SELECT jobwork_no, customer_name, order_date, due_date FROM tbl_jobwork_orders WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
@@ -608,5 +841,6 @@ echo json_encode([
     'jwo_id' => $new_jwo_id,
     'job_work_no' => $jobwork_no,
     'jobwork_no' => $jobwork_no,
-    'sale_order_id' => $sale_order_id
+    'sale_order_id' => $sale_order_id,
+    'new_barcodes' => $metal_exchange_barcodes_out,
 ]);

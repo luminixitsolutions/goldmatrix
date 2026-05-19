@@ -182,6 +182,7 @@ $dashboard_metals = [
 ];
 
 require_once __DIR__ . '/includes/dashboard_carat_master.php';
+require_once __DIR__ . '/includes/auragold_dashboard_metal_images.php';
 if (isset($conn) && $conn) {
     auragold_dashboard_apply_carat_master_rows($conn, $dashboard_metals);
 }
@@ -191,6 +192,12 @@ $__db_rates = auragold_load_dashboard_metals_from_db(isset($conn) ? $conn : null
 $dashboard_metals = $__db_rates['metals'];
 if (!empty($__db_rates['rates_updated'])) {
     $rates_updated = $__db_rates['rates_updated'];
+}
+
+if (isset($conn) && $conn) {
+    require_once __DIR__ . '/includes/auragold_metal_dashboard_image_schema.php';
+    auragold_ensure_tbl_metal_dashboard_images($conn);
+    $dashboard_metals = auragold_dashboard_filter_metals_by_master_visibility($conn, $dashboard_metals);
 }
 
 /** Today's gold strip (24K–18K): tbl_settings matches sale invoices; dashboard cards fill gaps. Skip global tbl_settings when viewing a branch-specific rate sheet. */
@@ -224,20 +231,15 @@ if (isset($dashboard_metals['gold']['cards']) && is_array($dashboard_metals['gol
     }
 }
 
-/** Shared hero/marquee image URLs for metals (CDN); single source for ticker + summary cards. */
-$dash_dashboard_metal_img_urls = [
-    'gold'     => 'https://media.istockphoto.com/id/1184141145/vector/one-gold-bar-or-ingot.jpg?s=612x612&w=0&k=20&c=TrVTJvRAg2AGdkg2Bc1tQKhZ1EQc23dNT_3AaVqeelM=',
-    'silver'   => 'https://cdn.prod.website-files.com/60c747bc971620e1ec0658df/610060a76a037c23fce2df91_Depositphotos_26360155_l-2015.jpeg',
-    'platinum' => 'https://static.paliapedia.com/images/items/256/mineral-bar-platinum.webp',
-    'diamond'  => 'https://www.reinersjewelry.com/cdn/shop/articles/040716_ts_diamond_feat_free_860x.jpg?v=1605765723',
-];
-require_once __DIR__ . '/includes/auragold_dashboard_metal_images.php';
+/** Hero + ticker: only Masters images (Carat / Metal upload or URL). No stock placeholders. */
+$dash_dashboard_metal_img_urls = [];
+$dash_carat_row_imgs = [];
 if (isset($conn) && $conn) {
     $dash_dashboard_metal_img_urls = array_merge(
-        $dash_dashboard_metal_img_urls,
         auragold_dashboard_metal_images_from_carats($conn),
         auragold_dashboard_metal_images_from_tbl_metal($conn)
     );
+    $dash_carat_row_imgs = auragold_dashboard_carat_images_map_by_metal_key($conn);
 }
 
 /** One-line marquee: Gold | Silver | Diamond — bold karat/purity, faint values, · between pairs. */
@@ -247,91 +249,95 @@ $dash_mq_h = static function ($s) {
 $dash_mq_join_pairs = static function (array $pairs) {
     return implode('<span class="dash-mq-sep-in" aria-hidden="true">·</span>', $pairs);
 };
+$dash_mq_img_snippet = static function ($url, string $cssClass) use ($dash_mq_h): string {
+    $url = trim((string) $url);
+    if ($url === '') {
+        return '';
+    }
+    return '<img class="' . $dash_mq_h($cssClass) . '" src="' . $dash_mq_h($url) . '" alt="" width="28" height="28" loading="lazy" decoding="async">';
+};
+$dash_mq_pair_src = static function ($metalKey, $lab, array $rowImgs, array $metalImgs): string {
+    $lab = trim((string) $lab);
+    if ($lab !== '' && !empty($rowImgs[$metalKey][$lab])) {
+        return (string) $rowImgs[$metalKey][$lab];
+    }
+    return trim((string) ($metalImgs[$metalKey] ?? ''));
+};
 $dash_marquee_blocks = [];
-$dash_mq_gold_bar_img_html = '<img class="dash-mq-gold-img" src="' . $dash_mq_h($dash_dashboard_metal_img_urls['gold']) . '" alt="" width="28" height="28" loading="lazy" decoding="async">';
-$dash_mq_pair_gold = static function ($lab, $val) use ($dash_mq_h, $dash_mq_gold_bar_img_html) {
-    return '<span class="dash-mq-pair dash-mq-pair-gold">' . $dash_mq_gold_bar_img_html . '<span class="dash-mq-lab">' . $dash_mq_h($lab) . '</span><span class="dash-mq-val">' . $dash_mq_h($val) . '</span></span>';
-};
-$dash_mq_silver_bar_img_html = '<img class="dash-mq-silver-img" src="' . $dash_mq_h($dash_dashboard_metal_img_urls['silver']) . '" alt="" width="28" height="28" loading="lazy" decoding="async">';
-$dash_mq_pair_silver = static function ($lab, $val) use ($dash_mq_h, $dash_mq_silver_bar_img_html) {
-    return '<span class="dash-mq-pair dash-mq-pair-silver">' . $dash_mq_silver_bar_img_html . '<span class="dash-mq-lab">' . $dash_mq_h($lab) . '</span><span class="dash-mq-val">' . $dash_mq_h($val) . '</span></span>';
-};
-$dash_mq_platinum_bar_img_html = '<img class="dash-mq-platinum-img" src="' . $dash_mq_h($dash_dashboard_metal_img_urls['platinum']) . '" alt="" width="28" height="28" loading="lazy" decoding="async">';
-$dash_mq_pair_platinum = static function ($lab, $val) use ($dash_mq_h, $dash_mq_platinum_bar_img_html) {
-    return '<span class="dash-mq-pair dash-mq-pair-platinum">' . $dash_mq_platinum_bar_img_html . '<span class="dash-mq-lab">' . $dash_mq_h($lab) . '</span><span class="dash-mq-val">' . $dash_mq_h($val) . '</span></span>';
-};
-$dash_mq_diamond_feat_img_html = '<img class="dash-mq-diamond-img" src="' . $dash_mq_h($dash_dashboard_metal_img_urls['diamond']) . '" alt="" width="28" height="28" loading="lazy" decoding="async">';
-$dash_mq_pair_diamond = static function ($lab, $val) use ($dash_mq_h, $dash_mq_diamond_feat_img_html) {
-    return '<span class="dash-mq-pair dash-mq-pair-diamond">' . $dash_mq_diamond_feat_img_html . '<span class="dash-mq-lab">' . $dash_mq_h($lab) . '</span><span class="dash-mq-val">' . $dash_mq_h($val) . '</span></span>';
+$dash_mq_build_pair = static function (string $metalKey, string $lab, string $val) use (
+    $dash_mq_h,
+    $dash_mq_img_snippet,
+    $dash_mq_pair_src,
+    $dash_carat_row_imgs,
+    $dash_dashboard_metal_img_urls
+): string {
+    $mk = strtolower($metalKey);
+    $layouts = [
+        'gold' => ['wrap' => 'dash-mq-pair dash-mq-pair-gold', 'img' => 'dash-mq-gold-img'],
+        'silver' => ['wrap' => 'dash-mq-pair dash-mq-pair-silver', 'img' => 'dash-mq-silver-img'],
+        'platinum' => ['wrap' => 'dash-mq-pair dash-mq-pair-platinum', 'img' => 'dash-mq-platinum-img'],
+        'diamond' => ['wrap' => 'dash-mq-pair dash-mq-pair-diamond', 'img' => 'dash-mq-diamond-img'],
+    ];
+    $L = isset($layouts[$mk]) ? $layouts[$mk] : ['wrap' => 'dash-mq-pair dash-mq-pair-custom', 'img' => 'dash-mq-custom-img'];
+    $src = $dash_mq_pair_src($metalKey, $lab, $dash_carat_row_imgs, $dash_dashboard_metal_img_urls);
+    $imgHtml = $dash_mq_img_snippet($src, $L['img']);
+    return '<span class="' . $dash_mq_h($L['wrap']) . '">'
+        . $imgHtml
+        . '<span class="dash-mq-lab">' . $dash_mq_h($lab) . '</span>'
+        . '<span class="dash-mq-val">' . $dash_mq_h($val) . '</span>'
+        . '</span>';
 };
 $__pairs_g = [];
-/** Gold pairs: order & labels from Carat master (tbl_carat → dashboard cards); values match dashboard + tbl_settings overlay for 24K–18K when global branch. */
-$__gold_marquee_cards = (isset($dashboard_metals['gold']['cards']) && is_array($dashboard_metals['gold']['cards']))
-    ? $dashboard_metals['gold']['cards']
-    : [];
-if ($__gold_marquee_cards !== []) {
-    foreach ($__gold_marquee_cards as $__gc) {
-        $__lab = trim((string) ($__gc['label'] ?? ''));
-        if ($__lab === '') {
-            continue;
+/** Gold pairs: only when this metal is enabled in Masters; labels from Carat master where set. */
+if (isset($dashboard_metals['gold'])) {
+    $__gold_mq_label = trim((string) ($dashboard_metals['gold']['label'] ?? '')) ?: 'Gold';
+    $__gold_marquee_cards = (isset($dashboard_metals['gold']['cards']) && is_array($dashboard_metals['gold']['cards']))
+        ? $dashboard_metals['gold']['cards']
+        : [];
+    if ($__gold_marquee_cards !== []) {
+        foreach ($__gold_marquee_cards as $__gc) {
+            $__lab = trim((string) ($__gc['label'] ?? ''));
+            if ($__lab === '') {
+                continue;
+            }
+            $__val = trim((string) ($__gc['value'] ?? '0'));
+            if ($dash_rates_branch_id <= 0 && array_key_exists($__lab, $dash_today_gold_bar) && $dash_today_gold_bar[$__lab] !== null) {
+                $__val = number_format((float) $dash_today_gold_bar[$__lab], 2);
+            }
+            $__pairs_g[] = $dash_mq_build_pair('gold', $__lab, $__val);
         }
-        $__val = trim((string) ($__gc['value'] ?? '0'));
-        if ($dash_rates_branch_id <= 0 && array_key_exists($__lab, $dash_today_gold_bar) && $dash_today_gold_bar[$__lab] !== null) {
-            $__val = number_format((float) $dash_today_gold_bar[$__lab], 2);
+    } else {
+        foreach (['24K', '22K', '21K', '18K'] as $__gk) {
+            $__gv = $dash_today_gold_bar[$__gk] ?? null;
+            if ($__gv === null) {
+                $__gv = 0.0;
+            }
+            $__pairs_g[] = $dash_mq_build_pair('gold', $__gk, number_format((float) $__gv, 2));
         }
-        $__pairs_g[] = $dash_mq_pair_gold($__lab, $__val);
     }
-} else {
-    foreach (['24K', '22K', '21K', '18K'] as $__gk) {
-        $__gv = $dash_today_gold_bar[$__gk] ?? null;
-        if ($__gv === null) {
-            $__gv = 0.0;
-        }
-        $__pairs_g[] = $dash_mq_pair_gold($__gk, number_format((float) $__gv, 2));
+    if ($__pairs_g !== []) {
+        $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h($__gold_mq_label) . '</span>' . $dash_mq_join_pairs($__pairs_g) . '</span>';
     }
 }
-$dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h('Gold') . '</span>' . $dash_mq_join_pairs($__pairs_g) . '</span>';
-$__pairs_s = [];
-if (!empty($dashboard_metals['silver']['cards']) && is_array($dashboard_metals['silver']['cards'])) {
-    foreach ($dashboard_metals['silver']['cards'] as $__c) {
+foreach ($dashboard_metals as $mq_key => $mq_dm) {
+    if ($mq_key === 'gold') {
+        continue;
+    }
+    $__pairs_x = [];
+    $__mq_cards = (isset($mq_dm['cards']) && is_array($mq_dm['cards'])) ? $mq_dm['cards'] : [];
+    foreach ($__mq_cards as $__c) {
         $__lab = trim((string) ($__c['label'] ?? ''));
         if ($__lab === '') {
             continue;
         }
         $__val = trim((string) ($__c['value'] ?? '0'));
-        $__pairs_s[] = $dash_mq_pair_silver($__lab, $__val);
+        $__pairs_x[] = $dash_mq_build_pair((string) $mq_key, $__lab, $__val);
     }
-}
-if ($__pairs_s !== []) {
-    $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h('Silver') . '</span>' . $dash_mq_join_pairs($__pairs_s) . '</span>';
-}
-$__pairs_p = [];
-if (!empty($dashboard_metals['platinum']['cards']) && is_array($dashboard_metals['platinum']['cards'])) {
-    foreach ($dashboard_metals['platinum']['cards'] as $__c) {
-        $__lab = trim((string) ($__c['label'] ?? ''));
-        if ($__lab === '') {
-            continue;
-        }
-        $__val = trim((string) ($__c['value'] ?? '0'));
-        $__pairs_p[] = $dash_mq_pair_platinum($__lab, $__val);
+    if ($__pairs_x === []) {
+        continue;
     }
-}
-if ($__pairs_p !== []) {
-    $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h('Platinum') . '</span>' . $dash_mq_join_pairs($__pairs_p) . '</span>';
-}
-$__pairs_d = [];
-if (!empty($dashboard_metals['diamond']['cards']) && is_array($dashboard_metals['diamond']['cards'])) {
-    foreach ($dashboard_metals['diamond']['cards'] as $__c) {
-        $__lab = trim((string) ($__c['label'] ?? ''));
-        if ($__lab === '') {
-            continue;
-        }
-        $__val = trim((string) ($__c['value'] ?? '0'));
-        $__pairs_d[] = $dash_mq_pair_diamond($__lab, $__val);
-    }
-}
-if ($__pairs_d !== []) {
-    $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h('Diamond') . '</span>' . $dash_mq_join_pairs($__pairs_d) . '</span>';
+    $__sec_lab = trim((string) ($mq_dm['label'] ?? '')) ?: $mq_key;
+    $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h($__sec_lab) . '</span>' . $dash_mq_join_pairs($__pairs_x) . '</span>';
 }
 $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</span>', $dash_marquee_blocks);
 ?>
@@ -468,6 +474,9 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
         .dash-summary-card.metal-accent-platinum {
             background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
         }
+        .dash-summary-card.metal-accent-other {
+            background: linear-gradient(135deg, #6d7a8c 0%, #475569 100%);
+        }
         .dash-summary-card .dash-metal-icon {
             position: absolute;
             right: 18px;
@@ -585,6 +594,13 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
             min-height: 96px;
             transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
+        .rate-card > .dash-snap-carat-img {
+            width: 52px;
+            height: 52px;
+            object-fit: contain;
+            flex-shrink: 0;
+            pointer-events: none;
+        }
         .rate-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 14px 28px rgba(0,0,0,0.09);
@@ -627,6 +643,8 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
         .d10{border-color:#a5b4fc;color:#4f46e5}
         .d15{border-color:#c4b5fd;color:#6d28d9}
         .d20{border-color:#e9d5ff;color:#7c3aed}
+
+        .cc-other{border-color:#64748b;color:#334155}
 
         .card-value { font-size: 20px; font-weight: 700; color: #2c3b60; }
         .card-date { font-size: 12px; color: #868686; margin-top: 4px; }
@@ -770,6 +788,21 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
             font-size: 0.88rem;
             color: #64748b;
         }
+        .dash-rate-conversions {
+            margin-bottom: 14px;
+        }
+        .dash-rate-conversions label {
+            display: block;
+            font-weight: 650;
+            font-size: 0.95rem;
+            color: #1e3a8a;
+            margin-bottom: 8px;
+        }
+        .dash-rate-conversions select.form-control {
+            border-radius: 8px;
+            border: 1px solid #93c5fd;
+            max-width: 100%;
+        }
         .dash-rates-table {
             border-collapse: separate;
             border-spacing: 0;
@@ -860,6 +893,16 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
             background: #fff !important;
         }
+        .gold-snap-card .dash-snap-carat-img {
+            width: 56px;
+            min-width: 56px;
+            align-self: center;
+            max-height: 88px;
+            object-fit: contain;
+            padding: 6px 4px;
+            flex-shrink: 0;
+            pointer-events: none;
+        }
         .gold-snap-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1) !important;
@@ -949,7 +992,8 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
         .dash-today-gold-bar .dash-mq-gold-img,
         .dash-today-gold-bar .dash-mq-silver-img,
         .dash-today-gold-bar .dash-mq-platinum-img,
-        .dash-today-gold-bar .dash-mq-diamond-img {
+        .dash-today-gold-bar .dash-mq-diamond-img,
+        .dash-today-gold-bar .dash-mq-custom-img {
             display: inline-block;
             height: 22px;
             width: auto;
@@ -964,7 +1008,8 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
             .dash-today-gold-bar .dash-mq-gold-img,
             .dash-today-gold-bar .dash-mq-silver-img,
             .dash-today-gold-bar .dash-mq-platinum-img,
-            .dash-today-gold-bar .dash-mq-diamond-img {
+            .dash-today-gold-bar .dash-mq-diamond-img,
+            .dash-today-gold-bar .dash-mq-custom-img {
                 height: 18px;
                 max-height: 18px;
                 max-width: 28px;
@@ -1007,6 +1052,14 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
         .dash-mq-pair-diamond .dash-mq-diamond-img {
             margin-right: 0;
         }
+        .dash-mq-pair-custom {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .dash-mq-pair-custom .dash-mq-custom-img {
+            margin-right: 0;
+        }
         .dash-mq-lab {
             font-weight: 700;
             color: #0f172a;
@@ -1032,6 +1085,70 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
             font-size: 1.08em;
             vertical-align: middle;
         }
+        @media (max-width: 767.98px) {
+            .dash-mobile-root {
+                max-width: 100%;
+                overflow-x: hidden;
+            }
+            .dash-branch-rates-bar {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            .dash-branch-rates-bar .form-control {
+                max-width: 100% !important;
+            }
+            .metal-tabs-wrap .nav-link {
+                padding: 10px 12px;
+                margin: 0 2px;
+                font-size: 0.82rem;
+            }
+            .dash-gold-chart-wrap {
+                height: 220px;
+            }
+            .dash-marquee-group {
+                font-size: 0.82rem;
+                padding: 9px 20px;
+            }
+        }
+        /*
+         * Below lg, layout-content forces .row { margin: 0 }, so Bootstrap’s negative row margin
+         * no longer cancels column horizontal padding — rate cards stay inset vs .dash-summary.
+         * Drop horizontal padding on tab columns so white panels match headline card width.
+         */
+        @media (max-width: 991.98px) {
+            .dash-mobile-root .metal-tabs-wrap,
+            .dash-mobile-root #metalRateTabContent {
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+            .dash-mobile-root #metalRateTabContent .tab-pane > .row {
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+            .dash-mobile-root #metalRateTabContent .tab-pane > .row > [class*="col-"] {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            .dash-mobile-root #metalRateTabContent .tab-pane > .row > [class*="col-"]:not(:last-child) {
+                margin-bottom: 1rem;
+            }
+            .dash-mobile-root #metalRateTabContent .dash-gold-analytics-card .row {
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+            .dash-mobile-root #metalRateTabContent .dash-gold-analytics-card .row > [class*="col-"] {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            .dash-mobile-root #metalRateTabContent .dash-gold-analytics-card .row > [class*="col-"]:not(:last-child) {
+                margin-bottom: 0.75rem;
+            }
+            .dash-mobile-root #metalRateTabContent .white-box .row > [class*="col-"] {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+        }
         @keyframes dash-marquee-scroll {
             from { transform: translateX(0); }
             to { transform: translateX(-50%); }
@@ -1053,6 +1170,8 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
 
 <div class="row">
 <div class="col-12 p-3">
+
+<div class="dash-mobile-root">
 
 <div class="dash-today-gold-bar" role="region" aria-label="Metal rates">
   <div class="dash-marquee-viewport">
@@ -1174,7 +1293,12 @@ $dash_metal_icons = [
     $i = 0;
     foreach ($dashboard_metals as $key => $m) {
         $active = $i === 0 ? ' active' : '';
-        $itemClass = 'nav-item nav-item-' . preg_replace('/[^a-z]/', '', $key);
+        $coreTabs = ['gold', 'silver', 'platinum', 'diamond'];
+        if (in_array((string) $key, $coreTabs, true)) {
+            $itemClass = 'nav-item nav-item-' . (string) $key;
+        } else {
+            $itemClass = 'nav-item nav-item-extra-' . preg_replace('/[^a-zA-Z0-9_-]/', 'x', (string) $key);
+        }
     ?>
     <?php $tab_icon = $dash_metal_icons[$key] ?? 'fa fa-circle'; ?>
     <li class="<?= htmlspecialchars($itemClass, ENT_QUOTES, 'UTF-8') ?>" role="presentation">
@@ -1199,12 +1323,31 @@ $dash_metal_icons = [
         ? 'Today Gold Rate'
         : (($key === 'silver')
             ? 'Today Silver Rate'
-            : (($key === 'platinum') ? 'Today Platinum Rate' : 'Today Diamond Rate'));
+            : (($key === 'platinum')
+                ? 'Today Platinum Rate'
+                : (($key === 'diamond')
+                    ? 'Today Diamond Rate'
+                    : ('Today ' . trim((string) ($m['label'] ?? '')) . ' rate'))));
     ?>
     <div class="row g-4">
-      <div class="col-lg-6">
+      <div class="col-12 col-lg-6">
         <div class="white-box dash-rate-form-card">
           <div class="dash-rate-form-head">
+            <?php
+            $dash_rate_conv_uid = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string) $key);
+            ?>
+            <div class="dash-rate-conversions">
+              <label for="dashRateConversionUrls-<?= htmlspecialchars($dash_rate_conv_uid, ENT_QUOTES, 'UTF-8') ?>">Rate Conversions</label>
+              <select id="dashRateConversionUrls-<?= htmlspecialchars($dash_rate_conv_uid, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" autocomplete="off"
+                onchange="var u=this.value;if(u){window.open(u,'_blank','noopener,noreferrer');}this.selectedIndex=0;">
+                <option value="">Select URL…</option>
+                <option value="https://dubaicityofgold.com/">https://dubaicityofgold.com/</option>
+                <option value="https://igold.ae/gold-rate">https://igold.ae/gold-rate</option>
+                <option value="https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate">https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate</option>
+                <option value="https://www.kitco.com/">https://www.kitco.com/</option>
+                <option value="https://goldprice.org/">https://goldprice.org/</option>
+              </select>
+            </div>
             <?php if ($key === 'gold'): ?>
             <h3>Gold rate sheet</h3>
             <p>Enter values in <strong class="js-base-cur-label"><?= htmlspecialchars($base_currency_label, ENT_QUOTES, 'UTF-8') ?></strong> per gram. Saving updates the dashboard, snapshots, and analysis.</p>
@@ -1269,7 +1412,7 @@ $dash_metal_icons = [
         </div>
       </div>
 
-      <div class="col-lg-6">
+      <div class="col-12 col-lg-6">
         <div class="white-box h-100<?= $key === 'gold' ? ' today-rate-panel' : '' ?>">
           <div class="sec-title">
             <?php if ($key === 'gold'): ?>
@@ -1278,8 +1421,10 @@ $dash_metal_icons = [
             <i class="fa fa-ring" aria-hidden="true"></i>
             <?php elseif ($key === 'platinum'): ?>
             <i class="fa fa-circle" aria-hidden="true"></i>
-            <?php else: ?>
+            <?php elseif ($key === 'diamond'): ?>
             <i class="fa fa-gem" aria-hidden="true"></i>
+            <?php else: ?>
+            <i class="fa fa-layer-group" aria-hidden="true"></i>
             <?php endif; ?>
             <?= htmlspecialchars($snapshot_title, ENT_QUOTES, 'UTF-8') ?>
           </div>
@@ -1291,6 +1436,12 @@ $dash_metal_icons = [
             ?>
             <div class="gold-snap-card rate-card">
               <div class="circle <?= htmlspecialchars($c['class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($c['label'], ENT_QUOTES, 'UTF-8') ?></div>
+              <?php
+              $snap_img = trim((string) ($c['image_url'] ?? ''));
+              if ($snap_img !== '') {
+              ?>
+              <img class="dash-snap-carat-img" src="<?= htmlspecialchars($snap_img, ENT_QUOTES, 'UTF-8') ?>" alt="" loading="lazy" decoding="async">
+              <?php } ?>
               <div class="gold-snap-body">
                 <div class="card-value"><span class="js-gold-snapshot js-dash-num" data-karat-label="<?= htmlspecialchars($c['label'], ENT_QUOTES, 'UTF-8') ?>" data-is-diamond="0" data-base="<?= htmlspecialchars((string) $cv_base, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($c['value'], ENT_QUOTES, 'UTF-8') ?></span> <span class="js-dash-cur"><?= htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') ?></span></div>
                 <div class="card-unit">per gram (ref.)</div>
@@ -1308,6 +1459,12 @@ $dash_metal_icons = [
             ?>
             <div class="col-md-6">
               <div class="rate-card">
+                <?php
+                $rc_img = trim((string) ($c['image_url'] ?? ''));
+                if ($rc_img !== '') {
+                ?>
+                <img class="dash-snap-carat-img" src="<?= htmlspecialchars($rc_img, ENT_QUOTES, 'UTF-8') ?>" alt="" loading="lazy" decoding="async">
+                <?php } ?>
                 <div class="circle <?= htmlspecialchars($c['class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($c['label'], ENT_QUOTES, 'UTF-8') ?></div>
                 <div>
                   <div class="card-value"><span class="js-dash-num" data-is-diamond="<?= $is_dm_card ? '1' : '0' ?>" data-base="<?= htmlspecialchars((string) $cv_base, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($c['value'], ENT_QUOTES, 'UTF-8') ?></span> <span class="js-dash-cur"><?= htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') ?></span></div>
@@ -1366,6 +1523,7 @@ $dash_metal_icons = [
       $i++;
   }
   ?>
+</div>
 </div>
 
 </div>

@@ -6,205 +6,16 @@
 require_once __DIR__ . '/includes/session_init.php';
 require_once __DIR__ . '/config.php';
 
-$hasPendingTable = false;
-$__t = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_stock_transfer_pending'");
-if ($__t && mysqli_num_rows($__t) > 0) {
-    $hasPendingTable = true;
-}
-if ($__t) {
-    mysqli_free_result($__t);
-}
-
 if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
     header('Location: index.php');
     exit;
 }
 
-$refChk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock LIKE 'reference_type'");
-$hasRefType = ($refChk && mysqli_num_rows($refChk) > 0);
-if ($refChk) {
-    mysqli_free_result($refChk);
-}
+require_once __DIR__ . '/includes/stock_transfer_history_fetch.php';
 
-$stoneCol = '';
-$diamondCol = '';
-$metalCostCol = 'ow.value AS metal_cost';
-$stoneCostCol = '0 AS stone_cost';
-$makingCostCol = '0 AS making_cost';
-
-$sc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock");
-if ($sc) {
-    $fields = [];
-    while ($r = mysqli_fetch_assoc($sc)) {
-        $fields[$r['Field']] = true;
-    }
-    mysqli_free_result($sc);
-    if (!empty($fields['stone_wt'])) {
-        $stoneCol = 'ow.stone_wt AS stone_wt';
-    } else {
-        $stoneCol = '0 AS stone_wt';
-    }
-    if (!empty($fields['diamond_wt'])) {
-        $diamondCol = 'ow.diamond_wt AS diamond_wt';
-    } else {
-        $diamondCol = '0 AS diamond_wt';
-    }
-    if (!empty($fields['metal_value'])) {
-        $metalCostCol = 'COALESCE(ow.metal_value, ow.value, 0) AS metal_cost';
-    }
-    if (!empty($fields['stone_amt']) || !empty($fields['stone_amount'])) {
-        $f = !empty($fields['stone_amt']) ? 'ow.stone_amt' : 'ow.stone_amount';
-        $stoneCostCol = 'COALESCE(' . $f . ', 0) AS stone_cost';
-    }
-    if (!empty($fields['making_amt']) || !empty($fields['making_amount'])) {
-        $f = !empty($fields['making_amt']) ? 'ow.making_amt' : 'ow.making_amount';
-        $makingCostCol = 'COALESCE(' . $f . ', 0) AS making_cost';
-    }
-}
-
-$refWhere = '';
-if ($hasRefType) {
-    $refWhere = " AND ow.reference_type = 'stock_transfer' ";
-} else {
-    $refWhere = '';
-}
-
-if ($hasPendingTable) {
-    // One pending row per outward: prefer the line that was received (received_stock_id set), else latest id.
-    // Dest join: use received_stock_id; if no pending row, legacy 45s match; if pending but not linked yet, match purchase at destination branch.
-    $sql = "
-SELECT
-    ow.id AS outward_id,
-    ow.transaction_date,
-    ow.created_at,
-    ow.branch_id AS from_branch_id,
-    bf.name AS from_branch_name,
-    CASE
-        WHEN pen.id IS NOT NULL AND pen.to_branch_id IS NOT NULL AND pen.to_branch_id > 0 THEN pen.to_branch_id
-        ELSE COALESCE(dest.branch_id, pen.to_branch_id)
-    END AS to_branch_id,
-    bt.name AS to_branch_name,
-    ow.barcode,
-    p.name AS product_name,
-    COALESCE(dest.final_weight, ow.final_weight) AS gross_wt,
-    COALESCE(dest.current_weight, ow.current_weight) AS net_wt,
-    COALESCE(dest.current_qty, ow.current_qty) AS qty,
-    $diamondCol,
-    $stoneCol,
-    COALESCE(dest.value, ow.value) AS purchase_value,
-    $metalCostCol,
-    $stoneCostCol,
-    $makingCostCol,
-    COALESCE(pen.status, '') AS transfer_pending_status,
-    pen.received_stock_id AS transfer_received_stock_id,
-    dest.id AS dest_stock_id,
-    '' AS against_ref
-FROM tbl_stock ow
-LEFT JOIN tbl_stock_transfer_pending pen ON pen.id = (
-    SELECT p2.id FROM tbl_stock_transfer_pending p2
-    WHERE p2.outward_stock_id = ow.id
-    ORDER BY (p2.received_stock_id IS NOT NULL AND p2.received_stock_id > 0) DESC, p2.id DESC
-    LIMIT 1
-)
-LEFT JOIN tbl_stock dest ON dest.id = COALESCE(
-    NULLIF(pen.received_stock_id, 0),
-    IF(pen.id IS NULL,
-        (SELECT d.id FROM tbl_stock d
-         WHERE d.stock_type = 'purchase'
-         AND d.product_id = ow.product_id
-         AND BINARY IFNULL(d.barcode,'') = BINARY IFNULL(ow.barcode,'')
-         AND DATE(d.transaction_date) = DATE(ow.transaction_date)
-         AND d.branch_id <> ow.branch_id
-         AND ABS(TIMESTAMPDIFF(SECOND, ow.created_at, d.created_at)) <= 45
-         ORDER BY d.id ASC
-         LIMIT 1),
-        (SELECT d.id FROM tbl_stock d
-         WHERE d.stock_type = 'purchase'
-         AND pen.id IS NOT NULL
-         AND (pen.received_stock_id IS NULL OR pen.received_stock_id = 0)
-         AND d.product_id = ow.product_id
-         AND BINARY IFNULL(d.barcode,'') = BINARY IFNULL(ow.barcode,'')
-         AND d.branch_id = pen.to_branch_id
-         AND d.branch_id <> ow.branch_id
-         AND ABS(TIMESTAMPDIFF(SECOND, ow.created_at, d.created_at)) <= 86400
-         ORDER BY d.id DESC
-         LIMIT 1)
-    )
-)
-AND (
-    pen.id IS NULL
-    OR pen.to_branch_id IS NULL
-    OR pen.to_branch_id = 0
-    OR dest.branch_id = pen.to_branch_id
-)
-LEFT JOIN tbl_branches bf ON ow.branch_id = bf.id
-LEFT JOIN tbl_branches bt ON bt.id = CASE
-    WHEN pen.id IS NOT NULL AND pen.to_branch_id IS NOT NULL AND pen.to_branch_id > 0 THEN pen.to_branch_id
-    ELSE COALESCE(dest.branch_id, pen.to_branch_id)
-END
-LEFT JOIN tbl_products p ON ow.product_id = p.id
-WHERE ow.stock_type = 'outward'
-$refWhere
-AND (dest.id IS NOT NULL OR pen.id IS NOT NULL)
-ORDER BY ow.created_at DESC
-LIMIT 5000
-";
-} else {
-    $sql = "
-SELECT
-    ow.id AS outward_id,
-    ow.transaction_date,
-    ow.created_at,
-    ow.branch_id AS from_branch_id,
-    bf.name AS from_branch_name,
-    dest.branch_id AS to_branch_id,
-    bt.name AS to_branch_name,
-    ow.barcode,
-    p.name AS product_name,
-    ow.final_weight AS gross_wt,
-    ow.current_weight AS net_wt,
-    ow.current_qty AS qty,
-    $diamondCol,
-    $stoneCol,
-    ow.value AS purchase_value,
-    $metalCostCol,
-    $stoneCostCol,
-    $makingCostCol,
-    '' AS transfer_pending_status,
-    '' AS against_ref
-FROM tbl_stock ow
-INNER JOIN tbl_stock dest ON dest.id = (
-    SELECT d.id FROM tbl_stock d
-    WHERE d.stock_type = 'purchase'
-    AND d.product_id = ow.product_id
-    AND BINARY IFNULL(d.barcode,'') = BINARY IFNULL(ow.barcode,'')
-    AND DATE(d.transaction_date) = DATE(ow.transaction_date)
-    AND d.branch_id <> ow.branch_id
-    AND ABS(TIMESTAMPDIFF(SECOND, ow.created_at, d.created_at)) <= 45
-    ORDER BY d.id ASC
-    LIMIT 1
-)
-LEFT JOIN tbl_branches bf ON ow.branch_id = bf.id
-LEFT JOIN tbl_branches bt ON dest.branch_id = bt.id
-LEFT JOIN tbl_products p ON ow.product_id = p.id
-WHERE ow.stock_type = 'outward'
-$refWhere
-ORDER BY ow.created_at DESC
-LIMIT 5000
-";
-}
-
-$rows = [];
-$sqlError = '';
-$q = @mysqli_query($conn, $sql);
-if ($q) {
-    while ($r = mysqli_fetch_assoc($q)) {
-        $rows[] = $r;
-    }
-    mysqli_free_result($q);
-} else {
-    $sqlError = mysqli_error($conn);
-}
+$result = auragold_stock_transfer_history_fetch($conn);
+$rows = $result['rows'];
+$sqlError = $result['error'];
 
 ?>
 <!DOCTYPE html>
@@ -225,7 +36,8 @@ if ($q) {
         gap: 10px;
         margin-bottom: 14px;
     }
-    .sth-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .sth-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; z-index: 20; }
+    .sth-toolbar-right .dropdown-menu { z-index: 2000; min-width: 11rem; }
     .sth-table-wrap { overflow: auto; background: #fff; border: 1px solid #e8e6f2; border-radius: 10px; }
     .sth-wrap .table thead th {
         background: #1a2d4a !important;
@@ -261,7 +73,6 @@ if ($q) {
     <div class="sth-toolbar">
         <div>
             <h5 class="mb-0" style="font-weight:650;color:#1d2c4f;">Stock Transfer History</h5>
-            <small class="text-muted">Outward moves with destination branch; <strong>In transit</strong> until receive posts purchase into <code>tbl_stock</code>.</small>
         </div>
         <div class="sth-toolbar-right">
             <a href="stock-transfer.php" class="btn btn-sm btn-primary"><i class="feather icon-shuffle"></i> New transfer</a>
@@ -270,7 +81,8 @@ if ($q) {
             <div class="dropdown">
                 <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-toggle="dropdown" aria-expanded="false">Export</button>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a class="dropdown-item" href="#" id="sthExportCsv">Export CSV</a>
+                    <a class="dropdown-item" href="#" id="sthExportExcel"><i class="feather icon-file-text text-success mr-2"></i>Excel</a>
+                    <a class="dropdown-item" href="#" id="sthExportPdf"><i class="feather icon-file text-danger mr-2"></i>PDF</a>
                 </div>
             </div>
         </div>
@@ -352,6 +164,7 @@ if ($q) {
     </div>
 </div>
 
+<?php include __DIR__ . '/footer-script.php'; ?>
 <script>
 (function () {
     if (typeof jQuery === 'undefined') return;
@@ -367,30 +180,13 @@ if ($q) {
             }
         });
 
-        $('#sthExportCsv').on('click', function (e) {
+        $('#sthExportExcel').on('click', function (e) {
             e.preventDefault();
-            if (typeof $.fn.dataTable.ext.buttons !== 'undefined') {
-                // fallback: simple CSV from visible rows
-            }
-            var csv = [];
-            var headers = [];
-            $('#sthTable thead th').each(function () {
-                headers.push('"' + $(this).text().replace(/"/g, '""') + '"');
-            });
-            csv.push(headers.join(','));
-            dt.rows({ search: 'applied' }).every(function () {
-                var row = [];
-                $(this.node()).find('td').each(function () {
-                    row.push('"' + $(this).text().replace(/"/g, '""').trim() + '"');
-                });
-                csv.push(row.join(','));
-            });
-            var blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-            var link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'stock-transfer-history.csv';
-            link.click();
-            URL.revokeObjectURL(link.href);
+            window.location.href = 'ajax/export-stock-transfer-history-excel.php';
+        });
+        $('#sthExportPdf').on('click', function (e) {
+            e.preventDefault();
+            window.location.href = 'ajax/export-stock-transfer-history-pdf.php';
         });
     });
 })();

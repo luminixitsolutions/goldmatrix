@@ -1,4 +1,4 @@
--- Ensures all 65 master voucher types exist (name match is case-insensitive).
+-- Ensures master voucher types exist (name match is case-insensitive).
 -- Safe to run multiple times. Adjusts only missing rows.
 
 INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
@@ -78,6 +78,10 @@ SELECT 'Payment Voucher', NULL, 'Payment Voucher', 'Rate X Gross Wt', 'Net Wt', 
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`name`)) = 'payment voucher' LIMIT 1);
 
 INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
+SELECT 'Purchase Payment Voucher', NULL, 'Purchase Payment Voucher', 'Rate X Gross Wt', 'Net Wt', 'Standard', 'Net Wt', 1, NOW()
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`name`)) = 'purchase payment voucher' LIMIT 1);
+
+INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
 SELECT 'PDC Clearance', NULL, 'PDC Clearance', 'Rate X Gross Wt', 'Net Wt', 'Standard', 'Net Wt', 1, NOW()
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`name`)) = 'pdc clearance' LIMIT 1);
 
@@ -96,6 +100,10 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`
 INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
 SELECT 'POS', NULL, 'POS', 'Rate X Gross Wt', 'Net Wt', 'Standard', 'Net Wt', 1, NOW()
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`name`)) = 'pos' LIMIT 1);
+
+INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
+SELECT 'Sale Receipt Voucher', NULL, 'Sale Receipt Voucher', 'Rate X Gross Wt', 'Net Wt', 'Standard', 'Net Wt', 1, NOW()
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `tbl_voucher_types` WHERE LOWER(TRIM(`name`)) = 'sale receipt voucher' LIMIT 1);
 
 INSERT INTO `tbl_voucher_types` (`name`, `method_of_numbering`, `type_of_voucher`, `calculate_amount_by`, `calculate_wastage_by`, `fixing_type`, `calculate_loss_by`, `status`, `created_at`)
 SELECT 'Task / Event', NULL, 'Task / Event', 'Rate X Gross Wt', 'Net Wt', 'Standard', 'Net Wt', 1, NOW()

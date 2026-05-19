@@ -723,6 +723,38 @@ body { background: #f4f6fb; }
 .active-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .active-yes { background: #22c55e; }
 .active-no { background: #cbd5e1; }
+/* Column drag + resize */
+.table thead th.jwm-th-interactive { position: relative; padding-right: 12px; vertical-align: middle; }
+.table thead th[data-col="check"] { padding-right: 8px; }
+.jwm-col-drag-handle {
+    display: inline-block;
+    cursor: grab;
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1;
+    margin-right: 4px;
+    vertical-align: middle;
+    user-select: none;
+    touch-action: none;
+}
+.jwm-col-drag-handle:active { cursor: grabbing; }
+.table thead th.jwm-th-dragging .jwm-col-drag-handle,
+.table thead th.jwm-th-dragging { opacity: 0.75; }
+.table thead th.jwm-th-drag-over { box-shadow: inset 0 -3px 0 #5b4bce; background: #eef2ff !important; }
+.jwm-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 4;
+    user-select: none;
+    touch-action: none;
+}
+.jwm-col-resizer:hover { background: rgba(91, 75, 206, 0.15); }
+body.jwm-col-resizing { cursor: col-resize !important; user-select: none !important; }
+body.jwm-col-resizing * { cursor: col-resize !important; }
 </style>
 <body>
 <?php include 'sidebar.php'; ?>
@@ -1064,6 +1096,9 @@ body { background: #f4f6fb; }
         { key: 'action', label: 'action' }
     ];
     var STORAGE_KEY = 'jwm_visible_cols';
+    var STORAGE_ORDER = 'jwm_col_order';
+    var STORAGE_WIDTHS = 'jwm_col_widths';
+    var PINNED_COL_START = ['check'];
 
     function getStored() {
         try {
@@ -1083,6 +1118,196 @@ body { background: #f4f6fb; }
                 el.classList.toggle('jwm-col-hidden', !show);
             });
         });
+    }
+
+    function defaultColumnOrder() {
+        return COLUMN_KEYS.map(function(c) { return c.key; });
+    }
+    function getStoredOrder() {
+        try {
+            var raw = localStorage.getItem(STORAGE_ORDER);
+            if (!raw) return null;
+            var arr = JSON.parse(raw);
+            if (!Array.isArray(arr) || !arr.length) return null;
+            var def = defaultColumnOrder();
+            var set = {};
+            def.forEach(function(k) { set[k] = true; });
+            var seen = {};
+            var out = [];
+            arr.forEach(function(k) {
+                if (set[k] && !seen[k]) { out.push(k); seen[k] = true; }
+            });
+            def.forEach(function(k) {
+                if (!seen[k]) { out.push(k); seen[k] = true; }
+            });
+            return out;
+        } catch (e) { return null; }
+    }
+    function setStoredOrder(order) {
+        try { localStorage.setItem(STORAGE_ORDER, JSON.stringify(order)); } catch (e) {}
+    }
+    function reorderRowByDataCol(tr, tag, order) {
+        order.forEach(function(key) {
+            var el = tr.querySelector(tag + '[data-col="' + key + '"]');
+            if (el) tr.appendChild(el);
+        });
+    }
+    function applyColumnOrder(order) {
+        if (!table || !order || !order.length) return;
+        var headRow = table.querySelector('thead tr');
+        if (headRow) reorderRowByDataCol(headRow, 'th', order);
+        table.querySelectorAll('tbody tr').forEach(function(tr) {
+            if (!tr.querySelector('td[data-col]')) return;
+            reorderRowByDataCol(tr, 'td', order);
+        });
+    }
+    function normalizeOrderWithPins(order) {
+        var o = order.slice();
+        var pinned = PINNED_COL_START.slice();
+        o = o.filter(function(k) { return pinned.indexOf(k) === -1; });
+        return pinned.concat(o);
+    }
+    function getStoredWidths() {
+        try {
+            var raw = localStorage.getItem(STORAGE_WIDTHS);
+            if (!raw) return {};
+            var o = JSON.parse(raw);
+            return (o && typeof o === 'object') ? o : {};
+        } catch (e) { return {}; }
+    }
+    function setStoredWidths(w) {
+        try { localStorage.setItem(STORAGE_WIDTHS, JSON.stringify(w || {})); } catch (e) {}
+    }
+    function applyColumnWidths(widths) {
+        if (!table || !widths) return;
+        Object.keys(widths).forEach(function(key) {
+            var px = parseInt(widths[key], 10);
+            if (!px || px < 40) return;
+            table.querySelectorAll('th[data-col="' + key + '"], td[data-col="' + key + '"]').forEach(function(el) {
+                el.style.width = px + 'px';
+                el.style.minWidth = px + 'px';
+            });
+        });
+    }
+
+    function initColumnDragAndResize() {
+        if (!table) return;
+        var headRow = table.querySelector('thead tr');
+        if (!headRow) return;
+
+        headRow.querySelectorAll('th[data-col]').forEach(function(th) {
+            var key = th.getAttribute('data-col');
+            if (!key) return;
+            if (PINNED_COL_START.indexOf(key) >= 0) {
+                var rz0 = document.createElement('span');
+                rz0.className = 'jwm-col-resizer';
+                rz0.title = 'Resize column';
+                th.classList.add('jwm-th-interactive');
+                th.appendChild(rz0);
+                bindResizer(rz0, key);
+                return;
+            }
+            th.classList.add('jwm-th-interactive');
+            var handle = document.createElement('span');
+            handle.className = 'jwm-col-drag-handle';
+            handle.setAttribute('draggable', 'true');
+            handle.title = 'Drag to reorder column';
+            handle.innerHTML = '&#9776;';
+            handle.setAttribute('data-jwm-drag-col', key);
+            var rz = document.createElement('span');
+            rz.className = 'jwm-col-resizer';
+            rz.title = 'Resize column';
+            th.insertBefore(handle, th.firstChild);
+            th.appendChild(rz);
+            bindResizer(rz, key);
+        });
+
+        var dragCol = null;
+        headRow.querySelectorAll('.jwm-col-drag-handle').forEach(function(h) {
+            h.addEventListener('dragstart', function(e) {
+                dragCol = h.getAttribute('data-jwm-drag-col');
+                if (!dragCol) return;
+                e.dataTransfer.setData('text/plain', dragCol);
+                e.dataTransfer.effectAllowed = 'move';
+                var th = h.closest('th');
+                if (th) th.classList.add('jwm-th-dragging');
+            });
+            h.addEventListener('dragend', function() {
+                headRow.querySelectorAll('th').forEach(function(th) {
+                    th.classList.remove('jwm-th-dragging', 'jwm-th-drag-over');
+                });
+                dragCol = null;
+            });
+        });
+
+        headRow.querySelectorAll('th[data-col]').forEach(function(th) {
+            var key = th.getAttribute('data-col');
+            if (!key || PINNED_COL_START.indexOf(key) >= 0) return;
+            th.addEventListener('dragover', function(e) {
+                if (!dragCol || dragCol === key) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                th.classList.add('jwm-th-drag-over');
+            });
+            th.addEventListener('dragleave', function() {
+                th.classList.remove('jwm-th-drag-over');
+            });
+            th.addEventListener('drop', function(e) {
+                e.preventDefault();
+                th.classList.remove('jwm-th-drag-over');
+                var src = e.dataTransfer.getData('text/plain') || dragCol;
+                var tgt = key;
+                if (!src || !tgt || src === tgt) return;
+                if (PINNED_COL_START.indexOf(src) >= 0) return;
+                var cur = [];
+                headRow.querySelectorAll('th[data-col]').forEach(function(x) {
+                    cur.push(x.getAttribute('data-col'));
+                });
+                var iSrc = cur.indexOf(src);
+                var iTgt = cur.indexOf(tgt);
+                if (iSrc < 0 || iTgt < 0) return;
+                cur.splice(iSrc, 1);
+                if (iSrc < iTgt) {
+                    iTgt--;
+                }
+                cur.splice(iTgt, 0, src);
+                cur = normalizeOrderWithPins(cur);
+                applyColumnOrder(cur);
+                setStoredOrder(cur);
+            });
+        });
+
+        function bindResizer(resizerEl, colKey) {
+            var startX, startW, thEl;
+            resizerEl.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                thEl = resizerEl.closest('th');
+                if (!thEl) return;
+                startX = e.pageX;
+                startW = thEl.offsetWidth;
+                document.body.classList.add('jwm-col-resizing');
+                function onMove(ev) {
+                    var dx = ev.pageX - startX;
+                    var nw = Math.max(48, startW + dx);
+                    table.querySelectorAll('th[data-col="' + colKey + '"], td[data-col="' + colKey + '"]').forEach(function(el) {
+                        el.style.width = nw + 'px';
+                        el.style.minWidth = nw + 'px';
+                    });
+                }
+                function onUp() {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.body.classList.remove('jwm-col-resizing');
+                    var wmap = getStoredWidths();
+                    var cell = table.querySelector('th[data-col="' + colKey + '"]');
+                    if (cell) wmap[colKey] = Math.max(48, cell.offsetWidth);
+                    setStoredWidths(wmap);
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
     }
 
     function showModal() {
@@ -1134,10 +1359,14 @@ body { background: #f4f6fb; }
         b.addEventListener('click', hideModal);
     });
 
+    var ord = getStoredOrder();
+    if (ord) applyColumnOrder(ord);
     var st = getStored();
     if (st && typeof st === 'object' && Object.keys(st).some(function(k) { return st[k]; })) {
         applyCols(st);
     }
+    applyColumnWidths(getStoredWidths());
+    initColumnDragAndResize();
 
     document.getElementById('btnExportCsv')?.addEventListener('click', function(e) {
         e.preventDefault();

@@ -4,6 +4,9 @@
  */
 session_start();
 require_once __DIR__ . '/../config.php';
+if (is_file(__DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php')) {
+    require_once __DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php';
+}
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -55,6 +58,19 @@ if ($inv_chk && mysqli_num_rows($inv_chk) > 0) {
 }
 
 mysqli_begin_transaction($conn);
+
+// Jobwork Queue (activity, diamond issue, etc.) must be removed before JWO master.
+if (function_exists('auragold_jobwork_order_delete_queue_records')) {
+    auragold_jobwork_order_delete_queue_records($conn, $id);
+} else {
+    $act_chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_queue_activity'");
+    if ($act_chk && mysqli_num_rows($act_chk) > 0) {
+        mysqli_free_result($act_chk);
+        @mysqli_query($conn, 'DELETE FROM tbl_jobwork_queue_activity WHERE jobwork_order_id = ' . $id);
+    } elseif ($act_chk) {
+        mysqli_free_result($act_chk);
+    }
+}
 
 @mysqli_query($conn, 'DELETE FROM tbl_jobwork_order_items WHERE jobwork_order_id = ' . $id);
 

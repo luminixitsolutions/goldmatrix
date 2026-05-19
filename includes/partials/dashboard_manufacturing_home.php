@@ -13,9 +13,6 @@ function mfg_esc($s) {
 }
 ?>
 <style>
-.mfg-bc { font-size: 13px; color: #64748b; margin-bottom: 8px; }
-.mfg-bc a { color: #64748b; text-decoration: none; }
-.mfg-bc a:hover { text-decoration: underline; }
 .mfg-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .mfg-head h1 { font-size: 1.35rem; font-weight: 700; color: #1e293b; margin: 0; }
 .mfg-badge {
@@ -112,18 +109,56 @@ function mfg_esc($s) {
     flex-wrap: wrap;
     gap: 8px;
 }
+@media (max-width: 767.98px) {
+    .mfg-dashboard-root {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    .mfg-kpi-grid {
+        max-width: none;
+        width: 100%;
+    }
+    .mfg-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        margin-bottom: 14px;
+    }
+    .mfg-head h1 { font-size: 1.15rem; }
+    .mfg-head-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        width: 100%;
+    }
+    .mfg-head-actions .mfg-badge,
+    .mfg-head-actions .btn {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+        font-size: 0.78rem;
+        padding: 8px 6px;
+        line-height: 1.25;
+    }
+    .mfg-kpi .lbl { white-space: normal; overflow-wrap: anywhere; }
+    .mfg-kpi .sub { white-space: normal; }
+    .mfg-foot {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
 </style>
 
-<div class="mfg-bc">
-    <a href="#">Manufacturing</a> &gt; <span>Manufacturing</span>
-</div>
+<div class="mfg-dashboard-root">
 
 <div class="mfg-head">
     <div>
         <h1>Manufacturing Dashboard</h1>
-        <div style="font-size:13px;color:#64748b;margin-top:4px;">Job work orders, workstations, and sale order pipeline.</div>
     </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+    <div class="d-flex align-items-center gap-2 flex-wrap mfg-head-actions">
         <span class="mfg-badge">Manufacturing</span>
         <a class="btn btn-outline-secondary btn-sm" href="dashboards-hub.php"><i class="feather icon-grid"></i> All dashboards</a>
         <a class="btn btn-outline-primary btn-sm" href="jobwork-order.php"><i class="feather icon-file-text"></i> Jobwork order</a>
@@ -163,7 +198,7 @@ function mfg_esc($s) {
 </div>
 
 <div class="row g-3 mb-3">
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">JOBS IN PROGRESS</div>
             <div class="mfg-panel-body">
@@ -188,7 +223,7 @@ function mfg_esc($s) {
             </div>
         </div>
     </div>
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">JOBS IN WORKSTATION / TOTAL ORDER</div>
             <div class="mfg-panel-body">
@@ -216,7 +251,7 @@ function mfg_esc($s) {
 </div>
 
 <div class="row g-3 mb-3">
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">JOBS ON HOLD</div>
             <div class="mfg-panel-body">
@@ -240,7 +275,7 @@ function mfg_esc($s) {
             </div>
         </div>
     </div>
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">DELAYED JOB ORDER</div>
             <div class="mfg-panel-body">
@@ -268,7 +303,7 @@ function mfg_esc($s) {
 </div>
 
 <div class="row g-3">
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">RECENT SALE ORDER</div>
             <div class="mfg-panel-body">
@@ -291,7 +326,7 @@ function mfg_esc($s) {
             </div>
         </div>
     </div>
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="mfg-panel h-100">
             <div class="mfg-panel-h">COMPLETED ORDER</div>
             <div class="mfg-panel-body">
@@ -320,4 +355,5 @@ function mfg_esc($s) {
 <div class="mfg-foot">
     <span>AuraGold · Jobwork: <?php echo (int) ($mfg['total_jobwork'] ?? 0); ?> · Sale orders: <?php echo (int) ($mfg['total_sale_orders'] ?? 0); ?></span>
     <span><a href="sale-order.php" class="text-muted" style="text-decoration:none;">Sale orders</a></span>
+</div>
 </div>

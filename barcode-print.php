@@ -16,6 +16,7 @@ if ($print_code_kind !== 'qr' && $print_code_kind !== 'barcode') {
 /* Default stock: 100 mm × 50 mm (4 in × 2 in); match Windows printer custom paper or use 50×100 mm if rotated. */
 $label_width_mm  = $settings ? (float)($settings['label_width_mm'] ?? 100) : 100;
 $label_height_mm = $settings ? (float)($settings['label_height_mm'] ?? 50) : 50;
+$label_size_preset = $settings ? trim((string)($settings['label_size_preset'] ?? '')) : '';
 $font_size       = $settings ? (int)($settings['font_size'] ?? 12) : 12;
 $legacy_pn = $settings ? (int)($settings['show_product_name'] ?? 1) : 1;
 $legacy_pr = $settings ? (int)($settings['show_price'] ?? 1) : 1;
@@ -198,6 +199,7 @@ if ($print_code_kind !== 'qr') {
 $render_settings = [
     'label_width_mm'     => $label_width_mm,
     'label_height_mm'    => $label_height_mm,
+    'label_size_preset'  => $label_size_preset,
     'font_size'          => $font_size,
     'design_layout'      => $design_layout,
     'render_code_as'     => ($print_code_kind === 'qr') ? 'qr' : 'barcode',
@@ -206,6 +208,14 @@ $render_settings = [
     'design_left_inset_mm' => 0.0,
     'show_barcode_number' => $show_barcode_number,
 ];
+$is_120x50_double_barcode = ($print_code_kind === 'barcode' && $label_size_preset === '120x50');
+if ($is_120x50_double_barcode) {
+    $label_width_mm = max(10, min(500, $label_width_mm));
+    $label_height_mm = max(10, min(300, $label_height_mm));
+}
+$render_settings['barcode_bar_width_px'] = max(1, min(10, $barcode_bar_width_px));
+$render_settings['barcode_bar_height_px'] = max(10, min(200, $barcode_bar_height_px));
+
 if ($barcode1_left_mm !== null) {
     $render_settings['barcode1_left_mm'] = $barcode1_left_mm;
 }
@@ -399,6 +409,79 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
         }
         .barcode-product-name, .barcode-price, .barcode-text { margin: 0; padding: 0; }
 
+        /* 120x50 jewelry sticker: fixed pockets (ignore design drag positions) */
+        .barcode-print--120x50-double .full-sticker {
+            width: <?php echo $label_width_mm; ?>mm;
+            height: <?php echo $label_height_mm; ?>mm;
+            position: relative;
+            overflow: hidden;
+            page-break-after: always;
+            break-after: page;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            border: 1px solid #1e293b;
+        }
+        .barcode-print--120x50-double .full-sticker:last-child {
+            page-break-after: auto;
+            break-after: auto;
+        }
+        .barcode-print--120x50-double .barcode-copy-right {
+            position: absolute;
+            right: 6mm;
+            top: 6mm;
+            width: 28mm;
+            height: 10mm;
+            box-sizing: border-box;
+            overflow: visible;
+            z-index: 2;
+        }
+        .barcode-print--120x50-double .barcode-copy-left {
+            position: absolute;
+            left: 6mm;
+            top: 25mm;
+            width: 28mm;
+            height: 10mm;
+            box-sizing: border-box;
+            overflow: visible;
+            z-index: 2;
+        }
+        .barcode-print--120x50-double .barcode-120x50-graphic {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .barcode-print--120x50-double .barcode-copy-right svg,
+        .barcode-print--120x50-double .barcode-copy-left svg {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            margin: 0;
+            padding: 0;
+        }
+        .barcode-print--120x50-double .barcode-copy-text {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            font-size: 7px;
+            text-align: center;
+            width: 100%;
+            line-height: 1.1;
+            margin: 0;
+            padding: 0;
+            color: #1e293b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .barcode-print--120x50-double .barcode-120x50-graphic .barcode-print-wrap,
+        .barcode-print--120x50-double .design-field {
+            display: none !important;
+        }
+
         @media print {
 
             /* Must match printer custom paper size (e.g. 100×50 mm or 50×100 mm if rotated). */
@@ -511,6 +594,41 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
                 print-color-adjust: exact;
             }
 
+            .barcode-print--120x50-double .full-sticker {
+                page-break-after: always !important;
+                break-after: page !important;
+                border: none !important;
+            }
+            .barcode-print--120x50-double .full-sticker:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+            }
+            .barcode-print--120x50-double .barcode-copy-right {
+                position: absolute !important;
+                right: 6mm !important;
+                top: 6mm !important;
+                width: 28mm !important;
+                height: 10mm !important;
+                left: auto !important;
+            }
+            .barcode-print--120x50-double .barcode-copy-left {
+                position: absolute !important;
+                left: 6mm !important;
+                top: 25mm !important;
+                width: 28mm !important;
+                height: 10mm !important;
+                right: auto !important;
+            }
+            .barcode-print--120x50-double .barcode-120x50-graphic {
+                width: 100% !important;
+                height: 100% !important;
+            }
+            .barcode-print--120x50-double .barcode-copy-right svg,
+            .barcode-print--120x50-double .barcode-copy-left svg {
+                width: 100% !important;
+                height: 100% !important;
+            }
+
             .barcode-print--design svg {
                 transform: rotate(0deg) !important;
             }
@@ -542,18 +660,34 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
         }
     </style>
 </head>
-<body class="barcode-print <?php echo $use_design ? 'barcode-print--design' : 'barcode-print--simple'; ?>">
+<body class="barcode-print <?php echo $use_design ? 'barcode-print--design' : 'barcode-print--simple'; ?><?php echo $is_120x50_double_barcode ? ' barcode-print--120x50-double' : ''; ?>">
     <div class="print-controls no-print">
         <button class="btn btn-primary" onclick="window.print()">Print</button>
         <button class="btn btn-secondary" onclick="window.close()">Close</button>
-        <span style="margin-left: auto; color: #64748b;"><?php echo count($items); ?> label(s) · Label size: <strong><?php echo $label_width_mm; ?>mm × <?php echo $label_height_mm; ?>mm</strong></span>
+        <span style="margin-left: auto; color: #64748b;"><?php
+            if ($is_120x50_double_barcode) {
+                echo count($items) . ' sticker(s) · same barcode right + left on each (fixed layout)';
+            } else {
+                echo count($items) . ' label(s)';
+            }
+        ?> · Label size: <strong><?php echo $label_width_mm; ?>mm × <?php echo $label_height_mm; ?>mm</strong></span>
         <span class="print-tip" style="font-size: 12px; color: #64748b;">Chrome print: <strong>Margins → None</strong>, <strong>Scale 100%</strong>, turn off <strong>Fit to page</strong>. In Windows, create a <strong>custom paper</strong> matching this label: <strong><?php echo $label_width_mm; ?>×<?php echo $label_height_mm; ?> mm</strong> (e.g. 100×50 mm / 4×2 in, or 50×100 mm if rotated — must match <code>@page</code>). Grey side bands mean the driver paper size does not match — fix the custom size.</span>
     </div>
     <div class="barcode-container" id="barcodeContainer">
-        <?php foreach ($items as $item):
-            $productData = array_merge($item['row'], ['barcode' => $item['barcode']]);
-            if ($use_design):
-                $inner_html = renderBarcodeLayout($productData, $render_settings);
+        <?php
+        if ($is_120x50_double_barcode):
+            foreach ($items as $item):
+                echo render120x50DoubleStickerLabel(
+                    $item,
+                    $render_settings,
+                    is_array($decoded_snapshot) ? $decoded_snapshot : []
+                );
+            endforeach;
+        else:
+            foreach ($items as $item):
+                $productData = array_merge($item['row'], ['barcode' => $item['barcode']]);
+                if ($use_design):
+                    $inner_html = renderBarcodeLayout($productData, $render_settings);
         ?>
             <div class="barcode-label barcode-item" style="width:<?php echo $label_width_mm; ?>mm;height:<?php echo $label_height_mm; ?>mm;">
                 <div class="barcode-label-inner barcode-print-preview-label" style="position:relative;width:<?php echo $label_width_mm; ?>mm;height:<?php echo $label_height_mm; ?>mm;box-sizing:border-box;<?php echo htmlspecialchars($label_inner_pad_style, ENT_QUOTES, 'UTF-8'); ?>">
@@ -585,8 +719,11 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
                     </div>
                 </div>
             </div>
-        <?php endif; ?>
-        <?php endforeach; ?>
+        <?php
+                endif;
+            endforeach;
+        endif;
+        ?>
     </div>
     <script>
         function auragoldFillQrPrintHosts() {
@@ -616,7 +753,8 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
             /* Bar width/height from Barcode Setting (same as set-software canvas); matches design preview scaling. */
             var barW = <?php echo (int) max(1, min(10, $barcode_bar_width_px)); ?>;
             var barH = <?php echo (int) max(10, min(200, $barcode_bar_height_px)); ?>;
-            document.querySelectorAll('.barcode-svg').forEach(function(el) {
+            var barH120 = Math.max(18, Math.min(80, Math.round(12 / 0.264583 * 0.85)));
+            function auragoldRenderBarcodeSvg(el, barWidth, barHeight) {
                 var barcodeValue = el.getAttribute('data-barcode');
                 if (!barcodeValue) return;
                 var code = String(barcodeValue).trim();
@@ -625,8 +763,8 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
                     JsBarcode(el, code, {
                         format: "CODE128",
                         renderer: "svg",
-                        width: barW,
-                        height: barH,
+                        width: barWidth,
+                        height: barHeight,
                         displayValue: false,
                         margin: 0,
                         background: "#fff",
@@ -635,6 +773,12 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
                 } catch (e) {
                     el.parentElement.innerHTML = '<span style="font-size:10px;">' + (String(barcodeValue).replace(/</g, '&lt;')) + '</span>';
                 }
+            }
+            document.querySelectorAll('.barcode-svg--120x50').forEach(function(el) {
+                auragoldRenderBarcodeSvg(el, barW, barH120);
+            });
+            document.querySelectorAll('.barcode-svg:not(.barcode-svg--120x50)').forEach(function(el) {
+                auragoldRenderBarcodeSvg(el, barW, barH);
             });
         });
         /* Re-measure mm box right before print so QR pixel size matches printed layout (avoids screen vs paper mismatch). */

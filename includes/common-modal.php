@@ -292,6 +292,7 @@ window.auragoldDefaultBranchName = <?php echo json_encode((string)($auragold_new
 window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 </script>
 
+<?php $GLOBALS['auragold_common_modal_payments_included'] = true; ?>
 <!-- Payment Modals -->
 <!-- Cash Payment Modal -->
 <div class="modal fade" id="cashPaymentModal" tabindex="-1" role="dialog">

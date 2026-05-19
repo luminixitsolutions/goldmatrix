@@ -118,7 +118,7 @@
             var prevBalAmt = parseFloat(p.previous_balance_amount) || 0;
             var currentOrderAmt = parseFloat(p.amount) || 0;
             var totalAmt = currentOrderAmt + prevBalAmt;
-            if (totalAmt <= 0) return;
+            /* Every line the user added to `payments` is saved — amount may be 0 (metal exchange, scrap, placeholder). */
             out.push(Object.assign({}, p, {
                 payment_type: saveTypeLabel(p.type),
                 deposit_into: p.deposit_into || '',

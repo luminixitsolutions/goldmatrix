@@ -3,6 +3,7 @@ session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -63,6 +64,20 @@ if (!function_exists('purchase_quotation_payment_is_auto_pv_money')) {
     }
 }
 
+if (!function_exists('purchase_quotation_validate_metal_exchange_payments')) {
+    /** @param array<int, array<string, mixed>> $payments */
+    function purchase_quotation_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = auragold_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
+        }
+    }
+}
+
 mysqli_begin_transaction($conn);
 
 try {
@@ -70,6 +85,7 @@ try {
     if ($user_id <= 0) {
         throw new Exception('User session expired. Please login again.');
     }
+    $metal_exchange_barcodes_out = [];
 
     $has_pq_branch     = auragold_ensure_table_branch_id_column($conn, 'tbl_purchase_quotations');
     $hdr_branch        = auragold_transaction_header_branch_id();
@@ -734,7 +750,13 @@ try {
         $payments = [];
     }
 
-    foreach ($payments as $payment) {
+    $__pq_me_has_ref = false;
+    if (!empty($payments)) {
+        purchase_quotation_validate_metal_exchange_payments($conn, $payments);
+        $__pq_me_has_ref = auragold_metal_exchange_document_init($conn, $is_update, (int) $quotation_id, 'purchase_quotation_metal_exchange');
+    }
+
+    foreach ($payments as $pay_seq => $payment) {
         $payment_type = esc($payment['payment_type'] ?? '');
         $diamond_category = esc($payment['diamond_category'] ?? '');
         $transaction_no_p = esc($payment['transaction_no'] ?? '');
@@ -747,7 +769,11 @@ try {
         $quantity = (float) ($payment['quantity'] ?? 0);
         $purity_carat = esc($payment['purity_carat'] ?? '');
         $amount = (float) ($payment['amount'] ?? 0);
-        if ($amount > 0 || $payment_type !== '') {
+        $raw_pt = trim((string) ($payment['payment_type'] ?? ''));
+        $__insert_row = auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)
+            || (($amount > 1e-8) || $raw_pt !== '');
+
+        if ($__insert_row) {
             $payment_sql = "
                 INSERT INTO tbl_purchase_quotation_payments (
                     quotation_id, payment_type, diamond_category, transaction_no,
@@ -774,6 +800,23 @@ try {
                 throw new Exception('Payment insert failed: ' . mysqli_error($conn));
             }
         }
+
+        $__pq_pm = auragold_payment_merge_stored_details($payment);
+        auragold_post_metal_exchange_payment_to_stock(
+            $conn,
+            'purchase_quotation_metal_exchange',
+            (int) $quotation_id,
+            trim((string) $quotation_no_in),
+            substr(trim((string) $quotation_date), 0, 10),
+            $__pq_pm,
+            auragold_metal_exchange_default_branch_id(),
+            is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+            $__pq_me_has_ref,
+            'Purchase Quotation — Metal Exchange',
+            'pq_me',
+            'PQ-ME-',
+            $metal_exchange_barcodes_out
+        );
     }
 
     $pq_money_payments = [];
@@ -890,6 +933,11 @@ try {
         mysqli_free_result($task_tbl);
     }
 
+    if ((int) $quotation_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'purchase_quotation', (int) $quotation_id, $quotation_no, $quotation_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -910,6 +958,7 @@ try {
         'quotation_id' => $quotation_id,
         'quotation_no' => $quotation_no,
         'order_no' => $quotation_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
 } catch (Exception $e) {
     mysqli_rollback($conn);

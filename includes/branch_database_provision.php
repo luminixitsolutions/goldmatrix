@@ -96,6 +96,61 @@ function auragold_schema_table_exists($link, $schema, $table) {
     return $r && mysqli_num_rows($r) > 0;
 }
 
+if (!function_exists('auragold_schema_base_table_column_names')) {
+    /**
+     * Physical column names for schema.table in ordinal order (SHOW COLUMNS).
+     *
+     * @return list<string>
+     */
+    function auragold_schema_base_table_column_names(mysqli $link, string $schema, string $table): array {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $schema) || !preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
+            return [];
+        }
+        $db = '`' . str_replace('`', '``', $schema) . '`.`' . str_replace('`', '``', $table) . '`';
+        $r   = @mysqli_query($link, 'SHOW COLUMNS FROM ' . $db);
+        $out = [];
+        if ($r) {
+            while ($row = mysqli_fetch_assoc($r)) {
+                $f = isset($row['Field']) ? (string) $row['Field'] : '';
+                if ($f !== '') {
+                    $out[] = $f;
+                }
+            }
+            mysqli_free_result($r);
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('auragold_schema_table_column_names_intersection_ordered')) {
+    /**
+     * Columns present in both tables; order follows $preferredOrder (typically the registry / source).
+     *
+     * @param list<string> $preferredOrder
+     * @param list<string> $secondColumns
+     * @return list<string>
+     */
+    function auragold_schema_table_column_names_intersection_ordered(array $preferredOrder, array $secondColumns): array {
+        $have = [];
+        foreach ($secondColumns as $c) {
+            if (!is_string($c) || $c === '') {
+                continue;
+            }
+            $have[strtolower($c)] = true;
+        }
+        $out = [];
+        foreach ($preferredOrder as $c) {
+            if (!is_string($c) || $c === '') {
+                continue;
+            }
+            if (!empty($have[strtolower($c)])) {
+                $out[] = $c;
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('auragold_database_exists_on_schema')) {
     /**
      * @param string $name Single MySQL database identifier
@@ -198,7 +253,28 @@ function auragold_copy_table_data($link, $targetDb, $sourceDb, $table, $tquoted,
         return [true, ''];
     }
     $tq = '`' . str_replace('`', '``', $table) . '`';
-    if (!mysqli_query($link, "INSERT INTO $tquoted.$tq SELECT * FROM $squoted.$tq")) {
+
+    $srcCols = function_exists('auragold_schema_base_table_column_names')
+        ? auragold_schema_base_table_column_names($link, $sourceDb, $table)
+        : [];
+    $tgtCols = function_exists('auragold_schema_base_table_column_names')
+        ? auragold_schema_base_table_column_names($link, $targetDb, $table)
+        : [];
+    $common = (function_exists('auragold_schema_table_column_names_intersection_ordered') && $srcCols !== [] && $tgtCols !== [])
+        ? auragold_schema_table_column_names_intersection_ordered($srcCols, $tgtCols)
+        : [];
+    if ($common === []) {
+        if (!mysqli_query($link, "INSERT INTO $tquoted.$tq SELECT * FROM $squoted.$tq")) {
+            return [false, mysqli_error($link)];
+        }
+        return [true, ''];
+    }
+    $parts = [];
+    foreach ($common as $c) {
+        $parts[] = '`' . str_replace('`', '``', $c) . '`';
+    }
+    $colList = implode(', ', $parts);
+    if (!mysqli_query($link, 'INSERT INTO ' . $tquoted . '.' . $tq . ' (' . $colList . ') SELECT ' . $colList . ' FROM ' . $squoted . '.' . $tq)) {
         return [false, mysqli_error($link)];
     }
     return [true, ''];
@@ -237,6 +313,21 @@ function auragold_branch_mirror_registry_tbl_branches_family_into_target(
 
     $mid     = (int) $registryMainId;
 
+    $srcCols = auragold_schema_base_table_column_names($link, $sourceDb, 'tbl_branches');
+    $tgtCols = auragold_schema_base_table_column_names($link, $targetDb, 'tbl_branches');
+    $common  = auragold_schema_table_column_names_intersection_ordered($srcCols, $tgtCols);
+    if ($common === []) {
+        return [
+            'ok'      => false,
+            'message' => 'Could not resolve common `tbl_branches` columns between `' . $sourceDb . '` and `' . $targetDb . '`.',
+        ];
+    }
+    $colSql = [];
+    foreach ($common as $cn) {
+        $colSql[] = '`' . str_replace('`', '``', $cn) . '`';
+    }
+    $colList = implode(', ', $colSql);
+
     mysqli_query($link, 'SET FOREIGN_KEY_CHECKS=0');
     $del = mysqli_query($link, "DELETE FROM $tquoted.`tbl_branches`");
     if (!$del) {
@@ -247,7 +338,8 @@ function auragold_branch_mirror_registry_tbl_branches_family_into_target(
 
     $ins = mysqli_query(
         $link,
-        "INSERT INTO $tquoted.`tbl_branches` SELECT * FROM $squoted.`tbl_branches` WHERE id = $mid OR IFNULL(main_branch_id, 0) = $mid"
+        'INSERT INTO ' . $tquoted . '.`tbl_branches` (' . $colList . ') SELECT ' . $colList . ' FROM ' . $squoted . '.`tbl_branches` WHERE id = ' . $mid
+        . ' OR IFNULL(main_branch_id, 0) = ' . $mid
     );
     if (!$ins) {
         $err = mysqli_error($link);
@@ -507,20 +599,27 @@ if (!function_exists('auragold_provision_copy_table_data_separate_mysqli')) {
             return [false, 'no column metadata for copy'];
         }
         $colOrder = [];
-        $fields   = [];
         foreach ($fieldMeta as $fi) {
             if ((string) $fi->name === '') {
                 continue;
             }
-            $name       = (string) $fi->name;
-            $colOrder[] = $name;
-            $fields[]   = '`' . str_replace('`', '``', $name) . '`';
+            $colOrder[] = (string) $fi->name;
+        }
+        $tgtCols = function_exists('auragold_schema_base_table_column_names')
+            ? auragold_schema_base_table_column_names($linkT, $targetDb, $table)
+            : [];
+        if ($tgtCols !== [] && function_exists('auragold_schema_table_column_names_intersection_ordered')) {
+            $colOrder = auragold_schema_table_column_names_intersection_ordered($colOrder, $tgtCols);
+        }
+        $fields = [];
+        foreach ($colOrder as $name) {
+            $fields[] = '`' . str_replace('`', '``', $name) . '`';
         }
         mysqli_data_seek($res, 0);
         $columnList = implode(', ', $fields);
         if ($columnList === '') {
             mysqli_free_result($res);
-            return [false, 'no columns for copy'];
+            return [true, ''];
         }
         while ($row = mysqli_fetch_assoc($res)) {
             $values = [];
@@ -629,23 +728,29 @@ if (!function_exists('auragold_branch_mirror_family_separate_mysqli')) {
             mysqli_query($linkT, 'SET FOREIGN_KEY_CHECKS=1');
             return ['ok' => false, 'message' => 'No tbl_branches rows were read for main id ' . $mid . '.'];
         }
-        $fmeta  = mysqli_fetch_fields($sel);
-        $order  = [];
-        $colSql = [];
+        $fmeta = mysqli_fetch_fields($sel);
+        $order = [];
         if (is_array($fmeta)) {
             foreach ($fmeta as $f) {
                 if ((string) $f->name === '') {
                     continue;
                 }
-                $n        = (string) $f->name;
-                $order[]  = $n;
-                $colSql[] = '`' . str_replace('`', '``', $n) . '`';
+                $order[] = (string) $f->name;
             }
         }
-        if (empty($order)) {
+        $tgtCols = auragold_schema_base_table_column_names($linkT, $targetDb, 'tbl_branches');
+        $order     = auragold_schema_table_column_names_intersection_ordered($order, $tgtCols);
+        $colSql    = [];
+        foreach ($order as $n) {
+            $colSql[] = '`' . str_replace('`', '``', $n) . '`';
+        }
+        if ($order === []) {
             mysqli_free_result($sel);
             mysqli_query($linkT, 'SET FOREIGN_KEY_CHECKS=1');
-            return ['ok' => false, 'message' => 'Could not read tbl_branches column list from source.'];
+            return [
+                'ok'      => false,
+                'message' => 'No common `tbl_branches` columns between `' . $sourceDb . '` and `' . $targetDb . '` for mirror.',
+            ];
         }
         mysqli_data_seek($sel, 0);
         while ($r = mysqli_fetch_assoc($sel)) {

@@ -1,61 +1,78 @@
 <?php
-/** Manufacturing Process — delete job card: SweetAlert confirmation + AJAX delete */
+/** Manufacturing Process — revert job from current department (undo last transfer into this dept) */
 ?>
 <style>
-.sweet-alert.mp-delete-jwo-swal .sa-icon {
-    display: none !important;
+/* Above JWQ modal and Bootstrap modals */
+body.manufacturing-process-page.stop-scrolling .sweet-overlay {
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 12000 !important;
 }
-.sweet-alert.mp-delete-jwo-swal {
-    padding-top: 28px !important;
-    border-radius: 12px !important;
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal {
+    z-index: 12001 !important;
+    width: auto !important;
+    max-width: 480px !important;
+    min-width: 320px !important;
+    margin-left: -240px !important;
+    left: 50% !important;
+    border-radius: 16px !important;
+    padding: 28px 24px 22px !important;
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.2) !important;
+    font-family: inherit;
 }
-.sweet-alert.mp-delete-jwo-swal h2 {
-    color: #0f172a !important;
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal h2 {
+    font-size: 1.3rem !important;
     font-weight: 700 !important;
-    font-size: 1.2rem !important;
-    margin-top: 4px !important;
+    color: #1e3a5f !important;
+    margin: 12px 0 10px !important;
+    line-height: 1.3 !important;
 }
-.sweet-alert.mp-delete-jwo-swal p.lead {
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal p,
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal p.lead {
     color: #64748b !important;
-    font-size: 0.92rem !important;
-    margin-top: 8px !important;
-}
-.sweet-alert.mp-delete-jwo-swal .sa-button-container {
-    border-top: 1px solid #e2e8f0 !important;
-    margin-top: 18px !important;
-    padding-top: 14px !important;
-    text-align: center !important;
-}
-.sweet-alert.mp-delete-jwo-swal button.cancel {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    color: #64748b !important;
-    font-weight: 700 !important;
     font-size: 0.95rem !important;
-    letter-spacing: 0.06em !important;
+    line-height: 1.5 !important;
+    margin: 0 0 4px !important;
+    display: block !important;
 }
-.sweet-alert.mp-delete-jwo-swal button.confirm {
-    background: transparent !important;
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal .sa-button-container {
+    margin-top: 22px !important;
+    padding-top: 0 !important;
+    border-top: none !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal button.confirm.btn-mp-delete-sw-yes {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+    color: #fff !important;
     border: none !important;
-    box-shadow: none !important;
-    color: #dc2626 !important;
-    font-weight: 700 !important;
+    border-radius: 999px !important;
+    padding: 10px 28px !important;
+    font-weight: 600 !important;
     font-size: 0.95rem !important;
-    letter-spacing: 0.06em !important;
-    border-left: 1px solid #e2e8f0 !important;
-    margin-left: 6px !important;
-    padding-left: 18px !important;
-    border-radius: 0 !important;
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35) !important;
+    min-width: 96px !important;
+    margin: 0 !important;
 }
-.mp-delete-jwo-swal-icon {
-    text-align: center;
-    margin-bottom: 6px;
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal button.cancel.btn-mp-delete-sw-no {
+    background: #f1f5f9 !important;
+    color: #475569 !important;
+    border: none !important;
+    border-radius: 999px !important;
+    padding: 10px 28px !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    min-width: 96px !important;
+    margin: 0 !important;
+    border-left: none !important;
 }
-.mp-delete-jwo-swal-icon i {
-    font-size: 52px;
-    color: #dc2626;
-    line-height: 1;
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal button.confirm.btn-mp-delete-sw-yes:hover {
+    filter: brightness(1.05);
+}
+body.manufacturing-process-page .sweet-alert.mp-delete-jwo-swal button.cancel.btn-mp-delete-sw-no:hover {
+    background: #e2e8f0 !important;
 }
 </style>
 <script>
@@ -77,65 +94,103 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         var card = btn.closest('.mp-job-card');
-        function doDelete() {
+
+        function doRevert() {
             var fd = new FormData();
             fd.append('jobwork_order_id', jwoId);
             btn.disabled = true;
-            fetch('ajax/mp-delete-jobwork-order.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            fetch('ajax/mp-revert-jobwork-queue-dept.php', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(function (r) {
                     return r.json();
                 })
                 .then(function (data) {
                     btn.disabled = false;
                     if (!data || !data.ok) {
+                        var errMsg = data && data.message ? data.message : 'Could not remove from department';
                         if (typeof swal === 'function') {
                             swal({
-                                title: 'Cannot delete',
-                                text: data && data.message ? data.message : 'Delete failed',
+                                title: 'Cannot remove',
+                                text: errMsg,
                                 type: 'error',
                                 confirmButtonText: 'OK'
                             });
                         } else {
-                            alert(data && data.message ? data.message : 'Delete failed');
+                            alert(errMsg);
                         }
                         return;
                     }
-                    if (card && card.parentNode) {
-                        card.parentNode.removeChild(card);
-                    }
-                    var pag = document.getElementById('mpCardsPaginationText');
-                    if (pag && grid) {
-                        var n = grid.querySelectorAll('.mp-job-card[data-jwo-id]').length;
-                        pag.textContent = n === 0 ? 'No entries' : ('Showing ' + n + ' job work order' + (n === 1 ? '' : 's'));
+                    if (card) {
+                        if (data.previous_department_id) {
+                            card.setAttribute('data-dept-id', String(data.previous_department_id));
+                        }
+                        if (data.previous_user_id) {
+                            card.setAttribute('data-user-id', String(data.previous_user_id));
+                        } else {
+                            card.setAttribute('data-user-id', '0');
+                        }
+                        var deptBanner = card.querySelector('.mp-dept-banner-name');
+                        if (deptBanner && data.previous_department_name) {
+                            deptBanner.textContent = String(data.previous_department_name).toUpperCase();
+                        }
+                        var workerMeta = card.querySelector('.mp-name-meta span:first-child');
+                        if (workerMeta && data.previous_user_name) {
+                            workerMeta.textContent = String(data.previous_user_name);
+                        }
+                        if (data.jobwork_queue_no) {
+                            card.querySelectorAll('[data-jobwork-queue-no]').forEach(function (el) {
+                                el.setAttribute('data-jobwork-queue-no', data.jobwork_queue_no);
+                            });
+                        }
                     }
                     if (typeof filterByDepartmentAndUser === 'function') {
                         filterByDepartmentAndUser();
                     }
+                    var okMsg = data.message || 'Job moved to previous department.';
+                    if (typeof swal === 'function') {
+                        swal({
+                            title: 'Done',
+                            text: okMsg,
+                            type: 'success',
+                            timer: 2200,
+                            showConfirmButton: true,
+                            confirmButtonText: 'OK'
+                        });
+                    }
                 })
                 .catch(function () {
                     btn.disabled = false;
-                    alert('Delete failed');
+                    if (typeof swal === 'function') {
+                        swal({
+                            title: 'Error',
+                            text: 'Could not remove from department.',
+                            type: 'error',
+                            confirmButtonText: 'OK'
+                        });
+                    } else {
+                        alert('Could not remove from department');
+                    }
                 });
         }
+
+        var confirmText = 'This will remove the job from the current department and move it back to the previous department. The current department transfer record will be deleted.';
         if (typeof swal === 'function') {
             swal({
-                html: true,
-                title: '<div class="mp-delete-jwo-swal-icon"><i class="feather icon-trash-2"></i></div><div>Deleting</div>',
-                text: 'Are you sure you want to delete from this list',
+                title: 'Are you sure?',
+                text: confirmText,
                 type: 'warning',
                 showCancelButton: true,
-                confirmButtonText: 'DELETE',
-                cancelButtonText: 'CANCEL',
-                confirmButtonClass: 'confirm',
-                cancelButtonClass: 'cancel',
+                confirmButtonText: 'Yes',
+                cancelButtonText: 'No',
+                confirmButtonClass: 'btn-mp-delete-sw-yes',
+                cancelButtonClass: 'btn-mp-delete-sw-no',
                 customClass: 'mp-delete-jwo-swal'
             }, function (isConfirm) {
                 if (isConfirm) {
-                    doDelete();
+                    doRevert();
                 }
             });
-        } else if (confirm('Are you sure you want to delete from this list?')) {
-            doDelete();
+        } else if (window.confirm('Are you sure?\n\n' + confirmText)) {
+            doRevert();
         }
     });
 });

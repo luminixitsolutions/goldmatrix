@@ -7,7 +7,17 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
     exit;
 }
 
-$branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+$st_tree_root_id = function_exists('auragold_branch_stock_transfer_tree_root_id')
+    ? (int) auragold_branch_stock_transfer_tree_root_id()
+    : (function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0);
+if ($st_tree_root_id > 0) {
+    $branches = getListMaster(
+        'SELECT id, name, code FROM tbl_branches WHERE status = 1 AND (id = ' . $st_tree_root_id
+        . ' OR IFNULL(main_branch_id, 0) = ' . $st_tree_root_id . ') ORDER BY name ASC'
+    );
+} else {
+    $branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+}
 if (!is_array($branches)) {
     $branches = [];
 }
@@ -17,6 +27,29 @@ if (!empty($_SESSION['working_branch_id'])) {
     $default_branch_id = (int) $_SESSION['working_branch_id'];
 } elseif (!empty($_SESSION['branch_id'])) {
     $default_branch_id = (int) $_SESSION['branch_id'];
+}
+if ($default_branch_id > 0 && !empty($branches)) {
+    $in_branch_list = false;
+    foreach ($branches as $b) {
+        if ((int) ($b['id'] ?? 0) === $default_branch_id) {
+            $in_branch_list = true;
+            break;
+        }
+    }
+    if (!$in_branch_list) {
+        $default_branch_id = 0;
+        if ($st_tree_root_id > 0) {
+            foreach ($branches as $b) {
+                if ((int) ($b['id'] ?? 0) === $st_tree_root_id) {
+                    $default_branch_id = $st_tree_root_id;
+                    break;
+                }
+            }
+        }
+        if ($default_branch_id <= 0 && isset($branches[0]['id'])) {
+            $default_branch_id = (int) $branches[0]['id'];
+        }
+    }
 }
 
 $today_ymd = date('Y-m-d');
@@ -410,11 +443,6 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
         </div>
     </div>
 
-    <!-- <div class="alert alert-secondary border small mb-3 py-2 px-3 mb-2" role="status" style="font-size: 13px; color: #334155;">
-        <strong>Flow:</strong> When you click <strong>Save</strong>, the source line is cleared (deducted), an <strong>outward</strong> row is posted at the <em>source</em> branch with reference <code>stock_transfer</code>, and the move is staged in <code>tbl_stock_transfer_pending</code>. The <strong>destination</strong> <code>tbl_stock</code> purchase line (and <code>tbl_inward_stock</code> when that table exists) is created only when someone uses <a href="stock-receive-history.php">Receive</a> to post staged lines into stock. Use <a href="stock-transfer-history.php">History</a> for outward / in-transit status and <a href="stock-receive-history.php">Receive</a> to complete inward stock at the destination branch.
-        <br><span class="text-dark mt-1 d-inline-block"><strong>Active MySQL database:</strong> <code><?php echo htmlspecialchars($active_mysql_db ?: '(unknown)'); ?></code> — all transfer staging and stock rows use this database; destination branch is <code>to_branch_id</code> on pending / <code>branch_id</code> on receive. Optional duplicate to a second schema only if env <code>AURAGOLD_MIRROR_STOCK_DB</code> is set (e.g. <code>auragold_branch1</code>); default is off.</span>
-    </div> -->
-
     <div class="row st-stock-transfer-row">
         <div class="col-12 col-lg-6 mb-3">
             <div class="st-panel">
@@ -430,7 +458,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <button type="button" class="btn btn-sm btn-primary" id="stApplySource">Apply</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="stApplySource" title="Loads lines with on-hand qty. or weight &gt; 0 at the selected branch (non-outward)">Apply</button>
                     <div class="flex-grow-1"></div>
                     <div class="form-group" style="min-width:200px;">
                         <label class="small text-muted mb-0">Barcode</label>
@@ -644,6 +672,15 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
         } else {
             alert((opts.title ? opts.title + '\n\n' : '') + (opts.text || ''));
         }
+    }
+
+    function stShowMsg(title, text, type) {
+        stSwalOrAlert({
+            title: title || (type === 'error' ? 'Error' : 'Notice'),
+            text: text || '',
+            type: type || 'warning',
+            confirmButtonText: 'OK'
+        });
     }
 
     var sourceRows = [];
@@ -1204,7 +1241,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
     function loadSourceList() {
         var bid = document.getElementById('stFromBranch').value;
         if (!bid) {
-            alert('Select source branch.');
+            stShowMsg('Source branch', 'Select a source branch from the list, then click Apply.', 'warning');
             return;
         }
         var url = new URL('ajax/stock-transfer-list.php', window.location.href);
@@ -1229,7 +1266,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
             })
             .then(function (data) {
                 if (!data.success) {
-                    alert(data.message || 'Failed to load stock.');
+                    stShowMsg('Could not load stock', data.message || 'Failed to load stock.', 'error');
                     return;
                 }
                 sourceRows = data.rows || [];
@@ -1241,7 +1278,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
                 renderDest();
             })
             .catch(function (err) {
-                alert(err && err.message ? err.message : 'Network error loading stock.');
+                stShowMsg('Could not load stock', err && err.message ? err.message : 'Network error loading stock.', 'error');
             });
     }
 
@@ -1377,7 +1414,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
         if (!bc) return;
         var bid = document.getElementById('stFromBranch').value;
         if (!bid) {
-            alert('Select source branch first.');
+            stShowMsg('Source branch', 'Select a source branch before scanning a barcode.', 'warning');
             return;
         }
         var burl = new URL('ajax/stock-transfer-barcode.php', window.location.href);
@@ -1397,7 +1434,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
             })
             .then(function (data) {
                 if (!data.success) {
-                    alert(data.message || 'Barcode not found.');
+                    stShowMsg('Barcode', data.message || 'Barcode not found.', 'error');
                     return;
                 }
                 var row = data.row;
@@ -1413,7 +1450,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
                 document.getElementById('stBarcodeIn').value = '';
             })
             .catch(function (err) {
-                alert(err && err.message ? err.message : 'Network error.');
+                stShowMsg('Barcode', err && err.message ? err.message : 'Network error.', 'error');
             });
     });
 
@@ -1422,15 +1459,15 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
         var toB = document.getElementById('stToBranch').value;
         var dt = document.getElementById('stTransferDate').value;
         if (!fromB || !toB) {
-            alert('Select source and destination branch.');
+            stShowMsg('Branches', 'Select both source and destination branch.', 'warning');
             return;
         }
         if (fromB === toB) {
-            alert('Source and destination must differ.');
+            stShowMsg('Branches', 'Source and destination must be different branches.', 'warning');
             return;
         }
         if (!destRows.length) {
-            alert('Add items to the transfer list.');
+            stShowMsg('Transfer list', 'Add one or more items to the transfer list before saving.', 'warning');
             return;
         }
         if (!confirm('Transfer ' + destRows.length + ' item(s) to the destination branch?')) return;
@@ -1488,7 +1525,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
     });
 
     document.getElementById('stBtnLoose').addEventListener('click', function () {
-        alert('Transfer loose items is not configured yet. Use barcode scan for tagged stock.');
+        stShowMsg('Transfer loose items', 'This option is not configured yet. Use barcode scan for tagged stock.', 'info');
     });
 
     document.getElementById('stBtnFilter').addEventListener('click', function () {
@@ -1497,7 +1534,7 @@ $active_mysql_db = defined('DB_NAME') ? (string) DB_NAME : '';
 
     document.getElementById('stBtnPrintBc').addEventListener('click', function () {
         if (!destRows.length) {
-            alert('Add items to the transfer list first.');
+            stShowMsg('Print barcode', 'Add items to the transfer list first.', 'warning');
             return;
         }
         window.print();

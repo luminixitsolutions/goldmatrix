@@ -1,8 +1,8 @@
 <?php
 /**
- * Payment entries as cards (shared markup). Load assets/css/auragold-payment-cards.css
- * and assets/js/auragold-payment-cards.js on the parent page.
+ * Payment entries as cards (shared markup + assets).
  */
+require_once __DIR__ . '/auragold_payment_cards_assets.php';
 ?>
                                     <div class="pos-payment-cards-area">
                                         <div class="pos-payment-cards-scroll">

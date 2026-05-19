@@ -733,8 +733,7 @@ $rfid_scanned_col_map = [
                                         Export
                                     </button>
                                     <div class="dropdown-menu dropdown-menu-right shadow-sm">
-                                        <a class="dropdown-item" href="#" id="rfidExportCsv">Export CSV</a>
-                                        <a class="dropdown-item" href="#" id="rfidExportExcel">Export Excel</a>
+                                        <a class="dropdown-item" href="#" id="rfidExportExcel">Export to Excel</a>
                                     </div>
                                 </div>
                                 <button type="button" class="btn btn-rfid-reset" id="rfidBtnReset">Reset RFID</button>
@@ -1622,6 +1621,65 @@ $rfid_scanned_col_map = [
     if (filterForm) {
         rfidUpdateFilterBadge();
         rfidLoadAvailableStock();
+    }
+
+    function rfidExportExcelDownload() {
+        var exportUrl = (function () {
+            try {
+                return new URL('ajax/export-rfid-barcode-scan-excel.php', window.location.href).href;
+            } catch (e) {
+                return 'ajax/export-rfid-barcode-scan-excel.php';
+            }
+        })();
+        var fd = new FormData();
+        if (filterForm) {
+            new FormData(filterForm).forEach(function (val, key) {
+                fd.append(key, val);
+            });
+        }
+        fd.append('available_json', JSON.stringify(rfidGetAvailableRows()));
+        fd.append('scanned_json', JSON.stringify(rfidScannedRows.slice()));
+        fd.append('unknown_count', String(rfidUnknownScanCount));
+        fetch(exportUrl, {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (res) {
+            if (!res.ok) {
+                return res.text().then(function (t) {
+                    throw new Error(t || ('Export failed (HTTP ' + res.status + ')'));
+                });
+            }
+            var disp = res.headers.get('Content-Disposition') || '';
+            var m = /filename=\"?([^\";]+)\"?/i.exec(disp);
+            var fname = (m && m[1]) ? m[1] : ('RFID_Barcode_Scan_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+            return res.blob().then(function (blob) {
+                return { blob: blob, fname: fname };
+            });
+        }).then(function (o) {
+            var a = document.createElement('a');
+            var u = URL.createObjectURL(o.blob);
+            a.href = u;
+            a.download = o.fname;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () {
+                URL.revokeObjectURL(u);
+                a.remove();
+            }, 200);
+        }).catch(function (err) {
+            var msg = (err && err.message) ? String(err.message) : 'Export failed';
+            window.alert(msg.replace(/<[^>]+>/g, '').slice(0, 500));
+        });
+    }
+
+    var btnExportExcel = document.getElementById('rfidExportExcel');
+    if (btnExportExcel) {
+        btnExportExcel.addEventListener('click', function (e) {
+            e.preventDefault();
+            rfidExportExcelDownload();
+        });
     }
 })();
 </script>

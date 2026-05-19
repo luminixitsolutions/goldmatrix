@@ -64,6 +64,7 @@ $check_tables = [
     'tbl_credit_note_items'        => 'Credit Note',
     'tbl_debit_note_items'         => 'Debit Note',
     'tbl_receipt_voucher_items'    => 'Receipt Voucher',
+    'tbl_sale_receipt_voucher_items' => 'Sale Receipt Voucher',
     'tbl_payment_voucher_items'    => 'Payment Voucher',
     'tbl_stock_journal'            => 'Stock Journal',
     'tbl_purchase_quotation_items' => 'Purchase Quotation',

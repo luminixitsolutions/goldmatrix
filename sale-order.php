@@ -105,6 +105,8 @@ $edit_order_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
+$edit_diamond_issues = [];
+$edit_stone_issues = [];
 
 if (!empty($edit_order_id)) {
     $edit_order = getRecord("SELECT * FROM tbl_sale_orders WHERE id = " . intval($edit_order_id));
@@ -117,6 +119,32 @@ if (!empty($edit_order_id)) {
             LEFT JOIN tbl_product_characteristics pc ON pc.id = i.product_characteristic_id AND pc.product_id = i.product_id
             WHERE i.order_id = " . intval($edit_order_id));
         $edit_payments = getList("SELECT * FROM tbl_sale_order_payments WHERE order_id = " . intval($edit_order_id));
+        if (is_array($edit_payments)) {
+            require_once __DIR__ . '/includes/auragold_payment_details_merge.php';
+            auragold_merge_payment_details_into_payments($edit_payments);
+        }
+        $tDiamondIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_diamond_stock_issue'");
+        if ($tDiamondIss && mysqli_num_rows($tDiamondIss) > 0) {
+            mysqli_free_result($tDiamondIss);
+            $tmp_di = getList(
+                'SELECT id, order_id, stock_id, barcode, product_name, diamond_category, weight, qty, created_at '
+                . 'FROM tbl_sale_order_diamond_stock_issue WHERE order_id = ' . intval($edit_order_id) . ' ORDER BY id ASC'
+            );
+            $edit_diamond_issues = is_array($tmp_di) ? $tmp_di : [];
+        } elseif ($tDiamondIss) {
+            mysqli_free_result($tDiamondIss);
+        }
+        $tStoneIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_stone_stock_issue'");
+        if ($tStoneIss && mysqli_num_rows($tStoneIss) > 0) {
+            mysqli_free_result($tStoneIss);
+            $tmp_si = getList(
+                'SELECT id, order_id, stock_id, barcode, product_name, stone_category, weight, qty, created_at '
+                . 'FROM tbl_sale_order_stone_stock_issue WHERE order_id = ' . intval($edit_order_id) . ' ORDER BY id ASC'
+            );
+            $edit_stone_issues = is_array($tmp_si) ? $tmp_si : [];
+        } elseif ($tStoneIss) {
+            mysqli_free_result($tStoneIss);
+        }
         $next_order_no = $edit_order['order_no'] ?? '';
         if (!array_key_exists('against_of', $edit_order)) {
             $edit_order['against_of'] = '';
@@ -133,7 +161,25 @@ if (!empty($edit_order_id)) {
 }
 
 $si_save_blocked_by_purchase_fixing = false;
-$si_pfd_save_blocked_tip = '';
+$si_pfd_save_blocked_tip = 'Delete the purchase fixing first from Transaction report. Fixing type will switch to Standard, then you can save.';
+$si_save_blocked_by_jobwork_order = false;
+$si_jwo_save_blocked_tip = '';
+if (is_file(__DIR__ . '/includes/auragold_sale_order_jobwork_lock.php')) {
+    require_once __DIR__ . '/includes/auragold_sale_order_jobwork_lock.php';
+}
+if (!empty($edit_order_id) && (int) $edit_order_id > 0 && function_exists('auragold_sale_order_has_linked_jobwork_order')) {
+    $si_save_blocked_by_jobwork_order = auragold_sale_order_has_linked_jobwork_order($conn, (int) $edit_order_id);
+    if ($si_save_blocked_by_jobwork_order && function_exists('auragold_sale_order_jobwork_save_blocked_tip')) {
+        $si_jwo_save_blocked_tip = auragold_sale_order_jobwork_save_blocked_tip($conn, (int) $edit_order_id);
+    }
+}
+$si_save_blocked = !empty($si_save_blocked_by_purchase_fixing) || !empty($si_save_blocked_by_jobwork_order);
+$si_save_blocked_tip = '';
+if (!empty($si_save_blocked_by_jobwork_order) && $si_jwo_save_blocked_tip !== '') {
+    $si_save_blocked_tip = $si_jwo_save_blocked_tip;
+} elseif (!empty($si_save_blocked_by_purchase_fixing)) {
+    $si_save_blocked_tip = $si_pfd_save_blocked_tip;
+}
 
 // GST: branch (seller) state + tax master for JS — same as sale-invoice (CGST+SGST vs IGST from product + states)
 $auragold_sale_owner_state = '';
@@ -1763,6 +1809,9 @@ text-transform: uppercase;
     #productSelectionModal.product-modal-metal-tab .form-group.mb-2 {
         margin-bottom: 0.35rem !important;
     }
+    #productSelectionModal .product-modal-excel-import-wrap .dropdown-menu {
+        z-index: 1060;
+    }
     /* No gap below ADD button: last section in modal-body has no bottom margin */
     #productSelectionModal .modal-body > .text-right.mt-3:last-of-type,
     #productSelectionModal .modal-body > .d-flex.text-right:last-of-type {
@@ -3091,6 +3140,45 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
+
+                                    <div id="saleOrderDiamondLinesCard" class="mt-3 sale-order-diamond-lines-card" hidden>
+                                        <label class="mb-2 d-block" style="font-size: 0.85rem; color: #475569;">Diamonds allocated</label>
+                                        <div class="table-responsive border rounded" style="background: #fff;">
+                                            <table class="table table-sm table-bordered mb-0 sale-order-diamond-lines-table" style="font-size: 0.8rem;">
+                                                <thead style="background: #11294b; color: #fff;">
+                                                    <tr>
+                                                        <th>Barcode</th>
+                                                        <th>Product</th>
+                                                        <th>Category</th>
+                                                        <th class="text-right">Qty</th>
+                                                        <th class="text-right">Weight</th>
+                                                        <th style="width: 140px;">Status</th>
+                                                        <th class="text-center" style="width: 48px;" title="Remove line">Del</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="saleOrderDiamondLinesTbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <div id="saleOrderStoneLinesCard" class="mt-3 sale-order-stone-lines-card" hidden>
+                                        <label class="mb-2 d-block" style="font-size: 0.85rem; color: #475569;">Gemstones / stones allocated</label>
+                                        <div class="table-responsive border rounded" style="background: #fff;">
+                                            <table class="table table-sm table-bordered mb-0 sale-order-stone-lines-table" style="font-size: 0.8rem;">
+                                                <thead style="background: #0f766e; color: #fff;">
+                                                    <tr>
+                                                        <th>Barcode</th>
+                                                        <th>Product</th>
+                                                        <th>Category</th>
+                                                        <th class="text-right">Qty</th>
+                                                        <th class="text-right">Weight</th>
+                                                        <th style="width: 140px;">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="saleOrderStoneLinesTbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                     
                                     <!-- Comments: add multiple with date/time, edit, delete -->
                                     <div class="mt-3">
@@ -3121,8 +3209,8 @@ text-transform: uppercase;
                                     </div>
                                     <div class="invoice-header-actions">
                                         <button class="btn-new-invoice btn-sm" onclick="resetOrder()">New +</button>
-                                        <span id="siSaveInvoiceWrap" class="si-save-invoice-wrap<?php echo !empty($si_save_blocked_by_purchase_fixing) ? ' si-save-wrap-blocked' : ''; ?>" title="<?php echo !empty($si_save_blocked_by_purchase_fixing) ? htmlspecialchars($si_pfd_save_blocked_tip, ENT_QUOTES, 'UTF-8') : htmlspecialchars('Save', ENT_QUOTES, 'UTF-8'); ?>">
-                                            <button type="button" class="btn-save-invoice btn-sm" onclick="saveOrder()" <?php echo !empty($si_save_blocked_by_purchase_fixing) ? 'disabled' : ''; ?>>Save</button>
+                                        <span id="siSaveInvoiceWrap" class="si-save-invoice-wrap<?php echo !empty($si_save_blocked) ? ' si-save-wrap-blocked' : ''; ?>" title="<?php echo !empty($si_save_blocked) ? htmlspecialchars($si_save_blocked_tip, ENT_QUOTES, 'UTF-8') : htmlspecialchars('Save', ENT_QUOTES, 'UTF-8'); ?>">
+                                            <button type="button" class="btn-save-invoice btn-sm" onclick="saveOrder()" <?php echo !empty($si_save_blocked) ? 'disabled' : ''; ?>>Save</button>
                                         </span>
                                     </div>
                                 </div>
@@ -3367,9 +3455,20 @@ text-transform: uppercase;
     </div>
 </div>
 
-<?php include 'includes/common-modal.php'; ?>
-<link rel="stylesheet" href="assets/css/auragold-payment-cards.css">
-<script src="assets/js/auragold-payment-cards.js"></script>
+<?php
+$common_modal_show_excel_import = true;
+$common_modal_excel_sample_href = 'ajax/download-stock-journal-excel-sample.php?voucher=sale_order';
+include 'includes/common-modal.php';
+include 'includes/sale-order-diamond-stock-modal.php';
+include 'includes/sale-order-stone-stock-modal.php';
+?>
+<script>
+window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_order', 'urlIdParam' => 'id', 'windowDbIdKey' => '__saleOrderDbId'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
+<?php require_once __DIR__ . '/includes/auragold_payment_cards_assets.php'; ?>
+<script src="assets/js/sale-order-diamond-modal.js"></script>
+<script src="assets/js/sale-order-stone-modal.js"></script>
+<script src="assets/js/auragold-voucher-diamond-stone-payment-bind.js"></script>
 
 <?php include 'footer-script.php';?>
 
@@ -3396,6 +3495,9 @@ text-transform: uppercase;
     window.isPurchaseInvoiceEditMode = <?php echo (!empty($edit_order_id) && $edit_order_id > 0) ? 'true' : 'false'; ?>;
     window.siSaveBlockedByPurchaseFixing = <?php echo !empty($si_save_blocked_by_purchase_fixing) ? 'true' : 'false'; ?>;
     window.siSaveBlockedByPurchaseFixingTip = <?php echo json_encode($si_pfd_save_blocked_tip, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    window.siSaveBlockedByJobworkOrder = <?php echo !empty($si_save_blocked_by_jobwork_order) ? 'true' : 'false'; ?>;
+    window.siSaveBlockedByJobworkOrderTip = <?php echo json_encode($si_jwo_save_blocked_tip, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    window.__saleOrderDbId = <?php echo (int) ($edit_order_id ?? 0); ?>;
     
     <?php
     // Embed edit order/items/payments so form populates on page load (no AJAX dependency for direct ?id= load)
@@ -3426,6 +3528,8 @@ text-transform: uppercase;
             'layaways_id' => $edit_order['layaways_id'] ?? '',
             'fixing_type' => $edit_order['fixing_type'] ?? 'Standard',
             'purchase_fixing_blocks_save' => !empty($si_save_blocked_by_purchase_fixing),
+            'jobwork_order_blocks_save' => !empty($si_save_blocked_by_jobwork_order),
+            'jobwork_order_save_blocked_tip' => $si_jwo_save_blocked_tip,
             'previous_balance' => (float)($edit_order['previous_balance'] ?? 0),
             'previous_gold' => (float)($edit_order['previous_gold'] ?? 0),
             'previous_silver' => (float)($edit_order['previous_silver'] ?? 0),
@@ -3443,6 +3547,8 @@ text-transform: uppercase;
             'discount_percent' => (float)($edit_order['discount_percent'] ?? 0),
             'comment' => $edit_order['comment'] ?? '',
             'payment_comments' => $edit_order['payment_comments'] ?? '[]',
+            'diamond_issues' => is_array($edit_diamond_issues) ? $edit_diamond_issues : [],
+            'stone_issues' => is_array($edit_stone_issues) ? $edit_stone_issues : [],
         ];
         $embed_items = is_array($edit_items) ? $edit_items : [];
         $embed_payments = is_array($edit_payments) ? $edit_payments : [];
@@ -3737,6 +3843,149 @@ text-transform: uppercase;
                 modalProductBarcodeLastFetchDoneTime = Date.now();
             });
     }
+
+    /**
+     * Jewellery catalogue → sale order: add checked barcodes to product list (modal row + main table).
+     * @param {Array<{barcode:string,current_qty?:number,current_weight?:number,metal_id?:number}>} catalogItems
+     * @returns {Promise<{added:number,failed:Array}>}
+     */
+    function loadJewelryCatalogItemsToSaleOrder(catalogItems) {
+        var list = Array.isArray(catalogItems) ? catalogItems : [];
+        var added = 0;
+        var failed = [];
+        var idx = 0;
+
+        function applyCatalogWeightsToModalRow(row, catItem) {
+            if (!row || !catItem) return;
+            var qty = parseFloat(catItem.current_qty);
+            var wt = parseFloat(catItem.current_weight);
+            if (typeof setModalCellInput === 'function') {
+                if (isFinite(qty) && qty > 0.00001) {
+                    setModalCellInput(row, 'quantity', qty);
+                }
+                if (isFinite(wt) && wt > 0.00001) {
+                    setModalCellInput(row, 'gross-wt', wt);
+                    setModalCellInput(row, 'net-wt', wt);
+                    setModalCellInput(row, 'final-wt', wt);
+                }
+            }
+            if (typeof window.calculateModalRowNetWeight === 'function') {
+                window.calculateModalRowNetWeight(row);
+            }
+        }
+
+        function processNext() {
+            if (idx >= list.length) {
+                if (typeof updateSummaryPanel === 'function') {
+                    updateSummaryPanel();
+                }
+                return Promise.resolve({ added: added, failed: failed });
+            }
+            var catItem = list[idx++];
+            var bc = (catItem && catItem.barcode) ? String(catItem.barcode).trim() : '';
+            if (!bc) {
+                return processNext();
+            }
+            return fetch('ajax/get-product-by-barcode.php?barcode=' + encodeURIComponent(bc), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.success || !data.product) {
+                        failed.push({ barcode: bc, message: (data && data.message) ? data.message : 'Not found' });
+                        return processNext();
+                    }
+                    if (typeof addProductToProductSelectionTable !== 'function') {
+                        failed.push({ barcode: bc, message: 'Sale order product UI not ready' });
+                        return processNext();
+                    }
+                    addProductToProductSelectionTable(data.product);
+                    var tbody = document.getElementById('productListBody');
+                    var row = tbody ? tbody.querySelector('.product-row:last-of-type') : null;
+                    if (!row || typeof getModalRowDataFromRow !== 'function' || typeof addProductToTableFromModalRow !== 'function') {
+                        failed.push({ barcode: bc, message: 'Could not add product row' });
+                        return processNext();
+                    }
+                    applyCatalogWeightsToModalRow(row, catItem);
+                    var modalRowData = getModalRowDataFromRow(row, true);
+                    var mid = catItem.metal_id || data.product.metal_id || '';
+                    addProductToTableFromModalRow(modalRowData, mid);
+                    added++;
+                    return processNext();
+                })
+                .catch(function (err) {
+                    failed.push({ barcode: bc, message: (err && err.message) ? err.message : 'Request failed' });
+                    return processNext();
+                });
+        }
+
+        return processNext();
+    }
+
+    (function initJewelryCatalogSaleOrderImport() {
+        var storageKey = 'auragold_jcat_sale_order_items';
+        var editOrderIdPhp = <?php echo (int) ($edit_order_id ?? 0); ?>;
+
+        function runJewelryCatalogImport() {
+            try {
+                var params = new URLSearchParams(window.location.search);
+                if (params.get('from_jewelry_catalog') !== '1') {
+                    return;
+                }
+                var urlOrderId = parseInt(params.get('id') || '0', 10) || 0;
+                if (urlOrderId > 0 || editOrderIdPhp > 0) {
+                    sessionStorage.removeItem(storageKey);
+                    return;
+                }
+                var raw = sessionStorage.getItem(storageKey);
+                sessionStorage.removeItem(storageKey);
+                if (!raw) {
+                    return;
+                }
+                var items = JSON.parse(raw);
+                if (!Array.isArray(items) || items.length === 0) {
+                    return;
+                }
+                loadJewelryCatalogItemsToSaleOrder(items).then(function (res) {
+                    res = res || { added: 0, failed: [] };
+                    if (res.added > 0 && typeof swal === 'function') {
+                        swal({
+                            title: 'Catalogue items added',
+                            text: res.added + ' item(s) added to the product list. Complete customer and other details, then save.',
+                            type: 'success',
+                            timer: 2800,
+                            showConfirmButton: true
+                        });
+                    }
+                    if (res.failed && res.failed.length) {
+                        var msg = res.failed.map(function (f) {
+                            return (f.barcode || '') + ': ' + (f.message || 'failed');
+                        }).join('\n');
+                        if (typeof swal === 'function') {
+                            swal({
+                                title: 'Some items were not added',
+                                text: msg,
+                                type: 'warning'
+                            });
+                        } else {
+                            alert('Some items were not added:\n' + msg);
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Jewelry catalog import failed', e);
+            }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () {
+                setTimeout(runJewelryCatalogImport, 500);
+            });
+        } else {
+            setTimeout(runJewelryCatalogImport, 500);
+        }
+    })();
     
     let modalProductBarcodeCheckTimer = null;
     var modalProductBarcodeLastCheck = '';
@@ -5197,6 +5446,9 @@ text-transform: uppercase;
                 currentMetalId = btn.getAttribute('data-metal-id');
                 currentMetalName = btn.getAttribute('data-metal-name');
                 filterProductsByMetal(currentMetalId);
+                if (typeof syncProductModalExcelSampleLink === 'function') {
+                    syncProductModalExcelSampleLink();
+                }
                 var isDiamond = (typeof currentMetalName === 'string' && currentMetalName.toLowerCase().indexOf('diamond') !== -1);
                 var modalEl = document.getElementById('productSelectionModal');
                 var scrollWrap = document.getElementById('productListTableScrollWrapper');
@@ -5232,6 +5484,9 @@ text-transform: uppercase;
         const firstTab = modal.querySelector('.category-tab-btn.active');
         if (firstTab) {
             currentMetalId = firstTab.getAttribute('data-metal-id');
+            if (typeof syncProductModalExcelSampleLink === 'function') {
+                syncProductModalExcelSampleLink();
+            }
             currentMetalName = firstTab.getAttribute('data-metal-name');
             var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
             if (filterRow) {
@@ -5316,6 +5571,9 @@ text-transform: uppercase;
                 initCategoryTabs();
             } catch(e) {
                 console.log('Error initializing category tabs:', e);
+            }
+            if (typeof syncProductModalExcelSampleLink === 'function') {
+                syncProductModalExcelSampleLink();
             }
             
             // Clear search input
@@ -6752,7 +7010,89 @@ text-transform: uppercase;
         e.stopPropagation();
         addEmptyProductRow();
     });
-    
+
+    function mapSaleOrderExcelProductToModalRow(p) {
+        if (!p) p = {};
+        var tpaths = p.temp_image_paths;
+        if (!Array.isArray(tpaths)) tpaths = [];
+        return {
+            product_id: p.product_id,
+            characteristic_id: p.characteristic_id,
+            product_name: (p.product_name != null && String(p.product_name).trim() !== '') ? String(p.product_name).trim() : '',
+            quantity: p.quantity,
+            gross_wt: p.gross_weight,
+            less_wt: p.less_weight,
+            pkt_wt: p.pkt_wt,
+            pkt_less_wt: p.pkt_less_wt,
+            purity: p.purity,
+            final_wt: p.final_weight,
+            net_wt: p.net_weight,
+            pure_wt: p.pure_weight,
+            rate: p.rate,
+            making_amount: p.making_amount,
+            making_type: p.making_type,
+            making_rate: p.making_rate,
+            making_discount_amt: p.making_discount_amt,
+            making_actual_value: p.making_actual_value,
+            tax: p.tax_amount,
+            design_no: p.design_no,
+            stone_amount: p.stone_amount,
+            stone_weight: p.stone_weight,
+            other_amount: p.other_amount,
+            diamond_amount: p.diamond_amount,
+            amount: p.amount,
+            net_amt: p.net_amount,
+            net_amt_tax: p.net_amt_tax,
+            metal_value: p.metal_value,
+            discount: p.discount,
+            purchase_amount: p.purchase_amount,
+            sale_amount: p.sale_amount,
+            sale_amount_with: p.sale_amount_with,
+            reverse: p.reverse,
+            stone_charges: p.stone_charges,
+            other_charges: p.other_charges,
+            diamond_value: p.diamond_value,
+            gemstone_value: p.gemstone_value,
+            barcode: (p.barcode != null && String(p.barcode).trim() !== '') ? String(p.barcode).trim() : '',
+            from_excel: true,
+            metal_id: p.metal_id,
+            metal_name: p.metal_name,
+            carat_id: (p.karat != null && String(p.karat).trim() !== '') ? String(p.karat).trim() : '',
+            location_id: (p.location != null && String(p.location).trim() !== '') ? String(p.location).trim() : '',
+            calculation_type: (p.calculation != null && String(p.calculation).trim() !== '') ? String(p.calculation).trim() : '',
+            category: (p.category != null && String(p.category).trim() !== '') ? String(p.category).trim() : '',
+            excelTempImagePaths: tpaths,
+            excel_extra_columns: Array.isArray(p.excel_extra_columns) ? p.excel_extra_columns : []
+        };
+    }
+
+    function saleOrderExcelProductToItemProduct(p) {
+        var md = mapSaleOrderExcelProductToModalRow(p);
+        if (typeof getItemAndProductFromModalRowData !== 'function') {
+            return null;
+        }
+        var pair = getItemAndProductFromModalRowData(md);
+        var item = pair.item;
+        var product = pair.product;
+        item.barcode = item.barcode || md.barcode || '';
+        item.barcode_no = item.barcode_no || md.barcode || '';
+        item.calculation = md.calculation_type || item.calculation;
+        item.category = md.category || item.category;
+        item.rfid_code = p.rfid_code || item.rfid_code || '';
+        item.huid_no = p.huid_no || item.huid_no || '';
+        item.gold_loss1 = p.gold_loss1;
+        item.gold_loss2 = p.gold_loss2;
+        item.wastage_per = p.wastage_per;
+        item.wastage_weight = p.wastage_wt;
+        item.metal_rate = p.metal_rate || item.metal_rate;
+        item.setting_charge = p.setting_charge;
+        if (p.metal_id) {
+            item.metal_id = p.metal_id;
+        }
+        return { item: item, product: product };
+    }
+    window.saleOrderExcelProductToItemProduct = saleOrderExcelProductToItemProduct;
+
     // Modal Table Column Visibility Toggle (includes Column Groups)
     (function() {
         const settingsBtn = document.getElementById('modalTableSettingsBtn');
@@ -7997,6 +8337,35 @@ text-transform: uppercase;
         // Summary calculations moved to updateSummaryPanel
     }
     
+    // Metal exchange total for sidebar Metal Amt (payment.amount or purity_wt × rate × qty when amount is 0)
+    window.auragoldMetalExchangeValueFromPaymentRow = function (payment) {
+        if (!payment) return 0;
+        var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : (payment.type || '');
+        var paymentType = String(rawPayType).toLowerCase();
+        if (payment.type === 'metal-exchange') paymentType = 'metal-exchange';
+        if (!(paymentType.includes('metal') || paymentType.includes('exch'))) return 0;
+        var prevBal = parseFloat(payment.previous_balance_amount || 0) || 0;
+        var dbTotal = parseFloat(payment.amount || 0) || 0;
+        var dbCur = payment.current_order_amount != null && payment.current_order_amount !== '' ? parseFloat(payment.current_order_amount) : NaN;
+        var cur = !isNaN(dbCur) ? dbCur : Math.max(0, dbTotal - prevBal);
+        if (!isFinite(cur)) cur = 0;
+        if (cur > 0) return cur;
+        var pw = parseFloat(payment.metal_exchange_purity_wt) || 0;
+        var rt = parseFloat(payment.metal_exchange_rate) || 0;
+        var qty = parseFloat(payment.quantity) || 0;
+        var q = qty > 0 ? qty : 1;
+        if (pw > 0 && rt > 0) return pw * rt * q;
+        return 0;
+    };
+    window.auragoldTotalMetalAmtFromPayments = function (arr) {
+        if (!arr || !arr.length) return 0;
+        var t = 0;
+        arr.forEach(function (p) {
+            t += window.auragoldMetalExchangeValueFromPaymentRow(p);
+        });
+        return t;
+    };
+
     // Update summary panel (right sidebar)
     function updateSummaryPanel() {
         const tbody = document.getElementById('productTableBody');
@@ -8178,6 +8547,12 @@ text-transform: uppercase;
         
         const summaryPaidAmt = document.getElementById('summaryPaidAmt');
         if (summaryPaidAmt) summaryPaidAmt.textContent = paidAmt.toFixed(2);
+
+        var metalFromPayments = typeof window.auragoldTotalMetalAmtFromPayments === 'function'
+            ? window.auragoldTotalMetalAmtFromPayments(typeof payments !== 'undefined' && Array.isArray(payments) ? payments : [])
+            : 0;
+        const summaryMetalAmtEl = document.getElementById('summaryMetalAmt');
+        if (summaryMetalAmtEl) summaryMetalAmtEl.textContent = metalFromPayments.toFixed(2);
         
         // Get original previous balance (from ledger/loadCustomerBalance - can be positive or negative)
         const previousBalanceEl = document.getElementById('previousBalanceAmount');
@@ -8916,93 +9291,181 @@ text-transform: uppercase;
         });
     }
     
-    // Modal Add Button - Add all products directly to table (no checkbox required)
-    const modalAddBtn = document.getElementById('modalAddBtn');
-    if (modalAddBtn) {
-        modalAddBtn.addEventListener('click', function() {
-            // Get all product rows (not just checked ones)
-            const allProductRows = document.querySelectorAll('#productListBody .product-row');
-            
-            if (allProductRows.length === 0) {
-                alert('No products available to add');
-                return;
-            }
-            
-            // Check if we're in edit mode
-            if (currentEditingRowId) {
-                if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-                if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-                const mainRow = document.getElementById(currentEditingRowId);
-                const groupItemsJson = mainRow ? mainRow.getAttribute('data-group-items') : null;
-                if (groupItemsJson) {
-                    // Merged row: re-merge all modal rows and update main row
-                    const modalRowsData = [];
-                    allProductRows.forEach(function(r) { modalRowsData.push(getModalRowDataFromRow(r, true)); });
-                    if (modalRowsData.length > 0) {
-                        updateMergedRowFromModalRows(currentEditingRowId, modalRowsData);
-                    }
-                } else {
-                    // Single row: update from first modal row
-                    const firstRow = allProductRows[0];
-                    if (firstRow) {
-                        updateProductListRowFromModalRow(currentEditingRowId, firstRow);
-                    }
+    function clearMainRowBarcodeForReassign(mainRow) {
+        if (!mainRow) return;
+        mainRow.setAttribute('data-barcode', '');
+        var binp = mainRow.querySelector('[data-column="barcode"] input');
+        if (binp) binp.value = '';
+        var bsp = mainRow.querySelector('[data-column="barcode"] span');
+        if (bsp) bsp.textContent = '';
+        try {
+            var gi = mainRow.getAttribute('data-group-items');
+            if (gi) {
+                var arr = JSON.parse(gi);
+                if (Array.isArray(arr)) {
+                    arr.forEach(function(x) { if (x) x.barcode = ''; });
+                    mainRow.setAttribute('data-group-items', JSON.stringify(arr));
                 }
-                hideProductModal();
-                currentEditingRowId = null;
-                updateSummaryPanel();
-                return;
             }
-            
-            // Add mode: Only add rows that are visible (current tab); ignore hidden rows from other tabs
-            const productRows = Array.from(allProductRows).filter(function(row) {
-                if (!row) return false;
-                return row.style.display !== 'none';
-            });
-            if (productRows.length === 0) {
-                alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
-                return;
+        } catch (e) {}
+    }
+
+    /**
+     * Same as Add (Shift + A): push visible modal rows to #productTableBody.
+     * @param {{ forceNewBarcodes?: boolean, closeModal?: boolean, notifyEmpty?: boolean, forceSeparateRows?: boolean }} opts
+     * @returns {{ ok: boolean, reason?: string, mainRowsAdded?: number }}
+     */
+    function commitProductSelectionModalToMainTable(opts) {
+        opts = opts || {};
+        var forceNewBarcodes = !!opts.forceNewBarcodes;
+        var forceSeparateRows = !!opts.forceSeparateRows;
+        var closeModal = !!opts.closeModal;
+        var notifyEmpty = opts.notifyEmpty !== false;
+
+        var allProductRows = document.querySelectorAll('#productListBody .product-row');
+        if (allProductRows.length === 0) {
+            if (notifyEmpty) alert('No products available to add');
+            return { ok: false, reason: 'no_products' };
+        }
+
+        if (currentEditingRowId) {
+            if (forceNewBarcodes) {
+                alert('Excel lines are in the modal. Cancel or save the row you are editing, then click Add (Shift + A) to add them to the order.');
+                return { ok: false, reason: 'edit_mode' };
             }
             if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
             if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-            try {
-                // Run modal row calculation so making-amount (and other calculated fields) are up to date before reading
-                if (typeof window.calculateModalRowNetWeight === 'function') {
-                    productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
+            var mainRowEd = document.getElementById(currentEditingRowId);
+            var groupItemsJsonEd = mainRowEd ? mainRowEd.getAttribute('data-group-items') : null;
+            if (groupItemsJsonEd) {
+                var modalRowsDataEd = [];
+                allProductRows.forEach(function(r) { modalRowsDataEd.push(getModalRowDataFromRow(r, true)); });
+                if (modalRowsDataEd.length > 0) {
+                    updateMergedRowFromModalRows(currentEditingRowId, modalRowsDataEd);
                 }
-                var byMetal = {};
+            } else {
+                var firstRowEd = allProductRows[0];
+                if (firstRowEd) {
+                    updateProductListRowFromModalRow(currentEditingRowId, firstRowEd);
+                }
+            }
+            hideProductModal();
+            currentEditingRowId = null;
+            updateSummaryPanel();
+            return { ok: true, reason: 'edit_saved', mainRowsAdded: 0 };
+        }
+
+        var productRows = Array.from(allProductRows).filter(function(row) {
+            if (!row) return false;
+            return row.style.display !== 'none';
+        });
+        if (productRows.length === 0) {
+            if (notifyEmpty) {
+                alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
+            }
+            return { ok: false, reason: 'no_visible' };
+        }
+
+        if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
+        if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+
+        var byMetal = {};
+        var metalsTouched = {};
+        var mainRowsAdded = 0;
+        try {
+            if (typeof window.calculateModalRowNetWeight === 'function') {
+                productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
+            }
+            if (forceSeparateRows) {
+                var barcodeAssignPairs = [];
+                productRows.forEach(function(row) {
+                    var metalId = row.getAttribute('data-metal-id') || '';
+                    metalsTouched[metalId] = true;
+                    var d = getModalRowDataFromRow(row, false);
+                    if (forceNewBarcodes) d.barcode = '';
+                    var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
+                    addProductToTableFromModalRow(d, metalId);
+                    mainRowsAdded++;
+                    if (forceNewBarcodes) {
+                        var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
+                        if (afterRows.length > nBefore) {
+                            var newRow = afterRows[afterRows.length - 1];
+                            clearMainRowBarcodeForReassign(newRow);
+                            barcodeAssignPairs.push({ row: newRow, modalRowData: Object.assign({}, d, { barcode: '' }) });
+                        }
+                    }
+                });
+                if (forceNewBarcodes && barcodeAssignPairs.length && typeof window.assignUniqueBarcodesSequentialForProductListRows === 'function') {
+                    window.assignUniqueBarcodesSequentialForProductListRows(barcodeAssignPairs);
+                } else if (forceNewBarcodes && barcodeAssignPairs.length) {
+                    barcodeAssignPairs.forEach(function(p) {
+                        if (typeof window.assignUniqueBarcodeToProductListRow === 'function') {
+                            window.assignUniqueBarcodeToProductListRow(p.row, p.modalRowData);
+                        }
+                    });
+                }
+            } else {
                 productRows.forEach(function(row) {
                     var metalId = row.getAttribute('data-metal-id') || '';
                     if (!byMetal[metalId]) byMetal[metalId] = [];
                     byMetal[metalId].push(row);
                 });
                 Object.keys(byMetal).forEach(function(metalId) {
+                    metalsTouched[metalId] = true;
                     var rows = byMetal[metalId];
                     var modalRowsData = [];
                     rows.forEach(function(r) {
-                        modalRowsData.push(getModalRowDataFromRow(r, false));
+                        var d = getModalRowDataFromRow(r, false);
+                        if (forceNewBarcodes) d.barcode = '';
+                        modalRowsData.push(d);
                     });
-                    if (modalRowsData.length > 0) addMergedProductsToTable(modalRowsData, metalId);
+                    if (modalRowsData.length === 0) return;
+                    var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
+                    addMergedProductsToTable(modalRowsData, metalId);
+                    mainRowsAdded++;
+                    if (forceNewBarcodes) {
+                        var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
+                        if (afterRows.length > nBefore) {
+                            var newRow = afterRows[afterRows.length - 1];
+                            clearMainRowBarcodeForReassign(newRow);
+                            if (modalRowsData.length === 1 && typeof window.assignUniqueBarcodeToProductListRow === 'function') {
+                                window.assignUniqueBarcodeToProductListRow(newRow, Object.assign({}, modalRowsData[0], { barcode: '' }));
+                            } else if (modalRowsData.length > 1 && typeof window.assignUniqueBarcodesToMergedProductListRow === 'function') {
+                                var cleared = modalRowsData.map(function(d) { return Object.assign({}, d, { barcode: '' }); });
+                                window.assignUniqueBarcodesToMergedProductListRow(newRow, cleared);
+                            }
+                        }
+                    }
                 });
-            } finally {
-                // Always clear modal product list after add so user can add more products (modal stays open)
-                const productListBody = document.getElementById('productListBody');
-                if (productListBody) {
-                    productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
-                }
-                // Important: reset tab image cache after rows are added.
-                // Otherwise next new item can incorrectly reuse previous item's image.
-                if (window.productModalGroupImageByTab && typeof byMetal === 'object' && byMetal) {
-                    Object.keys(byMetal).forEach(function(metalId) {
-                        delete window.productModalGroupImageByTab[String(metalId || '')];
-                    });
-                }
-                var groupNameInput = document.getElementById('modalGroupName');
-                if (groupNameInput) groupNameInput.value = '';
-                var commentInput = document.getElementById('modalComment');
-                if (commentInput) commentInput.value = '';
             }
-            updateSummaryPanel();
+        } finally {
+            var productListBody = document.getElementById('productListBody');
+            if (productListBody) {
+                productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
+            }
+            if (window.productModalGroupImageByTab && metalsTouched && typeof metalsTouched === 'object') {
+                Object.keys(metalsTouched).forEach(function(metalId) {
+                    delete window.productModalGroupImageByTab[String(metalId || '')];
+                });
+            }
+            var groupNameInput = document.getElementById('modalGroupName');
+            if (groupNameInput) groupNameInput.value = '';
+            var commentInput = document.getElementById('modalComment');
+            if (commentInput) commentInput.value = '';
+        }
+        updateSummaryPanel();
+        if (closeModal && typeof hideProductModal === 'function') {
+            hideProductModal();
+        }
+        return { ok: true, mainRowsAdded: mainRowsAdded };
+    }
+    window.commitProductSelectionModalToMainTable = commitProductSelectionModalToMainTable;
+
+    // Modal Add Button - Add all products directly to table (no checkbox required)
+    const modalAddBtn = document.getElementById('modalAddBtn');
+    if (modalAddBtn) {
+        modalAddBtn.addEventListener('click', function() {
+            commitProductSelectionModalToMainTable({ forceNewBarcodes: false, closeModal: false, notifyEmpty: true });
         });
     }
     
@@ -10384,9 +10847,8 @@ text-transform: uppercase;
             return;
         }
 
-        if (typeof window.siSaveBlockedByPurchaseFixing !== 'undefined' && window.siSaveBlockedByPurchaseFixing) {
-            var _pfdTip = (typeof window.siSaveBlockedByPurchaseFixingTip === 'string' && window.siSaveBlockedByPurchaseFixingTip) ? window.siSaveBlockedByPurchaseFixingTip : 'Delete the purchase fixing first from Transaction report. Fixing type will switch to Standard, then you can save.';
-            alert(_pfdTip);
+        if (typeof isSiSaveBlocked === 'function' ? isSiSaveBlocked() : (window.siSaveBlockedByPurchaseFixing || window.siSaveBlockedByJobworkOrder)) {
+            alert(typeof getSiSaveBlockedTip === 'function' ? getSiSaveBlockedTip() : 'Save is locked until linked records are removed.');
             return;
         }
         
@@ -10679,6 +11141,14 @@ text-transform: uppercase;
             ? collectPosPaymentsForSave()
             : [];
 
+        orderData.pending_diamond_allocations = Array.isArray(window.__pendingSaleOrderDiamondLines)
+            ? window.__pendingSaleOrderDiamondLines.slice()
+            : [];
+
+        orderData.pending_stone_allocations = Array.isArray(window.__pendingSaleOrderStoneLines)
+            ? window.__pendingSaleOrderStoneLines.slice()
+            : [];
+
         
         // Show loading
         const saveBtn = document.querySelector('.btn-save-invoice, .btn-purple');
@@ -10691,7 +11161,7 @@ text-transform: uppercase;
         // Convert arrays to JSON strings for POST
         const postData = {};
         Object.keys(orderData).forEach(key => {
-            if (key === 'items' || key === 'payments') {
+            if (key === 'items' || key === 'payments' || key === 'pending_diamond_allocations' || key === 'pending_stone_allocations') {
                 postData[key] = JSON.stringify(orderData[key]);
             } else {
                 postData[key] = orderData[key];
@@ -10714,6 +11184,8 @@ text-transform: uppercase;
                     }
                     
                     if (response.status === 'success') {
+                        window.__pendingSaleOrderDiamondLines = [];
+                        window.__pendingSaleOrderStoneLines = [];
                         if (orderData.fixing_type === 'Hedging') {
                             window.siSaveBlockedByPurchaseFixing = true;
                             if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(true);
@@ -10724,7 +11196,26 @@ text-transform: uppercase;
                         const returnId = response.return_id || response.order_id;
                         const barcodes = response.new_barcodes || [];
                         const returnNo = response.return_no || response.order_no;
+                        var _rid = parseInt(returnId, 10) || 0;
+                        if (_rid > 0) {
+                            window.__saleOrderDbId = _rid;
+                            try {
+                                if (window.history && window.history.replaceState) {
+                                    window.history.replaceState({}, '', 'sale-order.php?id=' + encodeURIComponent(_rid));
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
                         saleReturnAfterSavePrompts(returnId, returnNo, barcodes);
+                        if (_rid > 0 && typeof window.refreshSaleOrderDiamondIssuesFromServer === 'function') {
+                            window.refreshSaleOrderDiamondIssuesFromServer(_rid);
+                        } else if (typeof window.renderSaleOrderDiamondLinesPanel === 'function') {
+                            window.renderSaleOrderDiamondLinesPanel();
+                        }
+                        if (_rid > 0 && typeof window.refreshSaleOrderStoneIssuesFromServer === 'function') {
+                            window.refreshSaleOrderStoneIssuesFromServer(_rid);
+                        } else if (typeof window.renderSaleOrderStoneLinesPanel === 'function') {
+                            window.renderSaleOrderStoneLinesPanel();
+                        }
                     } else {
                         alert('Error: ' + (response.message || 'Failed to save sale order'));
                     }
@@ -10771,6 +11262,8 @@ text-transform: uppercase;
                 }
                 
                 if (data.status === 'success') {
+                    window.__pendingSaleOrderDiamondLines = [];
+                    window.__pendingSaleOrderStoneLines = [];
                     if (orderData.fixing_type === 'Hedging') {
                         window.siSaveBlockedByPurchaseFixing = true;
                         if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(true);
@@ -10781,7 +11274,26 @@ text-transform: uppercase;
                     const returnId = data.return_id || data.order_id;
                     const barcodes = data.new_barcodes || [];
                     const returnNo = data.return_no || data.order_no;
+                    var _ridF = parseInt(returnId, 10) || 0;
+                    if (_ridF > 0) {
+                        window.__saleOrderDbId = _ridF;
+                        try {
+                            if (window.history && window.history.replaceState) {
+                                window.history.replaceState({}, '', 'sale-order.php?id=' + encodeURIComponent(_ridF));
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
                     saleReturnAfterSavePrompts(returnId, returnNo, barcodes);
+                    if (_ridF > 0 && typeof window.refreshSaleOrderDiamondIssuesFromServer === 'function') {
+                        window.refreshSaleOrderDiamondIssuesFromServer(_ridF);
+                    } else if (typeof window.renderSaleOrderDiamondLinesPanel === 'function') {
+                        window.renderSaleOrderDiamondLinesPanel();
+                    }
+                    if (_ridF > 0 && typeof window.refreshSaleOrderStoneIssuesFromServer === 'function') {
+                        window.refreshSaleOrderStoneIssuesFromServer(_ridF);
+                    } else if (typeof window.renderSaleOrderStoneLinesPanel === 'function') {
+                        window.renderSaleOrderStoneLinesPanel();
+                    }
                 } else {
                     alert('Error: ' + (data.message || 'Failed to save sale order'));
                 }
@@ -11295,10 +11807,25 @@ text-transform: uppercase;
         }
     }
     
-    function updateSiSaveBlockedByPfd(blocked) {
-        window.siSaveBlockedByPurchaseFixing = !!blocked;
-        var blockTip = (typeof window.siSaveBlockedByPurchaseFixingTip === 'string' && window.siSaveBlockedByPurchaseFixingTip) ? window.siSaveBlockedByPurchaseFixingTip : 'Delete the purchase fixing first from Transaction report. Fixing type will switch to Standard, then you can save.';
-        var tip = blocked ? blockTip : 'Save';
+    function isSiSaveBlocked() {
+        return !!(window.siSaveBlockedByPurchaseFixing || window.siSaveBlockedByJobworkOrder);
+    }
+    function getSiSaveBlockedTip() {
+        if (window.siSaveBlockedByJobworkOrder) {
+            return (typeof window.siSaveBlockedByJobworkOrderTip === 'string' && window.siSaveBlockedByJobworkOrderTip)
+                ? window.siSaveBlockedByJobworkOrderTip
+                : 'Delete Jobwork Queue records, then the Job Work Order, before saving this sale order.';
+        }
+        if (window.siSaveBlockedByPurchaseFixing) {
+            return (typeof window.siSaveBlockedByPurchaseFixingTip === 'string' && window.siSaveBlockedByPurchaseFixingTip)
+                ? window.siSaveBlockedByPurchaseFixingTip
+                : 'Delete the purchase fixing first from Transaction report. Fixing type will switch to Standard, then you can save.';
+        }
+        return 'Save';
+    }
+    function updateSiSaveBlockedUi() {
+        var blocked = isSiSaveBlocked();
+        var tip = getSiSaveBlockedTip();
         var wrap = document.getElementById('siSaveInvoiceWrap');
         if (wrap) {
             wrap.setAttribute('title', tip);
@@ -11309,30 +11836,69 @@ text-transform: uppercase;
             }
         }
         document.querySelectorAll('.btn-save-invoice').forEach(function(b) {
-            b.disabled = !!blocked;
+            b.disabled = blocked;
             b.removeAttribute('title');
         });
         document.querySelectorAll('button.btn-purple').forEach(function(b) {
             if (b && b.textContent && b.textContent.trim() === 'Save') {
-                b.disabled = !!blocked;
+                b.disabled = blocked;
                 b.title = tip;
             }
         });
+    }
+    function updateSiSaveBlockedByPfd(blocked) {
+        if (arguments.length) {
+            window.siSaveBlockedByPurchaseFixing = !!blocked;
+        }
+        updateSiSaveBlockedUi();
+    }
+    function updateSiSaveBlockedByJwo(blocked, tip) {
+        if (arguments.length) {
+            window.siSaveBlockedByJobworkOrder = !!blocked;
+        }
+        if (typeof tip === 'string' && tip !== '') {
+            window.siSaveBlockedByJobworkOrderTip = tip;
+        }
+        updateSiSaveBlockedUi();
     }
 
     // Populate form with order data (param loadedPayments to avoid shadowing global payments)
     function populateOrderForm(order, items, loadedPayments) {
         console.log('populateOrderForm executing', { orderId: order && order.id, itemsCount: (items && items.length) || 0, paymentsCount: (loadedPayments && loadedPayments.length) || 0 });
 
+        if (order && order.id) {
+            window.__saleOrderDbId = parseInt(order.id, 10) || 0;
+        }
+
+        window.__saleOrderDiamondIssueRows = (order && Array.isArray(order.diamond_issues)) ? order.diamond_issues.slice() : [];
+        if (typeof window.renderSaleOrderDiamondLinesPanel === 'function') {
+            window.renderSaleOrderDiamondLinesPanel();
+        }
+
+        window.__saleOrderStoneIssueRows = (order && Array.isArray(order.stone_issues)) ? order.stone_issues.slice() : [];
+        if (typeof window.renderSaleOrderStoneLinesPanel === 'function') {
+            window.renderSaleOrderStoneLinesPanel();
+        }
+
         var pfdBlock = !!(order && (order.purchase_fixing_blocks_save === true || order.purchase_fixing_blocks_save === 1 || order.purchase_fixing_blocks_save === '1'));
+        var jwoBlock = !!(order && (order.jobwork_order_blocks_save === true || order.jobwork_order_blocks_save === 1 || order.jobwork_order_blocks_save === '1'));
         updateSiSaveBlockedByPfd(pfdBlock);
+        updateSiSaveBlockedByJwo(jwoBlock, (order && order.jobwork_order_save_blocked_tip) ? String(order.jobwork_order_save_blocked_tip) : '');
         if (order && order.id > 0) {
             var pfdRefreshUrl = 'ajax/get-sale-order.php?id=' + encodeURIComponent(order.id) + '&_=' + (Date.now ? Date.now() : 0);
             fetch(pfdRefreshUrl, { cache: 'no-store' })
                 .then(function(r) { return r.json(); })
                 .then(function(resp) {
-                    if (resp && resp.status === 'success' && resp.order && typeof resp.order.purchase_fixing_blocks_save !== 'undefined') {
-                        updateSiSaveBlockedByPfd(!!resp.order.purchase_fixing_blocks_save);
+                    if (resp && resp.status === 'success' && resp.order) {
+                        if (typeof resp.order.purchase_fixing_blocks_save !== 'undefined') {
+                            updateSiSaveBlockedByPfd(!!resp.order.purchase_fixing_blocks_save);
+                        }
+                        if (typeof resp.order.jobwork_order_blocks_save !== 'undefined') {
+                            updateSiSaveBlockedByJwo(
+                                !!resp.order.jobwork_order_blocks_save,
+                                resp.order.jobwork_order_save_blocked_tip ? String(resp.order.jobwork_order_save_blocked_tip) : ''
+                            );
+                        }
                     }
                 })
                 .catch(function() {});
@@ -11615,17 +12181,23 @@ text-transform: uppercase;
         // Add payments to table (and to global payments array via addPaymentToTable)
         if (loadedPayments && loadedPayments.length > 0) {
             loadedPayments.forEach(function(payment) {
-                // Map payment type from database to modal type
-                var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : (payment.type || '');
-                let paymentType = String(rawPayType).toLowerCase();
-                if (paymentType.includes('cash')) paymentType = 'cash';
-                else if (paymentType.includes('bank')) paymentType = 'bank';
-                else if (paymentType.includes('cheque')) paymentType = 'cheque';
-                else if (paymentType.includes('upi') || paymentType.includes('mobile')) paymentType = 'upi';
-                else if (paymentType.includes('card')) paymentType = 'card';
-                else if (paymentType.includes('metal') || paymentType.includes('exch')) paymentType = 'metal-exchange';
-                else if (paymentType.includes('scrap')) paymentType = 'scrap';
-                else paymentType = 'other';
+                // Map payment type from database to modal type (prefer JSON type from payment_details)
+                var paymentType = '';
+                if (payment.type != null && String(payment.type).trim() !== '') {
+                    paymentType = String(payment.type).toLowerCase();
+                }
+                if (!paymentType || paymentType === 'other') {
+                    var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : '';
+                    paymentType = String(rawPayType).toLowerCase();
+                    if (paymentType.includes('cash')) paymentType = 'cash';
+                    else if (paymentType.includes('bank')) paymentType = 'bank';
+                    else if (paymentType.includes('cheque')) paymentType = 'cheque';
+                    else if (paymentType.includes('upi') || paymentType.includes('mobile')) paymentType = 'upi';
+                    else if (paymentType.includes('card')) paymentType = 'card';
+                    else if (paymentType.includes('metal') || paymentType.includes('exch')) paymentType = 'metal-exchange';
+                    else if (paymentType.includes('scrap')) paymentType = 'scrap';
+                    else paymentType = paymentType || 'other';
+                }
                 
                 var _prevBalLoad = parseFloat(payment.previous_balance_amount || 0) || 0;
                 var _dbTotalLoad = parseFloat(payment.amount || 0) || 0;
@@ -11701,6 +12273,10 @@ text-transform: uppercase;
         const savedGrandTotal = parseFloat(order.grand_total || 0);
         const savedPaidAmt = parseFloat(order.paid_amt || 0);
         const savedBalanceAmt = parseFloat(order.balance_amt || 0);
+        var metalFromLoadedPayments = typeof window.auragoldTotalMetalAmtFromPayments === 'function'
+            ? window.auragoldTotalMetalAmtFromPayments(loadedPayments || [])
+            : 0;
+        var metalAmtDisplay = Math.max(parseFloat(order.metal_amt || 0) || 0, metalFromLoadedPayments);
         if (document.getElementById('summaryTotal')) {
             document.getElementById('summaryTotal').textContent = savedSubtotal.toFixed(2);
         }
@@ -11714,7 +12290,7 @@ text-transform: uppercase;
             document.getElementById('summaryBalanceAmt').textContent = savedBalanceAmt.toFixed(2);
         }
         if (document.getElementById('summaryMetalAmt')) {
-            document.getElementById('summaryMetalAmt').textContent = parseFloat(order.metal_amt || 0).toFixed(2);
+            document.getElementById('summaryMetalAmt').textContent = metalAmtDisplay.toFixed(2);
         }
         const roundOffVal = parseFloat(order.round_off || 0);
         const roundOffValueInput = document.getElementById('roundOffValue');
@@ -11765,7 +12341,7 @@ text-transform: uppercase;
             document.getElementById('summaryNetTotal').textContent = parseFloat(order.net_total || order.subtotal || 0).toFixed(2);
         }
         if (document.getElementById('summaryMetalAmt')) {
-            document.getElementById('summaryMetalAmt').textContent = parseFloat(order.metal_amt || 0).toFixed(2);
+            document.getElementById('summaryMetalAmt').textContent = metalAmtDisplay.toFixed(2);
         }
         if (roundOffValueInput) roundOffValueInput.value = roundOffVal.toFixed(2);
         if (roundOffCheckbox) roundOffCheckbox.checked = roundOffVal !== 0;
@@ -11825,13 +12401,11 @@ text-transform: uppercase;
         } else {
             window.addEventListener('load', scheduleEditLoad);
         }
-        // Retry: if items/totals still empty after 1.2s, run again
+        // Retry only when product rows failed to load (do not re-run when grand total is 0 — that wipes user-added payments)
         setTimeout(function() {
             var tbody = document.getElementById('productTableBody');
-            var gt = document.getElementById('summaryGrandTotal');
             var hasRows = tbody && tbody.querySelectorAll('tr:not(.no-drag)').length > 0;
-            var gtZero = gt && parseFloat(gt.textContent || 0) > 0;
-            if ((!hasRows || !gtZero) && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
+            if (!hasRows && window.EDIT_ORDER_DATA && window.EDIT_ORDER_DATA.order) {
                 doPopulateFromEmbed();
             }
         }, 1200);
@@ -11851,6 +12425,18 @@ text-transform: uppercase;
             icon._paymentHandlerBound = true;
             icon.addEventListener('click', function() {
                 window._editingPaymentId = null;
+                if (this.classList.contains('payment-diamond')) {
+                    if (typeof openSaleOrderDiamondStockModal === 'function') {
+                        openSaleOrderDiamondStockModal();
+                    }
+                    return;
+                }
+                if (this.classList.contains('payment-stone')) {
+                    if (typeof openSaleOrderStoneStockModal === 'function') {
+                        openSaleOrderStoneStockModal();
+                    }
+                    return;
+                }
                 const paymentType = this.classList.contains('payment-cash') ? 'cash' :
                                    this.classList.contains('payment-bank') ? 'bank' :
                                    this.classList.contains('payment-cheque') ? 'cheque' :
@@ -11881,7 +12467,7 @@ text-transform: uppercase;
     } else {
         initSalesPersonSelect2();
     }
-    
+
     // Open payment modal based on type
     function openPaymentModal(type) {
         const modalMap = {
@@ -12088,6 +12674,7 @@ text-transform: uppercase;
             paymentData.card_no = document.getElementById('cardNumber').value;
             paymentData.amount = parseFloat(document.getElementById('cardAmount').value) || 0;
         } else if (type === 'metal-exchange') {
+            if (typeof window.updateMetalExchangeCalculations === 'function') window.updateMetalExchangeCalculations();
             paymentData.deposit_into = 'Metal Exchange';
             paymentData.purity_carat = document.getElementById('metalExchangePurity').value;
             paymentData.quantity = parseFloat(document.getElementById('metalExchangeQty').value) || 0;
@@ -12125,7 +12712,7 @@ text-transform: uppercase;
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount <= 0) {
+        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
             alert('Please enter a valid amount');
             return;
         }
@@ -12162,17 +12749,7 @@ text-transform: uppercase;
                 if (type === 'metal-exchange' && paymentData.metal_exchange_metal_id !== undefined) {
                     existingPayment.purity_carat = paymentData.purity_carat;
                     existingPayment.quantity = paymentData.quantity;
-                    existingPayment.metal_exchange_metal_id = paymentData.metal_exchange_metal_id;
-                    existingPayment.metal_exchange_product_id = paymentData.metal_exchange_product_id;
-                    existingPayment.metal_exchange_product_name = paymentData.metal_exchange_product_name;
-                    existingPayment.metal_exchange_gross_wt = paymentData.metal_exchange_gross_wt;
-                    existingPayment.metal_exchange_item_code = paymentData.metal_exchange_item_code;
-                    existingPayment.metal_exchange_rate = paymentData.metal_exchange_rate;
-                    existingPayment.metal_exchange_purity_wt = paymentData.metal_exchange_purity_wt;
-                }
-                if (type === 'metal-exchange' && paymentData.metal_exchange_metal_id !== undefined) {
-                    existingPayment.purity_carat = paymentData.purity_carat;
-                    existingPayment.quantity = paymentData.quantity;
+                    existingPayment.amount = paymentData.amount;
                     existingPayment.metal_exchange_metal_id = paymentData.metal_exchange_metal_id;
                     existingPayment.metal_exchange_product_id = paymentData.metal_exchange_product_id;
                     existingPayment.metal_exchange_product_name = paymentData.metal_exchange_product_name;
@@ -12793,6 +13370,7 @@ text-transform: uppercase;
         window.currentEditingRow = null;
     }
 </script>
+<script src="assets/js/product-modal-excel-import-sale-order-voucher.js"></script>
 <!-- Print Invoice Confirmation Modal -->
 <div id="printInvoiceModal" class="print-invoice-modal" style="display: none;">
     <div class="print-invoice-modal-content">

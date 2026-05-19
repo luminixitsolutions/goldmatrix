@@ -201,14 +201,96 @@ function auragold_market_rate($row) {
         height: 220px;
     }
 }
+/* Phones / small tablets only — md (768px)+ matches former desktop/tablet layout */
+@media (max-width: 767.98px) {
+    .retail-dashboard-root {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    .retail-hero {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        margin-bottom: 16px;
+    }
+    .retail-hero h1 {
+        font-size: 1.2rem;
+    }
+    .retail-hero .sub {
+        font-size: 12px;
+        line-height: 1.45;
+    }
+    .retail-hero-actions {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .retail-hero-actions .retail-badge,
+    .retail-hero-actions .btn {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        box-sizing: border-box;
+    }
+    .retail-hero-actions .retail-badge {
+        white-space: normal;
+        line-height: 1.25;
+        padding: 8px 8px;
+    }
+    .retail-hero-actions .btn {
+        white-space: normal;
+        line-height: 1.25;
+        padding: 8px 8px;
+        font-size: 0.8rem;
+    }
+    .retail-kpi {
+        min-height: 0;
+        align-items: flex-start;
+        padding: 14px 14px;
+    }
+    .retail-kpi .icon-wrap {
+        width: 46px;
+        height: 46px;
+        font-size: 20px;
+    }
+    .retail-kpi .lbl {
+        white-space: normal;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+        hyphens: auto;
+    }
+    .retail-kpi .num {
+        font-size: 1.15rem;
+        word-break: break-word;
+    }
+    .retail-kpi > div:last-child {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+    .retail-chart-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .retail-foot {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
 </style>
 
+<div class="retail-dashboard-root">
 <div class="retail-hero">
     <div>
         <h1>Retailer Dashboard</h1>
-        <div class="sub">Today’s sales, purchases, orders, collections, and market rates — customers with type <strong>Customer</strong> (retail).</div>
     </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+    <div class="d-flex align-items-center gap-2 flex-wrap retail-hero-actions">
         <span class="retail-badge">Retailer Dashboard</span>
         <a class="btn btn-outline-secondary btn-sm" href="dashboards-hub.php"><i class="feather icon-grid"></i> All dashboards</a>
     </div>
@@ -219,7 +301,7 @@ function auragold_market_rate($row) {
 <?php endif; ?>
 
 <div class="row g-3 mb-3">
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-sales h-100">
             <div class="icon-wrap"><i class="feather icon-shopping-cart"></i></div>
             <div>
@@ -228,7 +310,7 @@ function auragold_market_rate($row) {
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-purchase h-100">
             <div class="icon-wrap"><i class="feather icon-plus-circle"></i></div>
             <div>
@@ -237,7 +319,7 @@ function auragold_market_rate($row) {
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-orders h-100">
             <div class="icon-wrap"><i class="feather icon-package"></i></div>
             <div>
@@ -246,7 +328,7 @@ function auragold_market_rate($row) {
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-cash h-100">
             <div class="icon-wrap"><i class="feather icon-dollar-sign"></i></div>
             <div>
@@ -257,7 +339,7 @@ function auragold_market_rate($row) {
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-bank h-100">
             <div class="icon-wrap"><i class="feather icon-briefcase"></i></div>
             <div>
@@ -268,7 +350,7 @@ function auragold_market_rate($row) {
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-xl-2">
+    <div class="col-12 col-md-4 col-xl-2">
         <div class="retail-kpi kpi-card h-100">
             <div class="icon-wrap"><i class="feather icon-credit-card"></i></div>
             <div>
@@ -308,6 +390,7 @@ function auragold_market_rate($row) {
 <div class="retail-foot">
     <span>AuraGold · Retailer dashboard</span>
     <span><a href="account-ledger.php" class="text-muted" style="text-decoration:none;">Account ledger</a></span>
+</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

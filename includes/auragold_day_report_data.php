@@ -333,6 +333,7 @@ function auragold_day_report_collect($conn, string $report_date): array
             FROM tbl_receipt_vouchers rv
             LEFT JOIN tbl_receipt_voucher_items rvi ON rv.id = rvi.voucher_id
             WHERE DATE(rv.voucher_date) = '$report_date' AND IFNULL(rv.status, '') NOT IN ('cancelled', 'void')
+              AND COALESCE(rv.voucher_type,'') <> 'Sale Invoice Payment'
             GROUP BY rv.id, rv.voucher_no, rv.total_amount, rv.voucher_date
             ORDER BY rv.id ASC
         ");
@@ -350,6 +351,30 @@ function auragold_day_report_collect($conn, string $report_date): array
             'inward_wt'   => (float) ($v['total_weight'] ?? 0),
             'outward_wt'  => 0,
         ];
+    }
+
+    if (day_report_tbl_exists($conn, 'tbl_sale_receipt_vouchers')) {
+        $sale_receipt_vouchers = getList("
+            SELECT srv.id, srv.voucher_no, srv.total_amount, srv.voucher_date,
+                COALESCE(SUM(COALESCE(srvi.weight, 0)), 0) AS total_weight
+            FROM tbl_sale_receipt_vouchers srv
+            LEFT JOIN tbl_sale_receipt_voucher_items srvi ON srv.id = srvi.sale_receipt_voucher_id
+            WHERE DATE(srv.voucher_date) = '$report_date' AND IFNULL(srv.status, '') NOT IN ('cancelled', 'void')
+            GROUP BY srv.id, srv.voucher_no, srv.total_amount, srv.voucher_date
+            ORDER BY srv.id ASC
+        ");
+        if (is_array($sale_receipt_vouchers)) {
+            foreach ($sale_receipt_vouchers as $v) {
+                $amt = (float) $v['total_amount'];
+                $receipt_voucher_rows[] = [
+                    'description' => day_report_prefix_doc_no('SRV', $v['voucher_no'] ?? ''),
+                    'debit'       => 0,
+                    'credit'      => $amt,
+                    'inward_wt'   => (float) ($v['total_weight'] ?? 0),
+                    'outward_wt'  => 0,
+                ];
+            }
+        }
     }
 
     $advance_payments = [];

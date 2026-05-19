@@ -1,0 +1,261 @@
+<?php
+
+session_start();
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/auragold_require_login.php';
+require_once __DIR__ . '/includes/auragold_mail_settings_schema.php';
+
+auragold_require_login_or_exit();
+
+$conn = isset($conn) && $conn instanceof mysqli ? $conn : null;
+if ($conn === null) {
+    die('Database connection is not available.');
+}
+
+auragold_ensure_mail_settings_table($conn);
+
+$flash = ['type' => '', 'message' => ''];
+if (isset($_SESSION['mail_settings_flash']) && is_array($_SESSION['mail_settings_flash'])) {
+    $flash = array_merge(
+        $flash,
+        array_intersect_key(
+            $_SESSION['mail_settings_flash'],
+            array_flip(['type', 'message'])
+        )
+    );
+    unset($_SESSION['mail_settings_flash']);
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (($_POST['mail_settings_action'] ?? '') === 'save')) {
+    $m = isset($_POST['mail']) && is_array($_POST['mail']) ? $_POST['mail'] : [];
+    $ok = auragold_save_mail_settings_from_post($conn, $m);
+    $_SESSION['mail_settings_flash'] = [
+        'type'    => $ok ? 'success' : 'danger',
+        'message' => $ok
+            ? (function_exists('auragold_t') ? (string) auragold_t('mail_settings.saved') : 'Mail settings saved.')
+            : (function_exists('auragold_t') ? (string) auragold_t('mail_settings.save_error') : 'Could not save mail settings.'),
+    ];
+    header('Location: mail-settings.php');
+    exit;
+}
+
+$row = auragold_get_mail_settings_row($conn);
+$has_smtp_password = isset($row['smtp_password']) && trim((string) $row['smtp_password']) !== '';
+
+$t = static function (string $key, string $fallback = ''): string {
+    if (function_exists('auragold_t')) {
+        $s = (string) auragold_t($key);
+        if ($s !== '' && $s !== $key) {
+            return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+        }
+    }
+
+    return htmlspecialchars($fallback !== '' ? $fallback : $key, ENT_QUOTES, 'UTF-8');
+};
+
+$page_title = function_exists('auragold_t') ? (string) auragold_t('mail_settings.page_title') : 'Mail Setting - Set Software - GoldMatrix';
+
+?>
+<!DOCTYPE html>
+<html lang="en" class="default-style">
+<head>
+    <title><?php echo htmlspecialchars($page_title, ENT_QUOTES, 'UTF-8'); ?></title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link rel="icon" type="image/jpeg" href="favicon.jpeg">
+    <?php include 'header-script.php'; ?>
+    <link rel="stylesheet" href="set-software-sidebar.css">
+</head>
+<style>
+html, body { height: 100%; overflow-x: hidden; }
+.layout-content { height: calc(100vh - 60px); overflow: hidden; display: flex; flex-direction: column; }
+.set-software-wrapper { flex: 1; min-height: 0; }
+.set-software-main { overflow-y: auto; }
+.auragold-mail-page { padding: 24px; max-width: 800px; }
+.auragold-mail-page h1 { font-size: 1.35rem; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
+.auragold-mail-page .lead { color: #64748b; font-size: 0.9rem; margin-bottom: 20px; }
+.mail-secure-box { border: 2px solid #1e5a8a; border-radius: 8px; overflow: hidden; margin-bottom: 20px; background: #fff; }
+.mail-secure-box h2 { background: #1e5a8a; color: #fff; font-size: 0.95rem; font-weight: 600; margin: 0; padding: 10px 14px; }
+.mail-secure-box .inner { padding: 14px 16px; font-size: 0.875rem; }
+.mail-secure-box .note { font-size: 0.8rem; color: #475569; margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+.mail-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+@media (max-width: 640px) { .mail-field-grid { grid-template-columns: 1fr; } }
+.mail-field-grid .full { grid-column: 1 / -1; }
+details.mail-nonssl { margin-bottom: 16px; }
+details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600; font-size: 0.9rem; }
+</style>
+<body>
+<?php include 'sidebar.php'; ?>
+<div class="layout-content">
+    <div class="container-fluid flex-grow-1" style="padding-top: 0; padding-bottom: 0;">
+        <div class="set-software-wrapper">
+            <?php include 'set-software-sidebar.php'; ?>
+            <div class="set-software-main">
+                <?php include __DIR__ . '/includes/set-software-branch-banner.php'; ?>
+                <div class="auragold-mail-page">
+                    <h1><?php echo $t('mail_settings.heading', 'Mail Setting'); ?></h1>
+                    <p class="lead"><?php echo $t('mail_settings.lead', 'Configure SMTP for sending mail from the application, and incoming server details for staff setting up email clients (IMAP / POP3).'); ?></p>
+
+                    <?php if ($flash['message'] !== ''): ?>
+                        <div class="alert alert-<?php echo $flash['type'] === 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show" role="alert">
+                            <?php echo htmlspecialchars($flash['message'], ENT_QUOTES, 'UTF-8'); ?>
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="post" action="mail-settings.php" autocomplete="off" id="mail-settings-form">
+                        <input type="hidden" name="mail_settings_action" value="save">
+
+                        <div class="card shadow-sm mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title mb-3"><?php echo $t('mail_settings.section_outgoing', 'Outgoing mail (SMTP)'); ?></h5>
+                                <div class="mail-field-grid">
+                                    <div class="form-group full">
+                                        <label for="smtp_host"><?php echo $t('mail_settings.smtp_host', 'SMTP server'); ?></label>
+                                        <input type="text" class="form-control" id="smtp_host" name="mail[smtp_host]" value="<?php echo htmlspecialchars((string) ($row['smtp_host'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="mail.example.com">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="smtp_port"><?php echo $t('mail_settings.smtp_port', 'SMTP port'); ?></label>
+                                        <input type="number" class="form-control" id="smtp_port" name="mail[smtp_port]" value="<?php echo (int) ($row['smtp_port'] ?? 465); ?>" min="1" max="65535">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="smtp_encryption"><?php echo $t('mail_settings.smtp_encryption', 'Encryption'); ?></label>
+                                        <select class="form-control" id="smtp_encryption" name="mail[smtp_encryption]">
+                                            <?php
+                                            $enc = (string) ($row['smtp_encryption'] ?? 'ssl');
+                                            foreach (['ssl' => 'SSL', 'tls' => 'TLS', 'none' => 'None'] as $k => $lab) {
+                                                $sel = ($enc === $k) ? ' selected' : '';
+                                                echo '<option value="' . htmlspecialchars($k, ENT_QUOTES, 'UTF-8') . '"' . $sel . '>' . htmlspecialchars($lab, ENT_QUOTES, 'UTF-8') . '</option>';
+                                            }
+                                            ?>
+                                        </select>
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="smtp_username"><?php echo $t('mail_settings.smtp_username', 'Username (email)'); ?></label>
+                                        <input type="text" class="form-control" id="smtp_username" name="mail[smtp_username]" value="<?php echo htmlspecialchars((string) ($row['smtp_username'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="smtp_password"><?php echo $t('mail_settings.smtp_password', 'Password'); ?></label>
+                                        <input type="password" class="form-control" id="smtp_password" name="mail[smtp_password]" value="" placeholder="<?php echo $has_smtp_password ? $t('mail_settings.password_keep', 'Leave blank to keep the saved password') : $t('mail_settings.password_enter', 'Account password'); ?>">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card shadow-sm mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title mb-3"><?php echo $t('mail_settings.section_sender', 'Sender identity'); ?></h5>
+                                <div class="mail-field-grid">
+                                    <div class="form-group">
+                                        <label for="from_name"><?php echo $t('mail_settings.from_name', 'From name'); ?></label>
+                                        <input type="text" class="form-control" id="from_name" name="mail[from_name]" value="<?php echo htmlspecialchars((string) ($row['from_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="from_email"><?php echo $t('mail_settings.from_email', 'From email'); ?></label>
+                                        <input type="email" class="form-control" id="from_email" name="mail[from_email]" value="<?php echo htmlspecialchars((string) ($row['from_email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card shadow-sm mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title mb-3"><?php echo $t('mail_settings.section_incoming', 'Incoming mail (for email clients)'); ?></h5>
+                                <p class="text-muted small mb-3"><?php echo $t('mail_settings.incoming_hint', 'These values are stored for reference (e.g. Outlook / phone mail setup). They do not configure server-side mail by themselves.'); ?></p>
+                                <div class="mail-field-grid">
+                                    <div class="form-group full">
+                                        <label for="incoming_host"><?php echo $t('mail_settings.incoming_host', 'Incoming server'); ?></label>
+                                        <input type="text" class="form-control" id="incoming_host" name="mail[incoming_host]" value="<?php echo htmlspecialchars((string) ($row['incoming_host'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="mail.example.com">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="imap_port"><?php echo $t('mail_settings.imap_port', 'IMAP port (SSL)'); ?></label>
+                                        <input type="number" class="form-control" id="imap_port" name="mail[imap_port]" value="<?php echo (int) ($row['imap_port'] ?? 993); ?>" min="1" max="65535">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="pop3_port"><?php echo $t('mail_settings.pop3_port', 'POP3 port (SSL)'); ?></label>
+                                        <input type="number" class="form-control" id="pop3_port" name="mail[pop3_port]" value="<?php echo (int) ($row['pop3_port'] ?? 995); ?>" min="1" max="65535">
+                                    </div>
+                                </div>
+
+                                <div class="mail-secure-box mt-3">
+                                    <h2><?php echo $t('mail_settings.manual_ssl_title', 'Secure SSL/TLS settings (typical)'); ?></h2>
+                                    <div class="inner">
+                                        <p class="mb-1"><strong><?php echo $t('mail_settings.manual_username', 'Username'); ?>:</strong> <?php echo htmlspecialchars((string) ($row['smtp_username'] ?? ''), ENT_QUOTES, 'UTF-8') !== '' ? htmlspecialchars((string) $row['smtp_username'], ENT_QUOTES, 'UTF-8') : '—'; ?></p>
+                                        <p class="mb-1"><strong><?php echo $t('mail_settings.manual_password_note', 'Password'); ?>:</strong> <?php echo $t('mail_settings.manual_password_text', 'Use the email account\'s password.'); ?></p>
+                                        <p class="mb-1"><strong><?php echo $t('mail_settings.manual_incoming', 'Incoming server'); ?>:</strong>
+                                            <?php
+                                            $ih = trim((string) ($row['incoming_host'] ?? ''));
+                                            echo $ih !== '' ? htmlspecialchars($ih, ENT_QUOTES, 'UTF-8') : '—';
+                                            ?>
+                                            — IMAP <?php echo (int) ($row['imap_port'] ?? 993); ?>, POP3 <?php echo (int) ($row['pop3_port'] ?? 995); ?>
+                                        </p>
+                                        <p class="mb-0"><strong><?php echo $t('mail_settings.manual_outgoing', 'Outgoing server'); ?>:</strong>
+                                            <?php
+                                            $sh = trim((string) ($row['smtp_host'] ?? ''));
+                                            echo $sh !== '' ? htmlspecialchars($sh, ENT_QUOTES, 'UTF-8') : '—';
+                                            ?>
+                                            — SMTP <?php echo (int) ($row['smtp_port'] ?? 465); ?>
+                                        </p>
+                                        <p class="note mb-0"><?php echo $t('mail_settings.manual_auth_note', 'IMAP, POP3, and SMTP usually require authentication with the same username and password.'); ?></p>
+                                    </div>
+                                </div>
+
+                                <details class="mail-nonssl mt-3">
+                                    <summary><?php echo $t('mail_settings.show_non_ssl', 'Show non-SSL/TLS ports (reference)'); ?></summary>
+                                    <p class="text-muted small mt-2 mb-0"><?php echo $t('mail_settings.non_ssl_text', 'Common non-secure ports: IMAP 143, POP3 110, SMTP 25 or 587 (STARTTLS). Your host may differ; prefer SSL/TLS when available.'); ?></p>
+                                </details>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary"><?php echo $t('mail_settings.save', 'Save'); ?></button>
+                        <button type="button" class="btn btn-outline-secondary ml-2" id="btn-test-smtp"><?php echo $t('mail_settings.test_connection', 'Test SMTP connection'); ?></button>
+                        <p class="text-muted small mt-2 mb-0" id="mail-test-result" style="display:none;"></p>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php include 'footer-script.php'; ?>
+<script>
+(function () {
+    var btn = document.getElementById('btn-test-smtp');
+    var out = document.getElementById('mail-test-result');
+    if (!btn || !out) return;
+    btn.addEventListener('click', function () {
+        var host = (document.getElementById('smtp_host') || {}).value || '';
+        var port = parseInt((document.getElementById('smtp_port') || {}).value || '0', 10);
+        var enc = (document.getElementById('smtp_encryption') || {}).value || 'ssl';
+        out.style.display = 'block';
+        out.className = 'text-muted small mt-2 mb-0';
+        out.textContent = <?php echo json_encode(function_exists('auragold_t') ? (string) auragold_t('mail_settings.testing') : 'Testing connection…', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?>;
+        btn.disabled = true;
+        fetch('ajax/test-mail-smtp.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ smtp_host: host, smtp_port: port, smtp_encryption: enc })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                btn.disabled = false;
+                if (data && data.ok) {
+                    out.className = 'small mt-2 mb-0 text-success';
+                    out.textContent = data.message || 'OK';
+                } else {
+                    out.className = 'small mt-2 mb-0 text-danger';
+                    out.textContent = (data && data.message) ? data.message : <?php echo json_encode(function_exists('auragold_t') ? (string) auragold_t('mail_settings.test_failed') : 'Test failed.', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?>;
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                out.className = 'small mt-2 mb-0 text-danger';
+                out.textContent = <?php echo json_encode(function_exists('auragold_t') ? (string) auragold_t('mail_settings.test_network_error') : 'Network error.', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?>;
+            });
+    });
+})();
+</script>
+</body>
+</html>

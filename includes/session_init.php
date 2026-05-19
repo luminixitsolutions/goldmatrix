@@ -2,20 +2,21 @@
 require_once __DIR__ . '/remote_license_gate.php';
 
 /**
- * Session cookie + server-side max lifetime (1 hour). Each request refreshes the cookie (sliding).
+ * Session cookie + server-side max lifetime (24 hours). Each authenticated request refreshes the cookie (sliding).
  * Compatible with PHP 7.2+ (array cookie params need 7.3+).
  */
 if (!defined('AURAGOLD_SESSION_LIFETIME')) {
-    define('AURAGOLD_SESSION_LIFETIME', 3600);
+    define('AURAGOLD_SESSION_LIFETIME', 86400);
 }
 
 /**
- * Log out if there has been no HTTP request within this many seconds (sliding window via auragold_last_activity).
- * Set to 0 to disable idle logout. Override via env AURAGOLD_IDLE_LOGOUT_SECONDS.
+ * Optional idle logout: log out if there has been no HTTP request within this many seconds (sliding window).
+ * Default 0 = disabled so the session is not ended by inactivity; use Logout to end the session.
+ * Override via env AURAGOLD_IDLE_LOGOUT_SECONDS (e.g. 1800 for 30 minutes idle).
  */
 if (!defined('AURAGOLD_IDLE_LOGOUT_SECONDS')) {
     $envIdle = getenv('AURAGOLD_IDLE_LOGOUT_SECONDS');
-    $idleSec = 3600;
+    $idleSec = 0;
     if ($envIdle !== false && $envIdle !== '') {
         $idleSec = (int) $envIdle;
         if ($idleSec < 0) {

@@ -52,6 +52,9 @@ $edit_voucher_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $edit_voucher = null;
 $edit_items = [];
 
+$auragold_voucher_ds_kind = 'receipt_voucher';
+$auragold_voucher_ds_db_id = (int) ($edit_voucher_id ?? 0);
+
 if ($edit_voucher_id > 0) {
     $edit_voucher = getRecord("SELECT * FROM tbl_receipt_vouchers WHERE id = $edit_voucher_id");
     if ($edit_voucher) {
@@ -1052,7 +1055,14 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
                                                     <div class="payment-icon payment-jewelry" title="Scrap Payment" style="cursor: pointer; transition: all 0.3s ease;">
                                                         <img src="icons/scrap.jpeg" alt="Scrap Payment" style="width: 45px; height: 45px;">
                                                     </div>
+                                                    <div class="payment-icon payment-diamond" title="Diamond" style="cursor: pointer; transition: all 0.3s ease;">
+                                                        <img src="icons/diamond.jpeg" alt="Diamond" style="width: 45px; height: 45px;">
+                                                    </div>
+                                                    <div class="payment-icon payment-stone" title="Stone" style="cursor: pointer; transition: all 0.3s ease;">
+                                                        <img src="icons/stone.jpeg" alt="Stone" style="width: 45px; height: 45px;">
+                                                    </div>
                                                 </div>
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
                                                 <div class="table-responsive" style="padding-top: 6px;">
                                                     <table class="table table-bordered table-sm" id="receiptTable" style="margin-bottom: 0; font-size: 0.75rem;">
                                                         <thead>
@@ -1564,6 +1574,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
 
     <!-- Core scripts -->
     <?php include 'footer-script.php';?>
+    <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
     <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
     <script src="assets/libs/sortablejs/sortable.js"></script>
     <script src="js/customer-ledger-address.js"></script>
@@ -3167,6 +3178,10 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
         voucherData.total_gold = totalGold;
         voucherData.total_silver = totalSilver;
 
+        if (typeof window.auragoldVoucherDiamondStoneAppendPendingToOrderData === 'function') {
+            window.auragoldVoucherDiamondStoneAppendPendingToOrderData(voucherData);
+        }
+
         // Validation
         if (!voucherData.customer_name) {
             alert('Please select a customer');
@@ -3180,6 +3195,9 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             dataType: 'json',
             success: function(response) {
                 if (response.status === 'success') {
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(response.voucher_id);
+                    }
                     const voucherId = parseInt(response.voucher_id || voucherData.voucher_id || 0, 10) || 0;
                     // After save, always land on a blank form (no ?id=) — print modal closes to same page
                     const reportUrl = buildTransactionReportUrlAfterVoucherSave();
@@ -3204,6 +3222,12 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
 
     // Load edit data if editing
     <?php if ($edit_voucher): ?>
+    <?php
+    require_once __DIR__ . '/includes/auragold_voucher_diamond_stock.php';
+    require_once __DIR__ . '/includes/auragold_voucher_stone_stock.php';
+    $rv_edit_di = auragold_voucher_list_diamond_issue_rows_for_kind($conn, 'receipt_voucher', (int) ($edit_voucher['id'] ?? 0));
+    $rv_edit_si = auragold_voucher_list_stone_issue_rows_for_kind($conn, 'receipt_voucher', (int) ($edit_voucher['id'] ?? 0));
+    ?>
     $(document).ready(function() {
         $('#customerId').val('<?php echo $edit_voucher['customer_id'] ?? ''; ?>');
         $('#customerName').val('<?php echo htmlspecialchars($edit_voucher['customer_name'] ?? ''); ?>');
@@ -3227,6 +3251,14 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             formatVoucherPreviousBalanceMetal(document.getElementById('previousBalanceGemstone'), parseFloat('<?php echo (float)($edit_voucher['previous_gemstone'] ?? 0); ?>') || 0, 3, 'data-original-gemstone');
         }
         $('#comment').val('<?php echo htmlspecialchars($edit_voucher['comment'] ?? ''); ?>');
+
+        if (typeof window.auragoldVoucherDiamondStonePopulateFromOrder === 'function') {
+            window.auragoldVoucherDiamondStonePopulateFromOrder({
+                id: <?php echo (int) ($edit_voucher['id'] ?? 0); ?>,
+                diamond_issues: <?php echo json_encode($rv_edit_di ?: [], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT); ?>,
+                stone_issues: <?php echo json_encode($rv_edit_si ?: [], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT); ?>
+            });
+        }
 
         // Remove "No payment entries" row and load saved items as full 18-column rows (all columns visible)
         <?php if (!empty($edit_items)): ?>

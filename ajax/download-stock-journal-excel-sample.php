@@ -12,7 +12,8 @@ if (empty($_SESSION['Admin']['id']) && empty($_SESSION['user_id'])) {
 }
 
 $voucher = isset($_GET['voucher']) ? trim((string) $_GET['voucher']) : '';
-if ($voucher !== '' && $voucher !== 'product_opening') {
+$allowedVouchers = ['product_opening', 'purchase_invoice', 'sale_order'];
+if ($voucher !== '' && !in_array($voucher, $allowedVouchers, true)) {
     header('HTTP/1.1 400 Bad Request');
     header('Content-Type: text/plain; charset=utf-8');
     echo 'Invalid voucher';
@@ -20,6 +21,55 @@ if ($voucher !== '' && $voucher !== 'product_opening') {
 }
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_product_metal_tab_match.php';
+
+$item_id_dl = isset($_GET['item_id']) ? (int) $_GET['item_id'] : 0;
+$product_id = isset($_GET['product_id']) ? (int) $_GET['product_id'] : 0;
+$characteristic_id = isset($_GET['characteristic_id']) ? (int) $_GET['characteristic_id'] : 0;
+$metal_id_sample = isset($_GET['metal_id']) ? (int) $_GET['metal_id'] : 0;
+$diamond_category_sample = isset($_GET['diamond_category']) ? trim((string) $_GET['diamond_category']) : '';
+if ($diamond_category_sample !== '' && !in_array($diamond_category_sample, ['Diamonds', 'GemStones', 'Jewellery'], true)) {
+    $diamond_category_sample = '';
+}
+$metal_name_sample = '';
+if ($metal_id_sample > 0) {
+    $metalRowSample = getRecord('SELECT display_name, system_name FROM tbl_metal WHERE id = ' . $metal_id_sample . ' LIMIT 1');
+    if ($metalRowSample) {
+        $metal_name_sample = trim((string) ($metalRowSample['display_name'] ?? $metalRowSample['system_name'] ?? ''));
+    }
+}
+
+if ($voucher === 'purchase_invoice') {
+    if ($item_id_dl <= 0) {
+        header('HTTP/1.1 400 Bad Request');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'item_id is required for purchase invoice sample';
+        exit;
+    }
+    $piiDl = getRecord('SELECT product_id, product_characteristic_id FROM tbl_purchase_invoice_items WHERE id = ' . $item_id_dl . ' LIMIT 1');
+    if (!$piiDl) {
+        header('HTTP/1.1 404 Not Found');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Purchase invoice line not found';
+        exit;
+    }
+    $dbPid = (int) ($piiDl['product_id'] ?? 0);
+    $dbCid = (int) ($piiDl['product_characteristic_id'] ?? 0);
+    if ($product_id > 0 && $dbPid > 0 && $product_id !== $dbPid) {
+        header('HTTP/1.1 400 Bad Request');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'product_id does not match this invoice line';
+        exit;
+    }
+    if ($characteristic_id > 0 && $dbCid > 0 && $characteristic_id !== $dbCid) {
+        header('HTTP/1.1 400 Bad Request');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'characteristic_id does not match this invoice line';
+        exit;
+    }
+    $product_id = $dbPid > 0 ? $dbPid : $product_id;
+    $characteristic_id = $dbCid > 0 ? $dbCid : $characteristic_id;
+}
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -29,9 +79,6 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-
-$product_id = isset($_GET['product_id']) ? (int) $_GET['product_id'] : 0;
-$characteristic_id = isset($_GET['characteristic_id']) ? (int) $_GET['characteristic_id'] : 0;
 
 $product_name_db = '';
 if ($product_id > 0) {
@@ -76,24 +123,83 @@ $sample_calculation_names = [
 ];
 
 $sample_product_labels = [];
-if ($characteristic_id > 0) {
+
+$build_sample_product_labels_from_rows = static function (array $rows): array {
+    $labels = [];
+    $baseCounts = [];
+    foreach ($rows as $row) {
+        $n = trim((string) ($row['name'] ?? ''));
+        if ($n === '') {
+            continue;
+        }
+        $mn = trim((string) ($row['metal_name'] ?? ''));
+        $base = $mn !== '' ? $n . ' - ' . $mn : $n;
+        $baseCounts[$base] = ($baseCounts[$base] ?? 0) + 1;
+    }
+    foreach ($rows as $row) {
+        $n = trim((string) ($row['name'] ?? ''));
+        if ($n === '') {
+            continue;
+        }
+        $mn = trim((string) ($row['metal_name'] ?? ''));
+        $cid = (int) ($row['characteristic_id'] ?? 0);
+        $base = $mn !== '' ? $n . ' - ' . $mn : $n;
+        $label = $base;
+        if (($baseCounts[$base] ?? 0) > 1 && $cid > 0) {
+            $label = $base . ' [' . $cid . ']';
+        }
+        $labels[] = $label;
+    }
+
+    return array_values(array_unique($labels));
+};
+
+if ($voucher === 'sale_order' && $metal_id_sample > 0) {
+    $where_so = 'p.status = 1 AND pc.status = 1' . auragold_sql_pc_metal_matches_tab_metal($metal_id_sample);
+    if ($diamond_category_sample !== '') {
+        $where_so .= " AND pc.diamond_category = '" . esc($diamond_category_sample) . "'";
+    }
+    $branch_filter_so = 0;
+    if (!empty($_SESSION['working_branch_id'])) {
+        $branch_filter_so = (int) $_SESSION['working_branch_id'];
+    } elseif (!empty($_SESSION['branch_id'])) {
+        $branch_filter_so = (int) $_SESSION['branch_id'];
+    }
+    $where_query_so = $where_so;
+    if ($branch_filter_so > 0) {
+        $where_query_so .= ' AND pc.branch_id = ' . $branch_filter_so;
+    }
+    $sql_so = '
+        SELECT p.name, m.display_name AS metal_name, pc.id AS characteristic_id
+        FROM tbl_products p
+        INNER JOIN tbl_product_characteristics pc ON p.id = pc.product_id
+        INNER JOIN tbl_metal m ON pc.metal_id = m.id
+        WHERE ' . $where_query_so . '
+        ORDER BY p.name ASC, pc.id ASC
+        LIMIT 3000';
+    $so_rows = getList($sql_so);
+    if ((!is_array($so_rows) || count($so_rows) === 0) && $branch_filter_so > 0) {
+        $sql_so = '
+            SELECT p.name, m.display_name AS metal_name, pc.id AS characteristic_id
+            FROM tbl_products p
+            INNER JOIN tbl_product_characteristics pc ON p.id = pc.product_id
+            INNER JOIN tbl_metal m ON pc.metal_id = m.id
+            WHERE ' . $where_so . '
+            ORDER BY p.name ASC, pc.id ASC
+            LIMIT 3000';
+        $so_rows = getList($sql_so);
+    }
+    $sample_product_labels = $build_sample_product_labels_from_rows(is_array($so_rows) ? $so_rows : []);
+} elseif ($characteristic_id > 0) {
     $pchars = getList(
-        'SELECT p.name, m.display_name AS metal_name
+        'SELECT p.name, m.display_name AS metal_name, pc.id AS characteristic_id
         FROM tbl_product_characteristics pc
         INNER JOIN tbl_products p ON pc.product_id = p.id
         INNER JOIN tbl_metal m ON m.id = pc.metal_id
         WHERE pc.id = ' . (int) $characteristic_id . ' AND p.status = 1 AND pc.status = 1
         ORDER BY p.name ASC, pc.id ASC'
     );
-    foreach ($pchars as $row) {
-        $n = trim((string) ($row['name'] ?? ''));
-        $mn = trim((string) ($row['metal_name'] ?? ''));
-        if ($n === '') {
-            continue;
-        }
-        $sample_product_labels[] = $mn !== '' ? $n . ' - ' . $mn : $n;
-    }
-    $sample_product_labels = array_values(array_unique($sample_product_labels));
+    $sample_product_labels = $build_sample_product_labels_from_rows(is_array($pchars) ? $pchars : []);
 }
 if (empty($sample_product_labels) && $product_name_db !== '') {
     $sample_product_labels = [$product_name_db];
@@ -118,7 +224,9 @@ $sample_tax_type_labels = ['Tax on making', 'Tax of net amount', 'No tax'];
 $sample_other_charge_types = ['Fix', 'Percentage'];
 
 $product_display_for_sample = $product_name_db;
-if ($characteristic_id > 0) {
+if (!empty($sample_product_labels)) {
+    $product_display_for_sample = $sample_product_labels[0];
+} elseif ($characteristic_id > 0) {
     $pRow = getRecord(
         'SELECT p.name, m.display_name AS metal_name
         FROM tbl_product_characteristics pc
@@ -413,7 +521,18 @@ if (isset($labelIndices['Carat'], $listRangeMeta['carat']) && count($labelIndice
 }
 
 $filename = 'stock_journal_product_opening_sample';
-if ($product_id > 0) {
+if ($voucher === 'sale_order') {
+    $filename = 'sale_order_import_sample';
+    if ($metal_name_sample !== '') {
+        $slug = strtolower(preg_replace('/[^a-z0-9]+/', '_', $metal_name_sample));
+        $slug = trim($slug, '_');
+        if ($slug !== '') {
+            $filename .= '_' . $slug;
+        }
+    } elseif ($metal_id_sample > 0) {
+        $filename .= '_metal' . $metal_id_sample;
+    }
+} elseif ($product_id > 0) {
     $filename .= '_product' . $product_id;
 }
 $filename .= '.xlsx';

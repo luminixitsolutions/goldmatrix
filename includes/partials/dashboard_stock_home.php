@@ -41,25 +41,6 @@ $branchChartLabelsJson = json_encode($mcb['branch_labels'] ?? [], JSON_UNESCAPED
 $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UNICODE);
 ?>
 <style>
-.stk-bc { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.stk-bc .fake-search {
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 6px 14px;
-    font-size: 14px;
-    color: #64748b;
-    background: #fff;
-    min-width: 120px;
-}
-.stk-badge {
-    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
-    color: #fff;
-    font-weight: 600;
-    font-size: 13px;
-    padding: 8px 18px;
-    border-radius: 10px;
-    box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
-}
 .stk-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .stk-head h1 { font-size: 1.35rem; font-weight: 700; color: #1e293b; margin: 0; }
 .stk-tile {
@@ -149,19 +130,63 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
     flex-wrap: wrap;
     gap: 8px;
 }
+@media (max-width: 991.98px) {
+    .stk-chart-h { height: 240px; }
+}
+@media (max-width: 575.98px) {
+    .stk-chart-h { height: 200px; }
+}
+@media (max-width: 767.98px) {
+    .stk-dashboard-root {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    .stk-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        margin-bottom: 12px;
+    }
+    .stk-head h1 { font-size: 1.15rem; }
+    .stk-head-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+        width: 100%;
+    }
+    .stk-head-actions .btn {
+        min-height: 44px;
+        font-size: 0.68rem;
+        padding: 6px 4px;
+        white-space: normal;
+        line-height: 1.2;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    .stk-tile {
+        min-height: 0;
+        align-items: flex-start;
+    }
+    .stk-tile .txt .t {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .stk-foot {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
 </style>
 
-<div class="stk-bc">
-    <span class="fake-search">Stock</span>
-    <span class="stk-badge">Stock Dashboard</span>
-</div>
+<div class="stk-dashboard-root">
 
 <div class="stk-head">
     <div>
         <h1>Stock Dashboard</h1>
-        <div style="font-size:13px;color:#64748b;margin-top:4px;">Live view from <code>tbl_stock</code> (status = 1). Inward / outward follow stock types used in stock history.</div>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap stk-head-actions">
         <a class="btn btn-outline-primary btn-sm" href="gold-silver-analysis.php"><i class="feather icon-bar-chart-2"></i> Gold / Silver analysis</a>
         <a class="btn btn-outline-secondary btn-sm" href="dashboards-hub.php"><i class="feather icon-grid"></i> All dashboards</a>
         <a class="btn btn-outline-secondary btn-sm" href="stock-history.php"><i class="feather icon-list"></i> Stock history</a>
@@ -169,9 +194,9 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
 </div>
 
 <div class="row g-3">
-    <div class="col-xl-8">
+    <div class="col-12 col-xl-8">
         <div class="row g-3">
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="stk-tile">
                     <div class="txt">
                         <div class="t">Total Products</div>
@@ -181,7 +206,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
                     <div class="stk-ic ic-p"><i class="feather icon-package"></i></div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="stk-tile">
                     <div class="txt">
                         <div class="t">Zero Stock</div>
@@ -191,7 +216,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
                     <div class="stk-ic ic-y"><i class="feather icon-box"></i></div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="stk-tile">
                     <div class="txt">
                         <div class="t">Inward Stock</div>
@@ -201,7 +226,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
                     <div class="stk-ic ic-g"><i class="feather icon-log-in"></i></div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="stk-tile">
                     <div class="txt">
                         <div class="t">Outward Stock</div>
@@ -219,7 +244,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
                 $ic = $tileIc[$idx] ?? 'ic-p';
                 $fi = $tileIcon[$idx] ?? 'icon-package';
             ?>
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="stk-tile">
                     <div class="txt">
                         <div class="t"><?php echo $nm; ?></div>
@@ -265,7 +290,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
         </div>
     </div>
 
-    <div class="col-xl-4">
+    <div class="col-12 col-xl-4">
         <div class="stk-panel">
             <h3>Metal Wise Stock</h3>
             <div class="small text-muted mb-2">Weight by metal per branch. Metal names use each branch’s metal master (<code>tbl_metal</code> matched to stock branch).</div>
@@ -350,6 +375,7 @@ $branchChartDatasetsJson = json_encode($mcb['datasets'] ?? [], JSON_UNESCAPED_UN
 <div class="stk-foot">
     <span>Total value: <strong><?php echo number_format((float) ($stk['totals']['value'] ?? 0), 2); ?></strong> · Rows: <?php echo (int) ($stk['totals']['rows'] ?? 0); ?></span>
     <span><a href="stock-history.php" class="text-muted" style="text-decoration:none;">Details</a></span>
+</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

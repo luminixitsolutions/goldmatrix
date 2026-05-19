@@ -148,7 +148,7 @@ if (count($metals_list) > 1) {
 // Load Products from database
 $search_term = isset($_GET['search']) ? esc($_GET['search']) : '';
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$per_page = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 5;
+$per_page = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 10;
 $offset = ($page - 1) * $per_page;
 
 $auragold_sub_branch_list_from_pb = false;
@@ -651,11 +651,6 @@ html, body{
     min-width: 0;
 }
 
-.product-details-form {
-    min-width: 0;
-    overflow: hidden;
-}
-
 .tax-table-wrapper {
     min-width: 0;
     overflow: hidden;
@@ -676,8 +671,14 @@ html, body{
         min-width: 0;
     }
     .left-panel {
-        max-height: min(42vh, 380px);
+        /* Taller list column on phones/tablets — room for ~5+ product rows */
+        max-height: min(75vh, 620px);
         min-height: 0;
+    }
+    .left-list {
+        min-height: 260px;
+        max-height: none;
+        flex: 1 1 auto;
     }
     .right-content {
         min-height: 0;
@@ -705,7 +706,113 @@ html, body{
     }
     .pc-scroll {
         min-height: 200px;
-        max-height: min(50vh, 480px);
+        max-height: min(62vh, calc(100dvh - 11rem));
+        overflow-x: auto !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+    }
+
+    /* Hide app identity strip (title, FY, DB) — more room for the form */
+    body.page-product-opening .company-header .auragold-header-identity__title,
+    body.page-product-opening .company-header .auragold-header-identity__pill,
+    body.page-product-opening .company-header .user-info .auragold-header-db-name {
+        display: none !important;
+    }
+    body.page-product-opening .company-header {
+        row-gap: 0.35rem;
+        padding-bottom: 10px;
+    }
+
+    /* Product characteristics: hide column header row; scroll value columns only */
+    body.page-product-opening .pc-table {
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    body.page-product-opening .pc-table thead {
+        display: none;
+    }
+    body.page-product-opening .pc-table tbody td[data-col="check"],
+    body.page-product-opening .pc-table tbody td[data-col="metal"] {
+        position: sticky;
+        z-index: 6;
+        background: #ffffff;
+        box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08);
+    }
+    body.page-product-opening .pc-table tbody tr:hover td[data-col="metal"],
+    body.page-product-opening .pc-table tbody tr:hover td[data-col="check"] {
+        background: #f8fafc;
+    }
+    body.page-product-opening .pc-wrapper {
+        overflow: hidden;
+        min-width: 0;
+    }
+
+    /* Page shell: use width on narrow viewports */
+    .layout-content > .container-fluid.flex-grow-1:has(.product-wrapper) {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    .card-body:has(.product-wrapper) {
+        padding: 12px;
+    }
+    .product-wrapper .card-box {
+        padding: 12px 14px;
+    }
+    .left-panel > .d-flex.justify-content-between {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .left-panel > .d-flex.justify-content-between > .btn,
+    .left-panel > .d-flex.justify-content-between > a.btn {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
+    .pagination-wrapper {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .pagination-wrapper .d-flex.align-items-center {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .checkbox-custom {
+        margin-top: 8px;
+    }
+    .left-list table td.product-name {
+        word-break: break-word;
+        white-space: normal;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .layout-content > .container-fluid.flex-grow-1:has(.product-wrapper) {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    .card-body:has(.product-wrapper) {
+        padding: 10px;
+    }
+    .product-wrapper .card-box {
+        padding: 10px 12px;
+    }
+    .product-details-actions {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+    .product-details-actions .btn {
+        width: 100%;
+    }
+    /* Slightly narrower sticky metal column — table still scrolls horizontally */
+    .pc-table thead th[data-col="metal"],
+    .pc-table tbody td[data-col="metal"] {
+        min-width: 140px;
+        width: 140px;
+    }
+    body.page-product-opening .pc-scroll {
+        max-height: min(58vh, calc(100dvh - 10rem));
     }
 }
 
@@ -722,10 +829,13 @@ html, body{
 .product-details-form {
     position: relative;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 @media (min-width: 992px) {
+    .product-details-form {
+        overflow: hidden;
+    }
     .product-details-form .product-details-actions {
         position: absolute;
         top: 0;
@@ -1474,7 +1584,7 @@ html, body{
 
 </head>
 
-<body>
+<body class="page-product-opening">
 <!-- [ Preloader ] Start -->
 <div class="page-loader">
     <div class="bg-primary"></div>

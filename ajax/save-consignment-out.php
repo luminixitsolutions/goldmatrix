@@ -2,6 +2,7 @@
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/auragold_branch_data_scope.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -61,6 +62,15 @@ try {
     if (!is_array($items)) {
         $items = [];
     }
+
+    $payments_co = isset($_POST['payments']) ? $_POST['payments'] : '[]';
+    if (is_string($payments_co)) {
+        $payments_co = json_decode($payments_co, true);
+    }
+    if (!is_array($payments_co)) {
+        $payments_co = [];
+    }
+    $metal_exchange_barcodes_out = [];
 
     // Validation
     if (empty($customer_name)) {
@@ -631,6 +641,46 @@ try {
         }
     }
 
+    if (!empty($payments_co)) {
+        foreach ($payments_co as $__pco) {
+            if (!is_array($__pco)) {
+                continue;
+            }
+            $__mco = auragold_payment_merge_stored_details($__pco);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mco)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mco);
+        }
+        $___cout_me_has_ref = auragold_metal_exchange_document_init($conn, $co_was_update, (int) $consignment_id, 'consignment_out_metal_exchange');
+        $__co_plain_no = trim((string) $consignment_no);
+        $__co_dt = substr(trim((string) $consignment_date), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__co_dt)) {
+            $__co_dt = date('Y-m-d');
+        }
+        foreach ($payments_co as $pay_seq => $payment) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                continue;
+            }
+            $___pm_co = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'consignment_out_metal_exchange',
+                (int) $consignment_id,
+                $__co_plain_no,
+                $__co_dt,
+                $___pm_co,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___cout_me_has_ref,
+                'Consignment Out — Metal Exchange',
+                'cout_me',
+                'COU-ME-',
+                $metal_exchange_barcodes_out
+            );
+        }
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -648,7 +698,8 @@ try {
         'status' => 'success',
         'message' => 'Consignment Out saved successfully',
         'consignment_id' => $consignment_id,
-        'consignment_no' => $consignment_no
+        'consignment_no' => $consignment_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
 
 } catch (Exception $e) {

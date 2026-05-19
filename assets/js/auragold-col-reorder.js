@@ -1,5 +1,5 @@
 /**
- * Column drag-reorder + vertical borders (class acr-col-table).
+ * Column drag-reorder + resize (class acr-col-table).
  * Requires Sortable 1.x (load Sortable.min.js before this file).
  */
 (function (global) {
@@ -19,14 +19,24 @@
             'table.acr-col-table thead th:first-child,',
             'table.acr-col-table tbody td:first-child,',
             'table.acr-col-table tfoot td:first-child { border-left: none; }',
-            '.table thead th.acr-th-reorder { position: relative !important; }',
-            'table.acr-col-table thead th.acr-th-reorder .acr-th-drag {',
+            'table.acr-col-table thead th.acr-th-reorder,',
+            'table.acr-col-table thead th.acr-th-resizable { position: relative !important; }',
+            'table.acr-col-table thead th .acr-th-drag {',
             '  display: inline-flex; align-items: center; justify-content: center;',
             '  vertical-align: middle; margin-left: 0.35rem; cursor: grab; color: #c9a962;',
             '  line-height: 1; flex-shrink: 0;',
             '}',
-            'table.acr-col-table thead th.acr-th-reorder .acr-th-drag .feather { width: 0.95rem; height: 0.95rem; }',
-            'table.acr-col-table thead th.acr-th-reorder .acr-th-drag:active { cursor: grabbing; }',
+            'table.acr-col-table thead th .acr-th-drag .feather { width: 0.95rem; height: 0.95rem; }',
+            'table.acr-col-table thead th .acr-th-drag:active { cursor: grabbing; }',
+            'table.acr-col-table thead th .acr-th-resize {',
+            '  position: absolute; right: 0; top: 0; bottom: 0; width: 6px;',
+            '  cursor: col-resize; z-index: 4;',
+            '  background: linear-gradient(90deg, transparent, rgba(15, 23, 42, 0.08));',
+            '}',
+            'table.acr-col-table thead th .acr-th-resize:hover {',
+            '  background: rgba(201, 169, 98, 0.35);',
+            '}',
+            'table.acr-col-table thead th.acr-col-resizing { user-select: none; }',
             '.acr-sortable-ghost { opacity: 0.45; }',
             '.acr-sortable-chosen { opacity: 0.9; }'
         ].join('\n');
@@ -116,39 +126,73 @@
         table.querySelectorAll('tfoot tr').forEach(syncTr);
     }
 
-    function enhanceHeaders(table, fixedFirst, fixedKey) {
-        var tr = theadRow(table);
-        if (!tr) return;
-        var ths = tr.querySelectorAll('th');
-        ths.forEach(function (th, idx) {
+    function thMinWidth(th, fallback) {
+        var attr = th.getAttribute('data-acr-min');
+        if (attr != null && attr !== '') {
+            var n = parseInt(attr, 10);
+            if (!isNaN(n) && n > 0) return n;
+        }
+        var st = th.style.minWidth || window.getComputedStyle(th).minWidth;
+        if (st && st !== 'auto' && st !== '0px') {
+            var p = parseInt(st, 10);
+            if (!isNaN(p) && p > 0) return p;
+        }
+        return fallback || 60;
+    }
+
+    function applyWidths(table, widths, minWidthDefault) {
+        if (!widths || typeof widths !== 'object') return;
+        table.querySelectorAll('thead th[data-col]').forEach(function (th) {
             var k = th.getAttribute('data-col');
-            var isFixed = fixedFirst && (idx === 0 || (fixedKey && k === fixedKey));
-            th.classList.toggle('acr-th-fixed', isFixed);
-            th.classList.toggle('acr-th-reorder', !isFixed);
-            if (isFixed) return;
-            if (th.querySelector('.acr-th-drag')) return;
-            var drag = document.createElement('span');
-            drag.className = 'acr-th-drag';
-            drag.title = 'Drag to reorder columns';
-            drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
-            th.appendChild(drag);
+            if (!k || widths[k] == null) return;
+            var floor = thMinWidth(th, minWidthDefault);
+            var px = Math.max(floor, parseInt(widths[k], 10) || 0);
+            th.style.width = px + 'px';
+            th.style.minWidth = px + 'px';
+            table.querySelectorAll('tbody td[data-col="' + k + '"], tfoot td[data-col="' + k + '"]').forEach(function (td) {
+                td.style.minWidth = px + 'px';
+            });
         });
     }
 
-    function loadOrder(key) {
+    function collectWidths(table) {
+        var w = {};
+        table.querySelectorAll('thead th[data-col]').forEach(function (th) {
+            var k = th.getAttribute('data-col');
+            if (k) w[k] = Math.round(th.getBoundingClientRect().width);
+        });
+        return w;
+    }
+
+    function loadJson(key) {
         try {
             var raw = localStorage.getItem(key);
             if (!raw) return null;
-            var o = JSON.parse(raw);
-            return Array.isArray(o) ? o : null;
+            return JSON.parse(raw);
         } catch (e) {
             return null;
         }
     }
 
+    function loadOrder(key) {
+        var o = loadJson(key);
+        return Array.isArray(o) ? o : null;
+    }
+
+    function loadWidths(key) {
+        var o = loadJson(key);
+        return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+    }
+
     function saveOrder(key, order) {
         try {
             localStorage.setItem(key, JSON.stringify(order));
+        } catch (e) {}
+    }
+
+    function saveWidths(key, widths) {
+        try {
+            localStorage.setItem(key, JSON.stringify(widths));
         } catch (e) {}
     }
 
@@ -160,6 +204,74 @@
             if (Object.prototype.hasOwnProperty.call(need, k)) need[k]++;
         });
         return keys.every(function (k) { return need[k] === 1; });
+    }
+
+    function enhanceHeaders(table, fixedFirst, fixedKey) {
+        var tr = theadRow(table);
+        if (!tr) return;
+        var ths = tr.querySelectorAll('th');
+        ths.forEach(function (th, idx) {
+            if (th._acrEnhanced) return;
+            th._acrEnhanced = true;
+            var k = th.getAttribute('data-col');
+            var isFixed = fixedFirst && (idx === 0 || (fixedKey && k === fixedKey));
+            th.classList.toggle('acr-th-fixed', isFixed);
+            th.classList.toggle('acr-th-reorder', !isFixed);
+            th.classList.add('acr-th-resizable');
+            if (!th.querySelector('.acr-th-resize')) {
+                var resize = document.createElement('span');
+                resize.className = 'acr-th-resize';
+                resize.title = 'Drag to resize column';
+                resize.setAttribute('aria-hidden', 'true');
+                th.appendChild(resize);
+            }
+            if (!isFixed && !th.querySelector('.acr-th-drag')) {
+                var drag = document.createElement('span');
+                drag.className = 'acr-th-drag';
+                drag.title = 'Drag to reorder columns';
+                drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
+                th.appendChild(drag);
+            }
+        });
+    }
+
+    function bindResize(table, widthsKey, minWidthDefault) {
+        if (table._acrResizeBound) return;
+        table._acrResizeBound = true;
+        table.addEventListener('mousedown', function (e) {
+            var handle = e.target.closest ? e.target.closest('.acr-th-resize') : null;
+            if (!handle || !table.contains(handle)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var th = handle.closest('th');
+            if (!th) return;
+            var startX = e.clientX;
+            var startW = th.getBoundingClientRect().width;
+            var minW = thMinWidth(th, minWidthDefault);
+            function onMove(e2) {
+                var dx = e2.clientX - startX;
+                var w = Math.max(minW, Math.round(startW + dx));
+                th.style.width = w + 'px';
+                th.style.minWidth = w + 'px';
+                var col = th.getAttribute('data-col');
+                if (col) {
+                    table.querySelectorAll('tbody td[data-col="' + col + '"], tfoot td[data-col="' + col + '"]').forEach(function (td) {
+                        td.style.minWidth = w + 'px';
+                    });
+                }
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.style.cursor = '';
+                th.classList.remove('acr-col-resizing');
+                if (widthsKey) saveWidths(widthsKey, collectWidths(table));
+            }
+            th.classList.add('acr-col-resizing');
+            document.body.style.cursor = 'col-resize';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
     }
 
     function bindSortable(table, storageKey, fixedFirst, fixedKey) {
@@ -179,8 +291,8 @@
             animation: 150,
             handle: '.acr-th-drag',
             draggable: 'th.acr-th-reorder',
-            filter: '.acr-th-fixed',
-            preventOnFilter: false,
+            filter: '.acr-th-fixed, .acr-th-resize',
+            preventOnFilter: true,
             ghostClass: 'acr-sortable-ghost',
             chosenClass: 'acr-sortable-chosen',
             onEnd: function () {
@@ -202,14 +314,28 @@
         });
     }
 
+    function refresh(table) {
+        if (!table || table.tagName !== 'TABLE' || !table._acrOpts) return;
+        var opts = table._acrOpts;
+        ensureDataCols(table);
+        applyOrder(table, getOrder(table));
+        var w = loadWidths(opts.widthsStorageKey);
+        if (w) applyWidths(table, w, opts.minWidth || 60);
+    }
+
     /**
      * @param {string|HTMLElement} selector
-     * @param {{ storageKey: string, fixedFirst?: boolean, fixedKey?: string }} opts
+     * @param {{ storageKey: string, widthsStorageKey?: string, fixedFirst?: boolean, fixedKey?: string, minWidth?: number }} opts
      */
     function init(selector, opts) {
         opts = opts || {};
+        if (!opts.storageKey) return;
         var table = typeof selector === 'string' ? document.querySelector(selector) : selector;
         if (!table || table.tagName !== 'TABLE') return;
+
+        opts.widthsStorageKey = opts.widthsStorageKey || (opts.storageKey + '_widths');
+        opts.minWidth = opts.minWidth || 60;
+        table._acrOpts = opts;
 
         injectCss();
         table.classList.add('acr-col-table');
@@ -228,8 +354,12 @@
         }
 
         enhanceHeaders(table, !!opts.fixedFirst, opts.fixedKey || null);
+        bindResize(table, opts.widthsStorageKey, opts.minWidth);
         bindSortable(table, opts.storageKey, !!opts.fixedFirst, opts.fixedKey || null);
+
+        var savedW = loadWidths(opts.widthsStorageKey);
+        if (savedW) applyWidths(table, savedW, opts.minWidth);
     }
 
-    global.AuragoldColReorder = { init: init };
+    global.AuragoldColReorder = { init: init, refresh: refresh };
 })(typeof window !== 'undefined' ? window : this);

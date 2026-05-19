@@ -16,6 +16,7 @@ require_once __DIR__ . '/../includes/auragold_pos_sale_invoice_schema.php';
 if (function_exists('auragold_ensure_pos_sale_invoice_tables')) {
     auragold_ensure_pos_sale_invoice_tables($conn);
 }
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 ob_start();
@@ -86,16 +87,7 @@ mysqli_begin_transaction($conn);
 if (!function_exists('sale_invoice_payment_merge_stored_details')) {
     function sale_invoice_payment_merge_stored_details(array $payment): array
     {
-        $pd_raw = $payment['payment_details'] ?? '';
-        if (is_string($pd_raw) && $pd_raw !== '') {
-            $j = json_decode($pd_raw, true);
-            if (is_array($j)) {
-                // Row first, JSON overwrites — same as get-sale-invoice (avoid NULL cols wiping saved details)
-                return array_merge($payment, $j);
-            }
-        }
-
-        return $payment;
+        return auragold_payment_merge_stored_details($payment);
     }
 }
 
@@ -108,62 +100,7 @@ if (!function_exists('sale_invoice_metal_exchange_resolve')) {
      */
     function sale_invoice_metal_exchange_resolve($conn, array $payment): array
     {
-        $payment = sale_invoice_payment_merge_stored_details($payment);
-        $dep = strtolower(trim((string) ($payment['deposit_into'] ?? '')));
-        $pt = strtolower(trim((string) ($payment['payment_type'] ?? '')));
-        $is_me = ($dep === 'metal exchange')
-            || (strpos($pt, 'm. exch') !== false)
-            || (strpos($pt, 'metal') !== false && strpos($pt, 'exch') !== false)
-            || ($pt === 'metal_exchange')
-            || (strpos($pt, 'metal-exchange') !== false);
-        $empty = ['is_me' => false, 'gross' => 0.0, 'pure' => 0.0, 'metal_id' => 0, 'qty' => 1.0, 'is_silver' => false];
-        if (!$is_me) {
-            return $empty;
-        }
-        $qty = (float) ($payment['quantity'] ?? 1);
-        if ($qty < 1e-8) {
-            $qty = 1.0;
-        }
-        $gross = (float) ($payment['metal_exchange_gross_wt'] ?? 0) * $qty;
-        if ($gross <= 1e-8) {
-            $gross = (float) ($payment['gross_weight'] ?? $payment['gross_wt'] ?? $payment['net_weight'] ?? $payment['weight'] ?? 0) * $qty;
-        }
-        if ($gross <= 1e-8 && $qty > 0) {
-            $gross = $qty;
-        }
-        $pure = (float) ($payment['metal_exchange_purity_wt'] ?? 0) * $qty;
-        if ($pure <= 1e-8) {
-            $pure = (float) ($payment['purity_weight'] ?? $payment['pure_wt'] ?? $payment['purity_wt'] ?? 0) * $qty;
-        }
-        $pur_num = (float) ($payment['purity_carat'] ?? $payment['purity'] ?? 0);
-        if ($pure <= 1e-8 && $gross > 1e-8 && $pur_num > 0) {
-            if ($pur_num <= 1) {
-                $pure = $gross * $pur_num;
-            } elseif ($pur_num <= 100) {
-                $pure = $gross * ($pur_num / 100);
-            } else {
-                $pure = $gross * ($pur_num / 1000);
-            }
-        }
-        if ($pure <= 1e-8 && $gross > 1e-8) {
-            $pure = $gross;
-        }
-        $mid = (int) ($payment['metal_exchange_metal_id'] ?? $payment['metal_id'] ?? 0);
-        $nm = '';
-        if ($mid > 0) {
-            $mr = getRecord("SELECT LOWER(TRIM(COALESCE(display_name, system_name, ''))) AS n FROM tbl_metal WHERE id = $mid LIMIT 1");
-            $nm = strtolower(trim((string) ($mr['n'] ?? '')));
-        }
-        $is_silver = strpos($nm, 'silver') !== false;
-
-        return [
-            'is_me' => true,
-            'gross' => $gross,
-            'pure' => $pure,
-            'metal_id' => $mid,
-            'qty' => $qty,
-            'is_silver' => $is_silver,
-        ];
+        return auragold_metal_exchange_resolve($conn, $payment);
     }
 }
 
@@ -188,6 +125,68 @@ if (!function_exists('sale_invoice_metal_exchange_ledger_wts')) {
     }
 }
 
+if (!function_exists('sale_invoice_validate_metal_exchange_payments')) {
+    /**
+     * Metal exchange lines must use a real tbl_product_characteristics row for the chosen metal.
+     *
+     * @param array<int, array<string, mixed>> $payments
+     *
+     * @throws Exception
+     */
+    function sale_invoice_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = sale_invoice_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
+        }
+    }
+}
+
+if (!function_exists('sale_invoice_validate_scrap_payments')) {
+    /**
+     * Scrap payment lines must use a real tbl_product_characteristics row for the chosen metal.
+     *
+     * @param array<int, array<string, mixed>> $payments
+     *
+     * @throws Exception
+     */
+    function sale_invoice_validate_scrap_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = sale_invoice_payment_merge_stored_details($payment);
+            $amt = (float) ($payment['amount'] ?? 0);
+            if ($amt <= 0) {
+                continue;
+            }
+            $pt = strtolower(trim((string) ($payment['payment_type'] ?? '')));
+            $dep = strtolower(trim((string) ($payment['deposit_into'] ?? '')));
+            $is_scrap = (strpos($pt, 'scrap') !== false) || ($dep === 'scrap');
+            if (!$is_scrap) {
+                continue;
+            }
+            $mid = (int) ($payment['scrap_metal_id'] ?? $payment['metal_id'] ?? 0);
+            $pcid = (int) ($payment['scrap_product_id'] ?? $payment['product_id'] ?? 0);
+            if ($mid <= 0) {
+                throw new Exception('Scrap payment: select a metal.');
+            }
+            if ($pcid <= 0) {
+                throw new Exception('Scrap payment: select a product from the search list (custom product names are not allowed).');
+            }
+            $row = getRecord(
+                'SELECT pc.id FROM tbl_product_characteristics pc '
+                . 'INNER JOIN tbl_products p ON p.id = pc.product_id '
+                . "WHERE pc.id = $pcid AND pc.metal_id = $mid AND p.status = 1 AND pc.status = 1 LIMIT 1"
+            );
+            if (!$row) {
+                throw new Exception('Scrap payment: the selected product is not valid for this metal or is inactive. Choose a product from the list.');
+            }
+        }
+    }
+}
+
 if (!function_exists('sale_invoice_payment_is_auto_receipt_money')) {
     /** Cash / Bank / UPI / Card / Metal Exchange (same RV) — not Scrap (legacy payment lines on sale invoice no). */
     function sale_invoice_payment_is_auto_receipt_money(array $payment): bool
@@ -206,9 +205,40 @@ if (!function_exists('sale_invoice_payment_is_auto_receipt_money')) {
 }
 
 if (!function_exists('sale_invoice_delete_auto_receipt_vouchers_for_refs')) {
-    /** Removes auto-created receipt vouchers linked to a sale invoice (ref_no + voucher_type). */
+    /** Removes auto sale receipt vouchers (tbl_sale_receipt_vouchers) and legacy tbl_receipt_vouchers sale rows. */
     function sale_invoice_delete_auto_receipt_vouchers_for_refs($conn, array $ref_numbers): void
     {
+        $refs = array_values(array_unique(array_filter(array_map('trim', $ref_numbers))));
+        if (empty($refs)) {
+            return;
+        }
+        if (function_exists('auragold_ensure_tbl_sale_receipt_vouchers')) {
+            auragold_ensure_tbl_sale_receipt_vouchers($conn);
+        }
+        $in = [];
+        foreach ($refs as $r) {
+            $in[] = "'" . mysqli_real_escape_string($conn, $r) . "'";
+        }
+        $in_sql = implode(',', $in);
+
+        $chk_srv = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+        if ($chk_srv && mysqli_num_rows($chk_srv) > 0) {
+            mysqli_free_result($chk_srv);
+            $rows = getList("SELECT id FROM tbl_sale_receipt_vouchers WHERE sale_invoice_no IN ($in_sql)");
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $vid = (int) ($row['id'] ?? 0);
+                    if ($vid <= 0) {
+                        continue;
+                    }
+                    mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'sale_receipt_voucher' AND transaction_id = $vid AND status = 1");
+                    mysqli_query($conn, "DELETE FROM tbl_sale_receipt_vouchers WHERE id = $vid");
+                }
+            }
+        } elseif ($chk_srv) {
+            mysqli_free_result($chk_srv);
+        }
+
         $chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
         if (!$chk || mysqli_num_rows($chk) === 0) {
             if ($chk) {
@@ -218,16 +248,6 @@ if (!function_exists('sale_invoice_delete_auto_receipt_vouchers_for_refs')) {
             return;
         }
         mysqli_free_result($chk);
-
-        $refs = array_values(array_unique(array_filter(array_map('trim', $ref_numbers))));
-        if (empty($refs)) {
-            return;
-        }
-        $in = [];
-        foreach ($refs as $r) {
-            $in[] = "'" . mysqli_real_escape_string($conn, $r) . "'";
-        }
-        $in_sql = implode(',', $in);
         $rows = getList("SELECT id FROM tbl_receipt_vouchers WHERE ref_no IN ($in_sql) AND voucher_type = 'Sale Invoice Payment'");
         if (!is_array($rows)) {
             return;
@@ -246,7 +266,8 @@ if (!function_exists('sale_invoice_delete_auto_receipt_vouchers_for_refs')) {
 
 if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')) {
     /**
-     * One receipt voucher per sale (money lines only), ledger as receipt_voucher (RV no + Receipt Voucher type in reports).
+     * One sale receipt voucher per sale (money lines) in tbl_sale_receipt_vouchers; ledger transaction_type sale_receipt_voucher.
+     * Voucher number from bill series "Sale Receipt Voucher" (SRV- / bill-series.php).
      *
      * @param array<int, array<string, mixed>> $payments_money
      *
@@ -270,22 +291,24 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             return;
         }
 
-        $chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
+        if (function_exists('auragold_ensure_tbl_sale_receipt_vouchers')) {
+            auragold_ensure_tbl_sale_receipt_vouchers($conn);
+        }
+
+        $chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
         if (!$chk || mysqli_num_rows($chk) === 0) {
             if ($chk) {
                 mysqli_free_result($chk);
             }
-
-            return;
+            throw new Exception('Sale receipt voucher header table is missing or not accessible after schema bootstrap.');
         }
         mysqli_free_result($chk);
-        $chk2 = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_voucher_items'");
+        $chk2 = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_voucher_items'");
         if (!$chk2 || mysqli_num_rows($chk2) === 0) {
             if ($chk2) {
                 mysqli_free_result($chk2);
             }
-
-            return;
+            throw new Exception('Sale receipt voucher item table is missing or not accessible after schema bootstrap.');
         }
         mysqli_free_result($chk2);
 
@@ -307,12 +330,9 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             $sum_cgp += (float) $_mw['cgp'];
         }
 
-        $last_rv = getRecord('SELECT voucher_no FROM tbl_receipt_vouchers ORDER BY id DESC LIMIT 1');
-        $rv_next = 1;
-        if ($last_rv && !empty($last_rv['voucher_no']) && preg_match('/RV[- ]?(\d+)/i', (string) $last_rv['voucher_no'], $m)) {
-            $rv_next = (int) $m[1] + 1;
-        }
-        $voucher_no = 'RV-' . $rv_next;
+        $voucher_no = function_exists('getNextSaleReceiptVoucherNo')
+            ? getNextSaleReceiptVoucherNo($conn)
+            : 'SRV-1';
         $voucher_no_esc = mysqli_real_escape_string($conn, $voucher_no);
         $inv_date_esc = mysqli_real_escape_string($conn, $invoice_date);
         $curr_esc = mysqli_real_escape_string($conn, $currency !== '' ? $currency : 'AED');
@@ -320,19 +340,26 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
         $ref_sql = $ref_no !== null && $ref_no !== '' ? "'" . mysqli_real_escape_string($conn, $ref_no) . "'" : 'NULL';
         $comment_esc = mysqli_real_escape_string($conn, 'Receipt against Sale Invoice: ' . $invoice_no);
         $uid_sql = $user_id > 0 ? (string) $user_id : 'NULL';
+        $inv_no_esc = mysqli_real_escape_string($conn, $invoice_no);
+        $srv_branch_col = '';
+        $srv_branch_val = '';
+        if (function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_sale_receipt_vouchers', 'branch_id')) {
+            $srv_branch_col = ', branch_id';
+            $srv_branch_val = ', ' . ($ledger_branch_id > 0 ? (string) (int) $ledger_branch_id : 'NULL');
+        }
 
         $ins_h = "
-            INSERT INTO tbl_receipt_vouchers (
-                voucher_no, customer_id, customer_name, ref_no, voucher_type, against,
+            INSERT INTO tbl_sale_receipt_vouchers (
+                voucher_no, customer_id, customer_name, sale_invoice_no, against,
                 sales_person, currency, voucher_date, fixing_type,
                 previous_balance, previous_gold, previous_silver,
                 total_amount, total_gold, total_silver, comment, status, created_by, created_at
+                $srv_branch_col
             ) VALUES (
                 '$voucher_no_esc',
                 " . ($customer_id > 0 ? $customer_id : 'NULL') . ",
                 '$customer_name',
-                '$invoice_no',
-                'Sale Invoice Payment',
+                '$inv_no_esc',
                 'Sale Invoice',
                 $sp_esc,
                 '$curr_esc',
@@ -344,14 +371,15 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 'saved',
                 $uid_sql,
                 NOW()
+                $srv_branch_val
             )
         ";
         if (!mysqli_query($conn, $ins_h)) {
-            throw new Exception('Receipt voucher header failed: ' . mysqli_error($conn));
+            throw new Exception('Sale receipt voucher header failed: ' . mysqli_error($conn));
         }
         $voucher_id = (int) mysqli_insert_id($conn);
         if ($voucher_id <= 0) {
-            throw new Exception('Receipt voucher id missing after insert');
+            throw new Exception('Sale receipt voucher id missing after insert');
         }
 
         foreach ($payments_money as $payment) {
@@ -377,8 +405,8 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             $purity_carat_sql = ($is_me && $purity_carat_esc !== '') ? "'$purity_carat_esc'" : 'NULL';
             $pure_wt_sql = $is_me ? (string) $pure_w : '0';
             $ins_i = "
-                INSERT INTO tbl_receipt_voucher_items (
-                    voucher_id, payment_type, diamond_category, transaction_no, deposit_into,
+                INSERT INTO tbl_sale_receipt_voucher_items (
+                    sale_receipt_voucher_id, payment_type, diamond_category, transaction_no, deposit_into,
                     product_id, cheque_date, weight, metal_id, quantity, purity_carat, purity_wt,
                     amount, previous_balance_amount, status, created_at
                 ) VALUES (
@@ -395,7 +423,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 )
             ";
             if (!mysqli_query($conn, $ins_i)) {
-                throw new Exception('Receipt voucher item failed: ' . mysqli_error($conn));
+                throw new Exception('Sale receipt voucher item failed: ' . mysqli_error($conn));
             }
         }
 
@@ -466,7 +494,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 : ', NULL, NULL';
         }
 
-        $rv_desc_base = 'Receipt Voucher: ' . $voucher_no . ' (Sale ' . $invoice_no . ')';
+        $rv_desc_base = 'Sale Receipt Voucher: ' . $voucher_no . ' (Sale ' . $invoice_no . ')';
         if ($sum_cg > 0.00001 || $sum_cs > 0.00001) {
             $rv_desc_base .= ' — Metal Exchange';
         }
@@ -490,7 +518,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 ) VALUES (
                     $ledger_customer_id$lb_val,
                     '$customer_name',
-                    'receipt_voucher',
+                    'sale_receipt_voucher',
                     $voucher_id,
                     '$voucher_no_esc',
                     '$inv_date_esc',
@@ -518,7 +546,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 ) VALUES (
                     $ledger_customer_id$lb_val,
                     '$customer_name',
-                    'receipt_voucher',
+                    'sale_receipt_voucher',
                     $voucher_id,
                     '$voucher_no_esc',
                     '$inv_date_esc',
@@ -536,7 +564,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             ";
         }
         if (!mysqli_query($conn, $ledger_sql)) {
-            throw new Exception('Receipt voucher party ledger failed: ' . mysqli_error($conn));
+            throw new Exception('Sale receipt voucher party ledger failed: ' . mysqli_error($conn));
         }
 
         foreach ($payments_money as $item) {
@@ -560,7 +588,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             ");
             $cash_prev_balance = (float) ($cash_balance_record['balance_amount'] ?? 0);
             $cash_new_balance = $cash_prev_balance + $line_amt;
-            $cash_desc_esc = mysqli_real_escape_string($conn, 'Receipt from ' . $customer_name . ' (Receipt Voucher ' . $voucher_no . ')');
+            $cash_desc_esc = mysqli_real_escape_string($conn, 'Receipt from ' . $customer_name . ' (Sale Receipt Voucher ' . $voucher_no . ')');
             $ca_line_esc = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt_raw, $line_amt));
 
             if ($ledger_has_against) {
@@ -574,7 +602,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                     ) VALUES (
                         0$lb_val,
                         '$dep_esc',
-                        'receipt_voucher',
+                        'sale_receipt_voucher',
                         $voucher_id,
                         '$voucher_no_esc',
                         '$inv_date_esc',
@@ -602,7 +630,7 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                     ) VALUES (
                         0$lb_val,
                         '$dep_esc',
-                        'receipt_voucher',
+                        'sale_receipt_voucher',
                         $voucher_id,
                         '$voucher_no_esc',
                         '$inv_date_esc',
@@ -620,13 +648,14 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 ";
             }
             if (!mysqli_query($conn, $cash_ledger_sql)) {
-                throw new Exception('Receipt voucher cash/bank ledger failed: ' . mysqli_error($conn));
+                throw new Exception('Sale receipt voucher cash/bank ledger failed: ' . mysqli_error($conn));
             }
         }
     }
 }
 
 try {
+    $metal_exchange_barcodes_out = [];
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
     
     // Log the request for debugging
@@ -1704,6 +1733,8 @@ try {
     }
     
     if (!empty($payments) && is_array($payments)) {
+        sale_invoice_validate_metal_exchange_payments($conn, $payments);
+        sale_invoice_validate_scrap_payments($conn, $payments);
         $sip_has_payment_details = false;
         $_sipdc = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_pos_sale_invoice_payments LIKE 'payment_details'");
         if ($_sipdc && mysqli_num_rows($_sipdc) > 0) {
@@ -1720,23 +1751,28 @@ try {
             mysqli_free_result($_sipdc2);
         }
 
-        foreach ($payments as $payment) {
+        $___pos_si_me_has_ref = auragold_metal_exchange_document_init($conn, $is_update, (int) $invoice_id, 'pos_sale_invoice_metal_exchange');
+
+        foreach ($payments as $pay_seq => $payment) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                continue;
+            }
+            $payment = sale_invoice_payment_merge_stored_details($payment);
             $payment_type = esc($payment['payment_type'] ?? '');
             $deposit_into = esc($payment['deposit_into'] ?? '');
             $transaction_no = esc($payment['transaction_no'] ?? '');
             $cheque_date = isset($payment['cheque_date']) && $payment['cheque_date'] ? esc($payment['cheque_date']) : NULL;
             $purity_carat = esc($payment['purity_carat'] ?? '');
-            $amount = (float)($payment['amount'] ?? 0);
-            $previous_balance_amount = (float)($payment['previous_balance_amount'] ?? 0);
-            $current_order_amount = (float)($payment['current_order_amount'] ?? ($amount - $previous_balance_amount));
+            $amount = (float) ($payment['amount'] ?? 0);
+            $previous_balance_amount = (float) ($payment['previous_balance_amount'] ?? 0);
+            $current_order_amount = (float) ($payment['current_order_amount'] ?? ($amount - $previous_balance_amount));
             $diamond_category = esc($payment['diamond_category'] ?? '');
-            $quantity = (float)($payment['quantity'] ?? 0);
+            $quantity = (float) ($payment['quantity'] ?? 0);
             $payment_details_esc = mysqli_real_escape_string($conn, json_encode($payment, JSON_UNESCAPED_UNICODE));
             $pd_ins_col = $sip_has_payment_details ? ', payment_details' : '';
             $pd_ins_val = $sip_has_payment_details ? ", '$payment_details_esc'" : '';
 
-            if ($amount > 0) {
-                $payment_sql = "
+            $payment_sql = "
                     INSERT INTO tbl_pos_sale_invoice_payments (
                         invoice_id, payment_type, deposit_into, transaction_no,
                         cheque_date, purity_carat, amount, previous_balance_amount, current_order_amount, diamond_category, quantity
@@ -1758,10 +1794,26 @@ try {
                     )
                 ";
 
-                if (!mysqli_query($conn, $payment_sql)) {
-                    throw new Exception("Payment insert failed: " . mysqli_error($conn));
-                }
+            if (!mysqli_query($conn, $payment_sql)) {
+                throw new Exception("Payment insert failed: " . mysqli_error($conn));
             }
+
+            $pm_saved_pos = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'pos_sale_invoice_metal_exchange',
+                (int) $invoice_id,
+                trim((string) $invoice_no),
+                substr(trim((string) $invoice_date), 0, 10),
+                $pm_saved_pos,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___pos_si_me_has_ref,
+                'POS Sale Invoice — Metal Exchange',
+                'posi_me',
+                'POSI-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
     }
     
@@ -2376,7 +2428,7 @@ try {
             }
         }
         
-        // Money + metal exchange: one auto receipt voucher (RV-x) + receipt_voucher ledger; scrap only stays as payment lines on sale invoice no.
+        // Money + metal exchange: auto sale receipt voucher (tbl_sale_receipt_vouchers, SRV bill series) + sale_receipt_voucher ledger; scrap stays on sale invoice no.
         $si_money_payments = [];
         if (!empty($payments) && is_array($payments)) {
             foreach ($payments as $payment) {
@@ -2817,6 +2869,11 @@ try {
         'message'    => '',
     ];
 
+    if ((int) $invoice_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'pos_sale_invoice', (int) $invoice_id, $invoice_no, $invoice_date);
+    }
+
     mysqli_commit($conn);
 
     if (!AURAGOLD_EWAY_DISABLED && $enable_eway_bill && function_exists('ewaybill_generate_from_sale_invoice') && (int) $invoice_id > 0) {
@@ -2892,6 +2949,7 @@ try {
         'order_no'   => $invoice_no,
         'eway'       => $eway_json_summary,
         'eway_bill'  => $eway_bill_for_response,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ];
     if (empty($eway_json_summary['skipped']) && (($eway_json_summary['eway_status'] ?? '') === 'failed')) {
         $success_payload['eway_notice'] = 'e-Way Bill failed: ' . ($eway_json_summary['message'] ?? 'see eway_response on invoice');

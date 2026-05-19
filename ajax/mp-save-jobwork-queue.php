@@ -6,6 +6,7 @@
 ob_start();
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_mfg_jobwork_queue_line_weights.php';
 
 header('Content-Type: application/json; charset=utf-8');
 error_log('mp-save-jobwork-queue POST: ' . print_r($_POST, true));
@@ -121,7 +122,27 @@ if (!$jwo_before) {
 
 $from_dept_for_loss = $from_dept_post > 0 ? $from_dept_post : (int)($jwo_before['department_id'] ?? 0);
 $from_user_for_loss = $from_user_post > 0 ? $from_user_post : ((isset($jwo_before['department_user_id']) && $jwo_before['department_user_id'] !== null && $jwo_before['department_user_id'] !== '') ? (int)$jwo_before['department_user_id'] : 0);
-$is_transfer = ($to_dept > 0 && $from_dept_for_loss > 0 && ($to_dept !== $from_dept_for_loss || $to_user !== $from_user_for_loss));
+/** Second+ save to the same department (e.g. Casting again) must log another history row + new JWQ no. */
+$repeat_arrival_same_dept = false;
+if ($to_dept > 0 && $from_dept_for_loss > 0 && $to_dept === $from_dept_for_loss && $to_user === $from_user_for_loss) {
+    $ptc_same = function_exists('getRecord')
+        ? getRecord(
+            'SELECT COUNT(*) AS c FROM tbl_jobwork_queue_activity WHERE jobwork_order_id = ' . (int) $jobwork_order_id
+            . ' AND to_dept_id = ' . (int) $to_dept
+            . " AND LOWER(TRIM(IFNULL(activity_action,''))) = 'department_transfer'"
+        )
+        : null;
+    $repeat_arrival_same_dept = ($ptc_same && (int) ($ptc_same['c'] ?? 0) > 0);
+}
+$is_transfer = (
+    $to_dept > 0
+    && $from_dept_for_loss > 0
+    && (
+        $to_dept !== $from_dept_for_loss
+        || $to_user !== $from_user_for_loss
+        || $repeat_arrival_same_dept
+    )
+);
 
 $auto_loss_on = false;
 if ($is_transfer && $from_dept_for_loss > 0) {
@@ -182,46 +203,58 @@ if ($wsrc) {
 }
 
 function mp_jwq_item_orig_wt(array $row) {
-    $f = isset($row['final_weight']) ? (float)$row['final_weight'] : 0.0;
-    if ($f > 0.0000001) {
-        return $f;
-    }
-    $n = isset($row['net_weight']) ? (float)$row['net_weight'] : 0.0;
+    /** Baseline metal for auto-loss: net else gross (do not prefer final_weight — it is metal-after-loss, not order gross). */
+    $n = isset($row['net_weight']) ? (float) $row['net_weight'] : 0.0;
     if ($n > 0.0000001) {
         return $n;
     }
-    $g = isset($row['gross_weight']) ? (float)$row['gross_weight'] : 0.0;
+    $g = isset($row['gross_weight']) ? (float) $row['gross_weight'] : 0.0;
     if ($g > 0.0000001) {
         return $g;
     }
+    $f = isset($row['final_weight']) ? (float) $row['final_weight'] : 0.0;
+    if ($f > 0.0000001) {
+        return $f;
+    }
+
     return 0.0;
 }
 
-/** Sum line weights (final → net → gross) and quantities — same basis as manufacturing cards after transfer. */
+/** Sum line display totals — same rule as auragold_mfg_jobwork_line_calculated_total_wt (final first, else metal − loss + diamond). */
 function mp_jwq_totals_from_items($conn, $jobwork_order_id, array $ji_cols) {
     if (empty($ji_cols)) {
         return [0.0, 0.0];
     }
-    $whens = [];
+    $dwt = '0';
+    if (!empty($ji_cols['diamond_weight']) && !empty($ji_cols['diamond_wt'])) {
+        $dwt = 'COALESCE(ji.diamond_weight, ji.diamond_wt, 0)';
+    } elseif (!empty($ji_cols['diamond_weight'])) {
+        $dwt = 'COALESCE(ji.diamond_weight, 0)';
+    } elseif (!empty($ji_cols['diamond_wt'])) {
+        $dwt = 'COALESCE(ji.diamond_wt, 0)';
+    }
+    $loss = '0';
+    if (!empty($ji_cols['gold_loss_1']) && !empty($ji_cols['loss_wt'])) {
+        $loss = 'COALESCE(NULLIF(ji.gold_loss_1, 0), ji.loss_wt, 0)';
+    } elseif (!empty($ji_cols['gold_loss_1'])) {
+        $loss = 'COALESCE(ji.gold_loss_1, 0)';
+    } elseif (!empty($ji_cols['loss_wt'])) {
+        $loss = 'COALESCE(ji.loss_wt, 0)';
+    }
+    $metal = '(CASE WHEN COALESCE(ji.net_weight,0) > 0.0000001 THEN ji.net_weight ELSE COALESCE(ji.gross_weight, 0) END)';
+    $fallback = 'GREATEST(0, (' . $metal . ') - (' . $loss . ') + (' . $dwt . '))';
     if (!empty($ji_cols['final_weight'])) {
-        $whens[] = 'WHEN COALESCE(ji.final_weight, 0) > 0.0000001 THEN ji.final_weight';
+        $lineWt = '(CASE WHEN COALESCE(ji.final_weight,0) > 0.0000001 THEN ji.final_weight ELSE (' . $fallback . ') END)';
+    } else {
+        $lineWt = $fallback;
     }
-    if (!empty($ji_cols['net_weight'])) {
-        $whens[] = 'WHEN COALESCE(ji.net_weight, 0) > 0.0000001 THEN ji.net_weight';
-    }
-    if (!empty($ji_cols['gross_weight'])) {
-        $whens[] = 'WHEN COALESCE(ji.gross_weight, 0) > 0.0000001 THEN ji.gross_weight';
-    }
-    if (empty($whens)) {
-        return [0.0, 0.0];
-    }
-    $case = 'CASE ' . implode(' ', $whens) . ' ELSE 0 END';
-    $sql = 'SELECT COALESCE(SUM(' . $case . '), 0) AS sw, COALESCE(SUM(COALESCE(ji.quantity, 0)), 0) AS sq FROM tbl_jobwork_order_items ji WHERE ji.jobwork_order_id = ' . (int)$jobwork_order_id;
+    $sql = 'SELECT COALESCE(SUM(' . $lineWt . '), 0) AS sw, COALESCE(SUM(COALESCE(ji.quantity, 0)), 0) AS sq FROM tbl_jobwork_order_items ji WHERE ji.jobwork_order_id = ' . (int) $jobwork_order_id;
     $r = function_exists('getRecord') ? getRecord($sql) : null;
     if (!$r) {
         return [0.0, 0.0];
     }
-    return [(float)($r['sw'] ?? 0), (float)($r['sq'] ?? 0)];
+
+    return [(float) ($r['sw'] ?? 0), (float) ($r['sq'] ?? 0)];
 }
 
 $use_tx = function_exists('mysqli_begin_transaction');
@@ -382,15 +415,12 @@ if (!empty($ji_cols) && !empty($queue_lines)) {
             $new_metal = $new_total;
         }
 
-        $loss = 0.0;
+        $auto_loss_g = 0.0;
         if ($auto_loss_on && $orig > 0.0000001 && $new_total < $orig - 0.0000001) {
-            $loss = $orig - $new_total;
+            $auto_loss_g = round($orig - $new_total, 4);
         }
 
         $sets = [];
-        if (!empty($ji_cols['final_weight'])) {
-            $sets[] = 'final_weight = ' . round($new_total, 4);
-        }
         if (!empty($ji_cols['net_weight'])) {
             $sets[] = 'net_weight = ' . round($new_metal, 4);
         }
@@ -407,28 +437,56 @@ if (!empty($ji_cols) && !empty($queue_lines)) {
             }
         }
         if (!empty($ji_cols['less_weight'])) {
-            $lw = isset($itrow['less_weight']) ? (float)$itrow['less_weight'] : 0.0;
+            $lwLess = isset($itrow['less_weight']) ? (float) $itrow['less_weight'] : 0.0;
             if ($new_dust !== null && is_finite($new_dust) && $new_dust >= 0 && empty($ji_cols['wastage_wt'])) {
-                $lw = round($new_dust, 4);
+                $lwLess = round($new_dust, 4);
             }
-            if ($loss > 0.0000001) {
-                $sets[] = 'less_weight = ' . round($lw + $loss, 4);
+            if ($auto_loss_g > 0.0000001) {
+                $sets[] = 'less_weight = ' . round($lwLess + $auto_loss_g, 4);
             } elseif ($new_dust !== null && is_finite($new_dust) && $new_dust >= 0 && empty($ji_cols['wastage_wt'])) {
                 $sets[] = 'less_weight = ' . round($new_dust, 4);
             }
         }
+
+        $total_process_loss = 0.0;
         if (!empty($ji_cols['gold_loss_1'])) {
-            $gl = isset($itrow['gold_loss_1']) ? (float)$itrow['gold_loss_1'] : 0.0;
+            $gl = isset($itrow['gold_loss_1']) ? (float) $itrow['gold_loss_1'] : 0.0;
             if ($new_loss_line !== null && is_finite($new_loss_line) && $new_loss_line >= 0) {
                 $gl = round($new_loss_line, 4);
             }
-            if ($loss > 0.0000001) {
-                $sets[] = 'gold_loss_1 = ' . round($gl + $loss, 4);
-            } elseif ($new_loss_line !== null && is_finite($new_loss_line) && $new_loss_line >= 0) {
-                $sets[] = 'gold_loss_1 = ' . round($new_loss_line, 4);
+            if ($auto_loss_g > 0.0000001) {
+                $gl = round($gl + $auto_loss_g, 4);
             }
-        } elseif (!empty($ji_cols['loss_wt']) && $new_loss_line !== null && is_finite($new_loss_line) && $new_loss_line >= 0) {
-            $sets[] = 'loss_wt = ' . round($new_loss_line, 4);
+            $sets[] = 'gold_loss_1 = ' . $gl;
+            $total_process_loss = $gl;
+        } elseif (!empty($ji_cols['loss_wt'])) {
+            $lwv = isset($itrow['loss_wt']) ? (float) $itrow['loss_wt'] : 0.0;
+            if ($new_loss_line !== null && is_finite($new_loss_line) && $new_loss_line >= 0) {
+                $lwv = round($new_loss_line, 4);
+            }
+            if ($auto_loss_g > 0.0000001) {
+                $lwv = round($lwv + $auto_loss_g, 4);
+            }
+            $sets[] = 'loss_wt = ' . $lwv;
+            $total_process_loss = $lwv;
+        }
+
+        $diamond_for_calc = ($new_diamond !== null && is_finite($new_diamond) && $new_diamond >= 0) ? round($new_diamond, 4) : auragold_mfg_jobwork_line_diamond_grams($itrow, $ji_cols);
+        $entered_display_total = round($new_total, 4);
+        error_log(
+            'mp-save-jobwork-queue line weights item_id=' . $item_id
+            . ' gross_weight=' . ($itrow['gross_weight'] ?? '')
+            . ' net_weight=' . ($itrow['net_weight'] ?? '')
+            . ' final_weight_before=' . ($itrow['final_weight'] ?? '')
+            . ' metal_wt=' . round($new_metal, 4)
+            . ' diamond_wt=' . $diamond_for_calc
+            . ' loss_wt_post=' . round($total_process_loss, 4)
+            . ' final_weight_out=' . $entered_display_total
+            . ' (entered total_wt as final display total)'
+        );
+
+        if (!empty($ji_cols['final_weight'])) {
+            $sets[] = 'final_weight = ' . $entered_display_total;
         }
         if (!empty($sets)) {
             $tx_step = 'update_jobwork_order_item_weights';
@@ -440,8 +498,8 @@ if (!empty($ji_cols) && !empty($queue_lines)) {
             }
         }
 
-        if ($loss > 0.0000001) {
-            $loss_val = round($loss, 4);
+        if ($auto_loss_g > 0.0000001) {
+            $loss_val = $auto_loss_g;
             if ($loss_val > 999999.9999) {
                 $loss_val = 999999.9999;
             }

@@ -3,6 +3,7 @@ session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -60,6 +61,20 @@ if (!function_exists('sale_quotation_delete_auto_receipt_vouchers_for_refs')) {
             mysqli_query($conn, "DELETE FROM tbl_customer_ledger WHERE transaction_type = 'receipt_voucher' AND transaction_id = $vid AND status = 1");
             mysqli_query($conn, "DELETE FROM tbl_receipt_voucher_items WHERE voucher_id = $vid");
             mysqli_query($conn, "DELETE FROM tbl_receipt_vouchers WHERE id = $vid");
+        }
+    }
+}
+
+if (!function_exists('sale_quotation_validate_metal_exchange_payments')) {
+    /** @param array<int, array<string, mixed>> $payments */
+    function sale_quotation_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = auragold_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
         }
     }
 }
@@ -430,7 +445,8 @@ mysqli_begin_transaction($conn);
 
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
-    
+    $metal_exchange_barcodes_out = [];
+
     // Log the request for debugging
     error_log("Sale Quotation Save Request - User ID: " . $user_id . ", POST data keys: " . implode(", ", array_keys($_POST)));
     
@@ -1172,7 +1188,10 @@ try {
     }
     
     if (!empty($payments) && is_array($payments)) {
-        foreach ($payments as $payment) {
+        sale_quotation_validate_metal_exchange_payments($conn, $payments);
+        $___sq_me_has_ref = auragold_metal_exchange_document_init($conn, $is_update, (int) $quotation_id, 'sale_quotation_metal_exchange');
+
+        foreach ($payments as $pay_seq => $payment) {
             $payment_type = esc($payment['payment_type'] ?? '');
             $deposit_into = esc($payment['deposit_into'] ?? '');
             $transaction_no = esc($payment['transaction_no'] ?? '');
@@ -1183,8 +1202,8 @@ try {
             $current_order_amount = (float)($payment['current_order_amount'] ?? ($amount - $previous_balance_amount));
             $diamond_category = esc($payment['diamond_category'] ?? '');
             $quantity = (float)($payment['quantity'] ?? 0);
-            
-            if ($amount > 0) {
+
+            if (auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
                 $payment_sql = "
                     INSERT INTO tbl_sale_quotation_payments (
                         quotation_id, payment_type, deposit_into, transaction_no,
@@ -1204,29 +1223,25 @@ try {
                         1, NOW()
                     )
                 ";
-                
+
                 if (!mysqli_query($conn, $payment_sql)) {
                     throw new Exception("Payment insert failed: " . mysqli_error($conn));
                 }
-                
-                if (sale_quotation_payment_is_auto_receipt_money($payment)) {
-                    continue;
-                }
-                
-                // Determine the account name based on payment type (legacy non–receipt-voucher lines)
-                $account_name = '';
-                if (strtolower($payment_type) === 'cash') {
-                    $account_name = 'Cash';
-                } elseif (!empty($deposit_into)) {
-                    $account_name = $deposit_into;
-                } elseif (strtolower($payment_type) === 'bank') {
-                    $account_name = 'Bank';
-                } else {
-                    $account_name = $payment_type; // Use payment type as account name if no deposit_into
-                }
-                
-                // Get customer's latest balance for ledger entry
-                $last_balance_record = getRecord("
+
+                if (!sale_quotation_payment_is_auto_receipt_money($payment) && $amount > 0.00001) {
+                    // Determine the account name based on payment type (legacy non–receipt-voucher lines)
+                    $account_name = '';
+                    if (strtolower($payment_type) === 'cash') {
+                        $account_name = 'Cash';
+                    } elseif (!empty($deposit_into)) {
+                        $account_name = $deposit_into;
+                    } elseif (strtolower($payment_type) === 'bank') {
+                        $account_name = 'Bank';
+                    } else {
+                        $account_name = $payment_type;
+                    }
+
+                    $last_balance_record = getRecord("
                     SELECT balance_amount, balance_gold, balance_silver 
                     FROM tbl_customer_ledger 
                     WHERE customer_id = " . ($customer_id > 0 ? $customer_id : 0) . "
@@ -1236,15 +1251,13 @@ try {
                     ORDER BY transaction_date DESC, id DESC 
                     LIMIT 1
                 ");
-                $last_balance_amount = (float)($last_balance_record['balance_amount'] ?? 0);
-                $last_balance_gold = (float)($last_balance_record['balance_gold'] ?? 0);
-                $last_balance_silver = (float)($last_balance_record['balance_silver'] ?? 0);
-                
-                // Calculate new balance after payment (credit entry reduces customer balance)
-                $new_balance_amount = $last_balance_amount - $current_order_amount;
-                
-                // 1. Create customer ledger entry (credit entry for customer payment)
-                $payment_ledger_sql = "
+                    $last_balance_amount = (float)($last_balance_record['balance_amount'] ?? 0);
+                    $last_balance_gold = (float)($last_balance_record['balance_gold'] ?? 0);
+                    $last_balance_silver = (float)($last_balance_record['balance_silver'] ?? 0);
+
+                    $new_balance_amount = $last_balance_amount - $current_order_amount;
+
+                    $payment_ledger_sql = "
                     INSERT INTO tbl_customer_ledger (
                         customer_id$ledger_branch_sql_col, customer_name, transaction_type, transaction_id, transaction_no,
                         transaction_date, debit_amount, credit_amount,
@@ -1271,15 +1284,13 @@ try {
                         NOW()
                     )
                 ";
-                
-                if (!mysqli_query($conn, $payment_ledger_sql)) {
-                    throw new Exception("Payment ledger entry failed: " . mysqli_error($conn));
-                }
-                
-                // 2. Create Cash/Payment Account ledger entry (debit entry for Cash/Bank)
-                if (!empty($account_name)) {
-                    // Get Cash/Bank account balance
-                    $cash_balance_record = getRecord("
+
+                    if (!mysqli_query($conn, $payment_ledger_sql)) {
+                        throw new Exception("Payment ledger entry failed: " . mysqli_error($conn));
+                    }
+
+                    if (!empty($account_name)) {
+                        $cash_balance_record = getRecord("
                         SELECT balance_amount 
                         FROM tbl_customer_ledger 
                         WHERE customer_name = '$account_name' 
@@ -1288,10 +1299,10 @@ try {
                         ORDER BY transaction_date DESC, id DESC 
                         LIMIT 1
                     ");
-                    $cash_prev_balance = (float)($cash_balance_record['balance_amount'] ?? 0);
-                    $cash_new_balance = $cash_prev_balance + $current_order_amount; // Cash increases when customer pays
-                    
-                    $cash_ledger_sql = "
+                        $cash_prev_balance = (float)($cash_balance_record['balance_amount'] ?? 0);
+                        $cash_new_balance = $cash_prev_balance + $current_order_amount;
+
+                        $cash_ledger_sql = "
                         INSERT INTO tbl_customer_ledger (
                             customer_id$ledger_branch_sql_col, customer_name, transaction_type, transaction_id, transaction_no,
                             transaction_date, debit_amount, credit_amount,
@@ -1315,12 +1326,29 @@ try {
                             NOW()
                         )
                     ";
-                    
-                    if (!mysqli_query($conn, $cash_ledger_sql)) {
-                        throw new Exception("Cash ledger entry failed: " . mysqli_error($conn));
+
+                        if (!mysqli_query($conn, $cash_ledger_sql)) {
+                            throw new Exception("Cash ledger entry failed: " . mysqli_error($conn));
+                        }
                     }
                 }
             }
+            $pm = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'sale_quotation_metal_exchange',
+                (int) $quotation_id,
+                $quotation_no,
+                substr(trim((string) $quotation_date), 0, 10),
+                $pm,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $___sq_me_has_ref,
+                'Sale Quotation — Metal Exchange',
+                'sq_me',
+                'SQ-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
     }
     
@@ -1350,6 +1378,11 @@ try {
         );
     }
     
+    if ((int) $quotation_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'sale_quotation', (int) $quotation_id, $quotation_no, $quotation_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -1369,7 +1402,8 @@ try {
         'order_id' => $quotation_id,
         'quotation_id' => $quotation_id,
         'order_no' => $quotation_no,
-        'quotation_no' => $quotation_no
+        'quotation_no' => $quotation_no,
+        'new_barcodes' => $metal_exchange_barcodes_out,
     ]);
     
 } catch (Exception $e) {

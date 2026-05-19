@@ -11,14 +11,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // Validation helpers
 $label_size_preset = isset($_POST['label_size_preset']) ? trim($_POST['label_size_preset']) : '100x18';
-$valid_presets = ['100x18', '100x25', '100x48', '120x50', '250x120', '64x25', '81x12', 'zebra-zpl', 'custom'];
+$valid_presets = ['100x18', '100x80', '100x25', '100x48', '120x50', '250x120', '64x25', '81x12', 'zebra-zpl', 'custom'];
 if (!in_array($label_size_preset, $valid_presets)) {
     $label_size_preset = '100x18';
 }
 
 $label_width_mm = isset($_POST['label_width_mm']) ? (float)$_POST['label_width_mm'] : 100;
 $label_height_mm = isset($_POST['label_height_mm']) ? (float)$_POST['label_height_mm'] : 18;
-if ($label_size_preset === 'custom') {
+if ($label_size_preset === 'custom' || $label_size_preset === '120x50') {
     $label_width_mm = max(10, min(500, $label_width_mm));
     $label_height_mm = max(10, min(300, $label_height_mm));
 } else {

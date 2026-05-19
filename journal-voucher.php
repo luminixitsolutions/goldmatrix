@@ -71,6 +71,15 @@ if ($t && mysqli_num_rows($t) > 0) {
         $add_against($r['voucher_no'] ?? '', $r['voucher_no'] ?? '');
     }
 }
+$t = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+if ($t && mysqli_num_rows($t) > 0) {
+    mysqli_free_result($t);
+    foreach (getList("SELECT voucher_no FROM tbl_sale_receipt_vouchers ORDER BY id DESC LIMIT 300") as $r) {
+        $add_against($r['voucher_no'] ?? '', $r['voucher_no'] ?? '');
+    }
+} elseif ($t) {
+    mysqli_free_result($t);
+}
 // PV - Payment Vouchers
 $t = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_payment_vouchers'");
 if ($t && mysqli_num_rows($t) > 0) {

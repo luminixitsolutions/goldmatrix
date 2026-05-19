@@ -12,6 +12,7 @@ $table  = 'tbl_metal';
 auragold_ensure_tbl_metal_dashboard_images($conn);
 
 $has_img_cols = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'dashboard_image_path');
+$has_show_dash = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'show_on_dashboard');
 
 $metal_delete_dashboard_upload = static function (string $relativePath): void {
     $relativePath = str_replace('\\', '/', $relativePath);
@@ -96,6 +97,9 @@ if ($action === 'get') {
     if ($has_img_cols) {
         $cols .= ',dashboard_image_path,dashboard_image_url';
     }
+    if ($has_show_dash) {
+        $cols .= ',show_on_dashboard';
+    }
     $r = getRecord('SELECT ' . $cols . ' FROM tbl_metal WHERE id = ' . $id . ' AND status = 1 LIMIT 1');
     if (!is_array($r)) {
         echo json_encode(['status' => 'error', 'message' => 'Not found']);
@@ -120,21 +124,29 @@ if ($action === 'add') {
         exit;
     }
 
-    if ($has_img_cols) {
-        mysqli_query($conn, "
-            INSERT INTO tbl_metal
-            (display_name, hsn_code, system_name, dashboard_image_url, branch_id, created_by)
-            VALUES
-            ('$name','$hsn','$system','" . ($clear_img ? '' : $ext_url_sql) . "','$bid','$user')
-        ");
-    } else {
-        mysqli_query($conn, "
-            INSERT INTO tbl_metal
-            (display_name, hsn_code, system_name, branch_id, created_by)
-            VALUES
-            ('$name','$hsn','$system','$bid','$user')
-        ");
+    $show_dash_val = 0;
+    if ($has_show_dash) {
+        $show_dash_val = isset($_POST['show_on_dashboard']) && (string) $_POST['show_on_dashboard'] === '1' ? 1 : 0;
     }
+
+    $ins_fields = ['display_name', 'hsn_code', 'system_name'];
+    $ins_vals = ["'$name'", "'$hsn'", "'$system'"];
+    if ($has_img_cols) {
+        $ins_fields[] = 'dashboard_image_url';
+        $ins_vals[] = "'" . ($clear_img ? '' : $ext_url_sql) . "'";
+    }
+    if ($has_show_dash) {
+        $ins_fields[] = 'show_on_dashboard';
+        $ins_vals[] = (string) (int) $show_dash_val;
+    }
+    $ins_fields[] = 'branch_id';
+    $ins_fields[] = 'created_by';
+    $ins_vals[] = "'" . mysqli_real_escape_string($conn, (string) $bid) . "'";
+    $ins_vals[] = "'" . mysqli_real_escape_string($conn, (string) $user) . "'";
+    mysqli_query(
+        $conn,
+        'INSERT INTO tbl_metal (' . implode(',', $ins_fields) . ') VALUES (' . implode(',', $ins_vals) . ')'
+    );
 
     $new_id = (int) mysqli_insert_id($conn);
 
@@ -164,6 +176,9 @@ if ($action === 'add') {
         $out['dashboard_image_url'] = $clear_img ? '' : $ext_url_in;
         $out['has_dashboard_thumb'] = ($saved_path_display !== '' || (!$clear_img && $ext_url_in !== ''));
     }
+    if ($has_show_dash) {
+        $out['show_on_dashboard'] = $show_dash_val;
+    }
     echo json_encode($out);
     exit;
 }
@@ -177,6 +192,12 @@ if ($action === 'update') {
     $ext_url_in = $normalize_ext_url((string) ($_POST['dashboard_image_url'] ?? ''));
     $ext_url_sql = mysqli_real_escape_string($conn, $ext_url_in);
     $clear_img = isset($_POST['clear_dashboard_image']) && (string) $_POST['clear_dashboard_image'] === '1';
+
+    $show_dash_sql = '';
+    if ($has_show_dash) {
+        $sd = isset($_POST['show_on_dashboard']) && (string) $_POST['show_on_dashboard'] === '1' ? 1 : 0;
+        $show_dash_sql = ',show_on_dashboard=' . (int) $sd;
+    }
 
     if ($id <= 0 || $name === '') {
         echo json_encode(["status" => "error", "message" => "Invalid data"]);
@@ -208,6 +229,7 @@ if ($action === 'update') {
                 dashboard_image_path=NULL,
                 dashboard_image_url=NULL,
                 modified_by='$user'
+                $show_dash_sql
             WHERE id='$id'
         ");
     } elseif ($has_img_cols) {
@@ -233,6 +255,7 @@ if ($action === 'update') {
                 dashboard_image_path='$path_sql',
                 dashboard_image_url='$ext_url_sql',
                 modified_by='$user'
+                $show_dash_sql
             WHERE id='$id'
         ");
     } else {
@@ -242,6 +265,7 @@ if ($action === 'update') {
                 hsn_code='$hsn',
                 system_name='$system',
                 modified_by='$user'
+                $show_dash_sql
             WHERE id='$id'
         ");
     }
@@ -261,6 +285,10 @@ if ($action === 'update') {
         $out['dashboard_image_url'] = $du;
         $out['has_dashboard_thumb'] = ($dp !== '' || $du !== '');
     }
+    if ($has_show_dash) {
+        $sf = @getRecord('SELECT show_on_dashboard FROM tbl_metal WHERE id = ' . $id . ' LIMIT 1');
+        $out['show_on_dashboard'] = is_array($sf) ? (int) ($sf['show_on_dashboard'] ?? 0) : 0;
+    }
     echo json_encode($out);
     exit;
 }
@@ -270,12 +298,12 @@ if ($action === 'delete') {
     $id = (int) ($_POST['id'] ?? 0);
 
     if ($id <= 0) {
-        echo json_encode(["status"=>"error","message"=>"Invalid id"]);
+        echo json_encode(["status" => "error", "message" => "Invalid id"]);
         exit;
     }
 
     if (!auragold_master_can_mutate_row($conn, $table, $id)) {
-        echo json_encode(["status"=>"error","message"=>"Access denied for this branch"]);
+        echo json_encode(["status" => "error", "message" => "Access denied for this branch"]);
         exit;
     }
 
@@ -295,7 +323,7 @@ if ($action === 'delete') {
         WHERE id='$id'
     ");
 
-    echo json_encode(["status"=>"success"]);
+    echo json_encode(["status" => "success"]);
     exit;
 }
 

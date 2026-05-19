@@ -982,7 +982,7 @@ require_once __DIR__ . '/ledger-modal-document-types-script.php';
                     <div class="col-6 col-lg-3">
                         <div class="form-group mb-2" style="position: relative;">
                             <label>Product</label>
-                            <input type="text" class="form-control" id="metalExchangeProductInput" placeholder="Type product name to search..." autocomplete="off">
+                            <input type="text" class="form-control" id="metalExchangeProductInput" placeholder="Search, then pick from list…" autocomplete="off" title="You must select a row from the list; typed text alone is not saved.">
                             <input type="hidden" id="metalExchangeProductId" value="">
                             <div id="metalExchangeProductList" style="display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 1055; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
                         </div>
@@ -1077,7 +1077,7 @@ require_once __DIR__ . '/ledger-modal-document-types-script.php';
                     <div class="col-md-4">
                         <div class="form-group" style="position: relative;">
                             <label>Product</label>
-                            <input type="text" class="form-control" id="scrapProductInput" placeholder="Type product name to search..." autocomplete="off">
+                            <input type="text" class="form-control" id="scrapProductInput" placeholder="Search, then pick from list…" autocomplete="off" title="You must select a row from the list; typed text alone is not saved.">
                             <input type="hidden" id="scrapProductId" value="">
                             <div id="scrapProductList" style="display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 1000; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
                         </div>
@@ -1251,6 +1251,12 @@ require_once __DIR__ . '/ledger-modal-document-types-script.php';
         });
         inputEl.addEventListener('focus', function () {
             if (metalEl.value) search();
+        });
+        /** Free text without picking a DB row is invalid — clear on blur. */
+        inputEl.addEventListener('blur', function () {
+            if (!String(idEl.value || '').trim()) {
+                inputEl.value = '';
+            }
         });
         metalEl.addEventListener('change', function () {
             inputEl.value = '';

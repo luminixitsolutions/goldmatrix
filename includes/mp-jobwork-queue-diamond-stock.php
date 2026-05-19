@@ -245,6 +245,115 @@ if (!function_exists('mp_jwq_apply_diamond_stock_consumption')) {
                     }
                 }
             }
+            $src_id = (int) $st['id'];
+            if ($src_id < 1) {
+                continue;
+            }
+            $prev_cq = (float) ($st['current_qty'] ?? 0);
+            $rate = (float) ($st['rate'] ?? 0);
+            $already = function_exists('getRecord')
+                ? getRecord('SELECT * FROM `' . $tbl . '` WHERE jobwork_order_id = ' . (int) $jobwork_order_id . ' AND stock_id = ' . $src_id . ' LIMIT 1')
+                : null;
+            if ($already && isset($already['id'])) {
+                $prev_w_out = (float) ($already['weight_out'] ?? $already['weight'] ?? 0);
+                $prev_q_out = (float) ($already['qty_out'] ?? $already['qty'] ?? 0);
+                $target_w = $w_out;
+                $max_total_w = $prev_w_out + $avail;
+                if ($target_w > $max_total_w + 0.0001) {
+                    $target_w = $max_total_w;
+                }
+                $target_q = $q_out > 0.0000001 ? $q_out : $prev_q_out;
+                if ($target_q > $prev_cq + $prev_q_out + 0.0001) {
+                    $target_q = $prev_cq + $prev_q_out;
+                }
+                $delta_w = round($target_w - $prev_w_out, 4);
+                $delta_q = round($target_q - $prev_q_out, 4);
+                if (abs($delta_w) < 0.0000001 && abs($delta_q) < 0.0000001) {
+                    continue;
+                }
+                if ($delta_w < -0.0000001) {
+                    $release_w = abs($delta_w);
+                    $release_q = $delta_q < -0.0000001 ? abs($delta_q) : 0.0;
+                    mp_jwq_restore_stock_after_issue_removal($conn, $src_id, $release_w, $release_q, $req_bc, $tx_ok, $tx_err);
+                    if (!$tx_ok) {
+                        return;
+                    }
+                    $w_log = round($target_w, 4);
+                    $q_log = round($target_q, 4);
+                    $upd_issue = 'UPDATE `' . $tbl . '` SET weight = ' . $w_log . ', qty = ' . $q_log . ', weight_out = ' . $w_log . ', qty_out = ' . $q_log
+                        . ' WHERE id = ' . (int) $already['id'] . ' AND jobwork_order_id = ' . (int) $jobwork_order_id . ' LIMIT 1';
+                    if (!@mysqli_query($conn, $upd_issue)) {
+                        $tx_ok = false;
+                        mp_jwq_set_last_db_error($conn);
+                        $tx_err = 'Could not update diamond issue log. DB: ' . mp_jwq_get_last_db_error();
+
+                        return;
+                    }
+                    $stats['saved_rows'] = (int) $stats['saved_rows'] + 1;
+                    $stats['excluded_stock_ids'][] = $src_id;
+                    continue;
+                }
+                $take = min($delta_w, $avail);
+                if ($take <= 0.0000001 && $delta_q <= 0.0000001) {
+                    continue;
+                }
+                $sold_q = $delta_q > 0.0000001 ? min($delta_q, $prev_cq) : ($avail > 0.0000001 && $take > 0.0000001 ? $prev_cq * ($take / $avail) : 0.0);
+                $balance_wt = max(0.0, $avail - $take);
+                $new_cq = max(0.0, $prev_cq - $sold_q);
+                $new_val = round($rate * $balance_wt, 2);
+                $bal_wt_sql = round($balance_wt, 4);
+                $new_cq_sql = round($new_cq, 4);
+                $upd = 'UPDATE tbl_stock SET current_weight = ' . $bal_wt_sql . ', current_qty = ' . $new_cq_sql
+                    . ', final_weight = ' . $bal_wt_sql . ', value = ' . $new_val . ' WHERE id = ' . $src_id . ' LIMIT 1';
+                if (!@mysqli_query($conn, $upd)) {
+                    $tx_ok = false;
+                    mp_jwq_set_last_db_error($conn);
+                    $tx_err = 'Could not update stock for diamond consumption. DB: ' . mp_jwq_get_last_db_error();
+
+                    return;
+                }
+                $w_log = round($target_w, 4);
+                $q_log = round($target_q, 4);
+                $upd_issue = 'UPDATE `' . $tbl . '` SET weight = ' . $w_log . ', qty = ' . $q_log . ', weight_out = ' . $w_log . ', qty_out = ' . $q_log
+                    . ' WHERE id = ' . (int) $already['id'] . ' AND jobwork_order_id = ' . (int) $jobwork_order_id . ' LIMIT 1';
+                if (!@mysqli_query($conn, $upd_issue)) {
+                    $tx_ok = false;
+                    mp_jwq_set_last_db_error($conn);
+                    $tx_err = 'Could not update diamond issue log. DB: ' . mp_jwq_get_last_db_error();
+
+                    return;
+                }
+                if ($take > 0.0000001) {
+                    $pid = (int) ($st['product_id'] ?? 0);
+                    $pcid = isset($st['product_characteristic_id']) ? (int) $st['product_characteristic_id'] : 0;
+                    $branch_id = (int) ($st['branch_id'] ?? 0);
+                    $metal_id = (int) ($st['metal_id'] ?? 0);
+                    $purity = (float) ($st['opening_purity'] ?? 0);
+                    $rate_sql = (float) ($st['rate'] ?? 0);
+                    $out_val = round($rate_sql * $take, 2);
+                    $barcode_sql = 'NULL';
+                    $bc_src = trim((string) ($st['barcode'] ?? ''));
+                    if ($bc_src !== '') {
+                        $barcode_sql = "'" . mysqli_real_escape_string($conn, $bc_src) . "'";
+                    }
+                    $pcid_sql = $pcid > 0 ? (string) $pcid : 'NULL';
+                    $out_sql = "INSERT INTO tbl_stock (product_id, product_characteristic_id, barcode, branch_id, metal_id, opening_weight, opening_purity, opening_qty, final_weight, rate, value, current_weight, current_qty, stock_type, transaction_date, created_at) VALUES ("
+                        . $pid . ', ' . $pcid_sql . ', ' . $barcode_sql . ', ' . $branch_id . ', ' . $metal_id . ', '
+                        . round($take, 4) . ', ' . round($purity, 4) . ', ' . round($sold_q, 4) . ', ' . round($take, 4) . ', '
+                        . $rate_sql . ', ' . $out_val . ', ' . round($take, 4) . ', ' . round($sold_q, 4) . ", 'outward', CURDATE(), NOW())";
+                    if (!@mysqli_query($conn, $out_sql)) {
+                        $tx_ok = false;
+                        mp_jwq_set_last_db_error($conn);
+                        $tx_err = 'Could not insert outward stock for diamond consumption. DB: ' . mp_jwq_get_last_db_error();
+
+                        return;
+                    }
+                }
+                $stats['saved_rows'] = (int) $stats['saved_rows'] + 1;
+                $stats['excluded_stock_ids'][] = $src_id;
+                continue;
+            }
+
             $take = $w_out;
             if ($take > $avail + 0.0001) {
                 $take = $avail;
@@ -252,22 +361,9 @@ if (!function_exists('mp_jwq_apply_diamond_stock_consumption')) {
             if ($take <= 0.0000001) {
                 continue;
             }
-
-            $src_id = (int) $st['id'];
-            if ($src_id < 1) {
-                continue;
-            }
-            $already = function_exists('getRecord')
-                ? getRecord('SELECT id FROM `' . $tbl . '` WHERE jobwork_order_id = ' . (int) $jobwork_order_id . ' AND stock_id = ' . $src_id . ' LIMIT 1')
-                : null;
-            if ($already && isset($already['id'])) {
-                continue;
-            }
             $balance_wt = max(0.0, $avail - $take);
-            $prev_cq = (float) ($st['current_qty'] ?? 0);
             $sold_q = $q_out > 0.0000001 ? min($q_out, $prev_cq) : ($avail > 0.0000001 ? $prev_cq * ($take / $avail) : 0.0);
             $new_cq = max(0.0, $prev_cq - $sold_q);
-            $rate = (float) ($st['rate'] ?? 0);
             $new_val = round($rate * $balance_wt, 2);
 
             $bal_wt_sql = round($balance_wt, 4);

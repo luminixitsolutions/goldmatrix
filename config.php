@@ -2,8 +2,8 @@
 $project = "local"; // for production set to "prod"
 // Must match cPanel’s MySQL prefix for that account, e.g. "goldmatrix_" (same leading part as cPanel’s DB/user names).
 $db_prefix = "goldmatrix_";
-// Set to your base domain (host only) to auto-fill branch “IP/URL” with https://{name-slug}.HOST, e.g. "goldmatrixsoftware.com"
-$auragold_branch_subdomain_base_host = 'goldmatrixsoftware.com';
+// Set to your base domain (host only) to auto-fill branch “IP/URL” with https://{name-slug}.HOST, e.g. "goldmatrixsoft.com"
+$auragold_branch_subdomain_base_host = 'goldmatrixsoft.com';
 // Branch schema clone (production): main/template database and a MySQL user that can read it. Used when cloning a new branch DB; often goldmatrix_main + that DB’s user. Leave empty to use the main app DB (DB_NAME) and app credentials (DB_USER/DB_PASS).
 $auragold_schema_clone_source_db  = '';
 $auragold_clone_source_mysql_user = '';
@@ -15,13 +15,13 @@ $domain       = '';
 if (isset($project) && (string) $project === 'prod') {
     // $cpanelUser: cPanel username; $domain: host only, no https — UAPI base is https://{domain}:2083
     $cpanelUser = 'goldmatrix';
-    $apiToken   = '54T0X39G9PL0XN8454VDFJR5EITCYUYV'; // rotate in cPanel if this file was ever exposed
-    $domain     = 'goldmatrixsoftware.com';
+    $apiToken   = 'JVK8M5WY2RUDKS0S0J897I78AN9IBUL1'; // rotate in cPanel if this file was ever exposed
+    $domain     = 'goldmatrixsoft.com';
     // Optional: MySQL user that can read the main/template DB; branch DB clone then uses cPanel’s new branch user (set password in $auragold_clone_source_mysql_pass)
     // $auragold_schema_clone_source_db   = 'goldmatrix_main';
     // $auragold_clone_source_mysql_user  = 'goldmatrix_main';
     // $auragold_clone_source_mysql_pass   = 'your_main_db_password';
-    $auragold_branch_subdomain_base_host = 'goldmatrixsoftware.com';
+    $auragold_branch_subdomain_base_host = 'goldmatrixsoft.com';
 }
 /** Branch DB naming: local uses root + empty password in tbl_branches; prod uses prefixed MySQL user + random password. */
 if (!defined('AURAGOLD_PROJECT')) {
@@ -350,6 +350,13 @@ if (isset($conn) && $conn instanceof mysqli) {
         require_once $___doctype;
         if (function_exists('auragold_ensure_tbl_document_types')) {
             auragold_ensure_tbl_document_types($conn);
+        }
+    }
+    $___srv = __DIR__ . '/includes/auragold_sale_receipt_voucher_schema.php';
+    if (is_file($___srv)) {
+        require_once $___srv;
+        if (function_exists('auragold_ensure_tbl_sale_receipt_vouchers')) {
+            auragold_ensure_tbl_sale_receipt_vouchers($conn);
         }
     }
 }
@@ -887,18 +894,32 @@ function countBillsForVoucherType($conn, $voucher_type_id) {
             mysqli_free_result($pvt);
         }
     }
-    // Receipt Voucher
+    // Receipt Voucher (manual RV- series; excludes sale-auto lines identified by voucher_type Sale Invoice Payment)
     $rcvVt = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(name)) = 'receipt voucher' LIMIT 1");
     if ($rcvVt && (int)$rcvVt['id'] === $id) {
         $rvt = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
         if ($rvt && mysqli_num_rows($rvt) > 0) {
             mysqli_free_result($rvt);
-            $r = mysqli_query($conn, "SELECT COUNT(*) AS c FROM tbl_receipt_vouchers");
+            $r = mysqli_query($conn, "SELECT COUNT(*) AS c FROM tbl_receipt_vouchers WHERE COALESCE(voucher_type,'') <> 'Sale Invoice Payment'");
             if ($r && $row = mysqli_fetch_assoc($r)) {
                 $total += (int)$row['c'];
             }
         } elseif ($rvt) {
             mysqli_free_result($rvt);
+        }
+    }
+    // Sale Receipt Voucher (tbl_sale_receipt_vouchers — auto from sale / POS invoice)
+    $srvVt = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(name)) = 'sale receipt voucher' LIMIT 1");
+    if ($srvVt && (int)$srvVt['id'] === $id) {
+        $srvt = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+        if ($srvt && mysqli_num_rows($srvt) > 0) {
+            mysqli_free_result($srvt);
+            $r = mysqli_query($conn, 'SELECT COUNT(*) AS c FROM tbl_sale_receipt_vouchers');
+            if ($r && $row = mysqli_fetch_assoc($r)) {
+                $total += (int)$row['c'];
+            }
+        } elseif ($srvt) {
+            mysqli_free_result($srvt);
         }
     }
     // Advance Payment
@@ -2581,6 +2602,104 @@ function bumpReceiptVoucherNo($conn, $voucher_no, array $cfg) {
 }
 
 /**
+ * Bill series for auto receipt from Sale / POS invoice (voucher type "Sale Receipt Voucher").
+ * Independent of manual Receipt Voucher (RV-) series. Legacy default: SRV-1, SRV-2.
+ *
+ * @return array{prefix:string,suffix:string,start_count:int,from_series_table:bool,voucher_type_id?:int}
+ */
+function getSaleReceiptVoucherBillSeriesConfig($conn) {
+    $legacy = ['prefix' => 'SRV-', 'suffix' => '', 'start_count' => 1, 'from_series_table' => false];
+    $vtId = 0;
+    $r = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(name)) = 'sale receipt voucher' LIMIT 1");
+    if ($r && !empty($r['id'])) {
+        $vtId = (int)$r['id'];
+    }
+    if ($vtId <= 0) {
+        $r2 = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(COALESCE(type_of_voucher,''))) = 'sale receipt voucher' LIMIT 1");
+        if ($r2 && !empty($r2['id'])) {
+            $vtId = (int)$r2['id'];
+        }
+    }
+    $tableCheck = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_bill_series'");
+    if (!$tableCheck || mysqli_num_rows($tableCheck) === 0) {
+        if ($tableCheck) {
+            mysqli_free_result($tableCheck);
+        }
+        return $legacy;
+    }
+    mysqli_free_result($tableCheck);
+    if ($vtId <= 0) {
+        return $legacy;
+    }
+    if (!function_exists('auragold_bill_series_row_for_voucher_type')) {
+        return $legacy;
+    }
+    $series = auragold_bill_series_row_for_voucher_type($conn, $vtId);
+    if (!$series || trim((string)($series['prefix'] ?? '')) === '') {
+        return $legacy;
+    }
+    return [
+        'prefix' => (string)$series['prefix'],
+        'suffix' => (string)($series['suffix'] ?? ''),
+        'start_count' => (int)($series['start_count'] ?? 0),
+        'from_series_table' => true,
+        'voucher_type_id' => $vtId,
+    ];
+}
+
+/**
+ * Next number for auto sale-invoice receipt rows (tbl_sale_receipt_vouchers) — uses Sale Receipt Voucher bill series only.
+ * Also considers legacy rows in tbl_receipt_vouchers (Sale Invoice Payment) with the same prefix/suffix pattern.
+ */
+function getNextSaleReceiptVoucherNo($conn) {
+    $cfg = getSaleReceiptVoucherBillSeriesConfig($conn);
+    $prefix = $cfg['prefix'];
+    $suffix = $cfg['suffix'];
+    $start = (int)($cfg['start_count'] ?? 0);
+    $startEff = max(1, $start);
+
+    $prefix_esc = mysqli_real_escape_string($conn, $prefix);
+    $regex = '/^' . preg_quote($prefix, '/') . '(\d+)' . preg_quote($suffix, '/') . '$/';
+
+    $maxNum = 0;
+
+    $tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_receipt_vouchers'");
+    if ($tbl && mysqli_num_rows($tbl) > 0) {
+        mysqli_free_result($tbl);
+        $rows = getList("SELECT voucher_no FROM tbl_sale_receipt_vouchers WHERE voucher_no LIKE '$prefix_esc%'");
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                $vno = (string)($row['voucher_no'] ?? '');
+                if (preg_match($regex, $vno, $m)) {
+                    $maxNum = max($maxNum, (int)$m[1]);
+                }
+            }
+        }
+    } elseif ($tbl) {
+        mysqli_free_result($tbl);
+    }
+
+    $tbl2 = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
+    if ($tbl2 && mysqli_num_rows($tbl2) > 0) {
+        mysqli_free_result($tbl2);
+        $rows2 = getList("SELECT voucher_no FROM tbl_receipt_vouchers WHERE voucher_no LIKE '$prefix_esc%' AND voucher_type = 'Sale Invoice Payment'");
+        if (is_array($rows2)) {
+            foreach ($rows2 as $row) {
+                $vno = (string)($row['voucher_no'] ?? '');
+                if (preg_match($regex, $vno, $m)) {
+                    $maxNum = max($maxNum, (int)$m[1]);
+                }
+            }
+        }
+    } elseif ($tbl2) {
+        mysqli_free_result($tbl2);
+    }
+
+    $nextNum = max($maxNum + 1, $startEff);
+    return $prefix . $nextNum . $suffix;
+}
+
+/**
  * Bill series config for Advance Payment (tbl_bill_series + voucher type "Advance Payment" or "Advance").
  * Legacy default: AP-1, AP-2.
  *
@@ -4010,4 +4129,118 @@ function renderBarcodeLayout($productData, $settings) {
     }
 
     return $html;
+}
+
+/**
+ * True when barcode print uses two tags on one 120×50 mm sticker.
+ */
+function auragold_is_120x50_double_barcode(array $settings, $decoded_snapshot = null): bool {
+    $preset = isset($settings['label_size_preset']) ? trim((string) $settings['label_size_preset']) : '';
+    if ($preset === '120x50') {
+        return true;
+    }
+    if (is_array($decoded_snapshot) && !empty($decoded_snapshot['double_barcode_120x50'])) {
+        return true;
+    }
+    $w = (float) ($settings['label_width_mm'] ?? 0);
+    $h = (float) ($settings['label_height_mm'] ?? 0);
+    return abs($w - 120) < 0.15 && abs($h - 50) < 0.15
+        && is_array($decoded_snapshot)
+        && (!empty($decoded_snapshot['items2']) || isset($decoded_snapshot['barcode2_left']));
+}
+
+/**
+ * One fixed-position copy (right or left pocket) on a 120×50 jewelry sticker.
+ */
+function render120x50FixedCopy(string $code, string $side, bool $show_barcode_number): string {
+    $copyClass = ($side === 'right') ? 'barcode-copy-right' : 'barcode-copy-left';
+    $html = '<div class="' . htmlspecialchars($copyClass, ENT_QUOTES, 'UTF-8') . '">';
+    $html .= '<div class="barcode-120x50-graphic">';
+    $html .= '<svg class="barcode-svg barcode-svg--120x50" data-barcode="' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '"></svg>';
+    $html .= '</div>';
+    if ($show_barcode_number) {
+        $html .= '<div class="barcode-copy-text">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+    $html .= '</div>';
+    return $html;
+}
+
+/** @deprecated Layout slice; not used for 120×50 fixed print. */
+function auragold_120x50_side_layout(array $layout, array $decoded_snapshot, string $side): array {
+    $layout = is_array($layout) ? $layout : [];
+    $out = [];
+    foreach ($layout as $el) {
+        if (!is_array($el)) {
+            continue;
+        }
+        $type = isset($el['type']) ? trim((string) $el['type']) : '';
+        if ($type === 'barcode_image' || $type === 'qr_image') {
+            continue;
+        }
+        if ($type === 'text' || (isset($el['field']) && trim((string) $el['field']) !== '')) {
+            $out[] = $el;
+        }
+    }
+    $barcode_el = null;
+    foreach ($layout as $el) {
+        if (is_array($el) && isset($el['type']) && $el['type'] === 'barcode_image') {
+            $barcode_el = $el;
+            break;
+        }
+    }
+    if (!$barcode_el) {
+        if ($side === 'right' && isset($decoded_snapshot['barcode2_left'], $decoded_snapshot['barcode2_top'])) {
+            $barcode_el = [
+                'type' => 'barcode_image',
+                'left' => (float) $decoded_snapshot['barcode2_left'],
+                'top' => (float) $decoded_snapshot['barcode2_top'],
+                'width' => 20,
+                'height' => 8,
+            ];
+        } elseif ($side === 'left' && isset($decoded_snapshot['barcode1_left'], $decoded_snapshot['barcode1_top'])) {
+            $barcode_el = [
+                'type' => 'barcode_image',
+                'left' => (float) $decoded_snapshot['barcode1_left'],
+                'top' => (float) $decoded_snapshot['barcode1_top'],
+                'width' => 20,
+                'height' => 8,
+            ];
+        } else {
+            $barcode_el = ['type' => 'barcode_image', 'left' => 0.5, 'top' => 0.5, 'width' => 18, 'height' => 8];
+        }
+    }
+    array_unshift($out, $barcode_el);
+    return $out;
+}
+
+/**
+ * One 120x50 sticker: same barcode in right pocket then left; center blank (one page per item).
+ *
+ * @param array $print_item ['barcode' => string, 'row' => array]
+ */
+function render120x50DoubleStickerLabel(array $print_item, array $settings, array $decoded_snapshot = []): string {
+    unset($decoded_snapshot);
+    $code = trim((string) ($print_item['barcode'] ?? ''));
+    if ($code === '') {
+        return '';
+    }
+
+    $sticker_w = (float) ($settings['label_width_mm'] ?? 120);
+    $sticker_h = (float) ($settings['label_height_mm'] ?? 50);
+    $show_number = !empty($settings['show_barcode_number']);
+
+    $html = '<div class="full-sticker" style="width:' . round($sticker_w, 2) . 'mm;height:' . round($sticker_h, 2) . 'mm;">';
+    $html .= render120x50FixedCopy($code, 'right', $show_number);
+    $html .= render120x50FixedCopy($code, 'left', $show_number);
+    $html .= '</div>';
+    return $html;
+}
+
+/** @deprecated */
+function renderBarcodeLayout120x50Double(array $productData, array $settings, array $decoded_snapshot = []): string {
+    return render120x50DoubleStickerLabel(
+        ['barcode' => $productData['barcode'] ?? '', 'row' => $productData],
+        $settings,
+        $decoded_snapshot
+    );
 }

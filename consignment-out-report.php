@@ -1360,6 +1360,84 @@ html, body {
     color: var(--brand-navy);
     font-weight: 500;
 }
+
+/* Mobile: allow document scroll (newcss locks html/body); stack customer list + items */
+@media (max-width: 991.98px) {
+    html {
+        height: auto !important;
+        min-height: 100dvh !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    body {
+        height: auto !important;
+        min-height: 100dvh !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .layout-wrapper {
+        height: auto !important;
+        min-height: 100dvh !important;
+        overflow: visible !important;
+    }
+    .layout-content {
+        height: auto !important;
+        min-height: 0;
+        max-width: 100%;
+        overflow-x: hidden !important;
+        overflow-y: visible !important;
+        padding-bottom: 1.25rem !important;
+    }
+    .container-fluid {
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+    .report-layout {
+        flex-direction: column;
+        flex: 1 1 auto;
+        overflow: visible;
+        min-height: 0;
+    }
+    .customer-panel {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-height: min(42dvh, 280px);
+        flex: 0 0 auto;
+        border-right: none;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .items-panel {
+        flex: 1 1 auto;
+        min-height: 260px;
+        overflow: visible;
+    }
+    .items-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+    }
+    .items-header-right {
+        flex-wrap: wrap;
+        width: 100%;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+    .items-table-container {
+        overflow: visible;
+        padding: 10px 12px;
+    }
+    .items-footer {
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 10px 14px;
+        align-items: flex-start;
+    }
+}
 </style>
 
 <body>

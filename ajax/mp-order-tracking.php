@@ -48,6 +48,21 @@ function mp_ot_fmt_dt(?string $d): string
     return $t ? date('d/m/Y H:i', $t) : '—';
 }
 
+/** "CASTING (AJAY)" → CASTING */
+function mp_ot_parse_dept_label(string $lbl): string
+{
+    $lbl = trim($lbl);
+    if ($lbl === '' || $lbl === '—') {
+        return '';
+    }
+    $pos = strpos($lbl, ' (');
+    if ($pos !== false) {
+        return trim(substr($lbl, 0, $pos));
+    }
+
+    return $lbl;
+}
+
 $dept_name = '';
 $worker_name = '';
 $did = isset($jwo['department_id']) ? (int)$jwo['department_id'] : 0;
@@ -314,9 +329,43 @@ if ($achk && mysqli_num_rows($achk) > 0) {
                 'action' => $act_label,
                 'to_department' => $to_lbl,
                 'from_department' => $from_lbl,
+                'to_dept_id' => (int) ($hr['to_dept_id'] ?? 0),
+                'from_dept_id' => (int) ($hr['from_dept_id'] ?? 0),
                 'flow' => $from_lbl . ' → ' . $to_lbl,
                 'total_weight' => ($tw_h > 0.0000001) ? number_format($tw_h, 3, '.', '') : '—',
                 'total_quantity' => ($tq_h > 0.0000001) ? $fmt_qty($tq_h) : '—',
+            ];
+        }
+    }
+
+    /* Current JWQ cycle missing from activity log (older saves) — show it in history for multi-visit departments. */
+    if ($jwo_queue_header !== '' && $queue_activity_history !== []) {
+        $qn_listed = [];
+        foreach ($queue_activity_history as $hx) {
+            $qn_listed[trim((string) ($hx['queue_no'] ?? ''))] = true;
+        }
+        if (!isset($qn_listed[$jwo_queue_header])) {
+            $last_h = $queue_activity_history[count($queue_activity_history) - 1];
+            $to_lbl_cur = $dept_name !== '' ? strtoupper($dept_name) : '—';
+            if ($worker_name !== '') {
+                $to_lbl_cur .= ' (' . strtoupper($worker_name) . ')';
+            }
+            $from_lbl_cur = trim((string) ($last_h['to_department'] ?? ''));
+            if ($from_lbl_cur === '') {
+                $from_lbl_cur = '—';
+            }
+            $dt_raw = $jwo['updated_at'] ?? $jwo['order_date'] ?? null;
+            $queue_activity_history[] = [
+                'queue_no' => $jwo_queue_header,
+                'date_time' => mp_ot_fmt_dt(is_string($dt_raw) ? $dt_raw : null),
+                'action' => 'Department transfer',
+                'to_department' => $to_lbl_cur,
+                'from_department' => $from_lbl_cur,
+                'to_dept_id' => $cur_dept_id,
+                'from_dept_id' => (int) ($last_h['to_dept_id'] ?? 0),
+                'flow' => $from_lbl_cur . ' → ' . $to_lbl_cur,
+                'total_weight' => $fmt_wt($cur_wt_sum),
+                'total_quantity' => $fmt_qty($cur_qty_sum),
             ];
         }
     }
@@ -324,126 +373,198 @@ if ($achk && mysqli_num_rows($achk) > 0) {
     mysqli_free_result($achk);
 }
 
-$mp_ot_step_queue_no = function ($state, $dept_id) use ($arrival_by_dept, $jwo_queue_header) {
-    if ($state === 'pending') {
-        return 'NA';
-    }
-    if ($state === 'active') {
-        if ($jwo_queue_header !== '') {
-            return $jwo_queue_header;
-        }
-        if (isset($arrival_by_dept[$dept_id]['queue_no']) && $arrival_by_dept[$dept_id]['queue_no'] !== null && $arrival_by_dept[$dept_id]['queue_no'] !== '') {
-            return (string)$arrival_by_dept[$dept_id]['queue_no'];
-        }
-        return 'NA';
-    }
-    // completed
-    if (isset($arrival_by_dept[$dept_id]['queue_no']) && $arrival_by_dept[$dept_id]['queue_no'] !== null && $arrival_by_dept[$dept_id]['queue_no'] !== '') {
-        return (string)$arrival_by_dept[$dept_id]['queue_no'];
-    }
-    return 'NA';
-};
-
-$mp_ot_step_transfer_at = function ($state, $dept_id) use ($arrival_by_dept) {
-    if ($state === 'pending') {
-        return 'NA';
-    }
-    if (isset($arrival_by_dept[$dept_id]['arrival_at']) && $arrival_by_dept[$dept_id]['arrival_at'] !== '' && $arrival_by_dept[$dept_id]['arrival_at'] !== '—') {
-        return (string)$arrival_by_dept[$dept_id]['arrival_at'];
-    }
-    return 'NA';
-};
-
 $jwo_od_str = mp_ot_fmt_date($jwo['order_date'] ?? '');
+$cur_dept_id = isset($jwo['department_id']) ? (int) $jwo['department_id'] : 0;
 
-$dept_rows = getList(
-    "SELECT id, dept_name FROM tbl_departments WHERE status = 1 AND LOWER(TRIM(dept_name)) NOT LIKE '%cancel%' ORDER BY id ASC"
-);
-if (!is_array($dept_rows)) {
-    $dept_rows = [];
+/** Diagram = one node per department transfer (destination), same order as job queue history table. */
+$process_steps = [];
+$transfer_hist = [];
+foreach ($queue_activity_history as $h) {
+    if (!is_array($h)) {
+        continue;
+    }
+    $act = strtolower(trim((string) ($h['action'] ?? '')));
+    if ($act !== 'department transfer') {
+        continue;
+    }
+    $transfer_hist[] = $h;
 }
 
-$cur_dept_id = isset($jwo['department_id']) ? (int)$jwo['department_id'] : 0;
-$cur_idx = null;
-foreach ($dept_rows as $ix => $dr) {
-    if ((int)($dr['id'] ?? 0) === $cur_dept_id) {
-        $cur_idx = $ix;
-        break;
+if ($transfer_hist !== []) {
+    $first_from_name = mp_ot_parse_dept_label((string) ($transfer_hist[0]['from_department'] ?? ''));
+    $first_to_name = mp_ot_parse_dept_label((string) ($transfer_hist[0]['to_department'] ?? ''));
+    if ($first_from_name !== '' && strcasecmp($first_from_name, $first_to_name) !== 0) {
+        $process_steps[] = [
+            'title' => strtoupper($first_from_name),
+            'state' => 'completed',
+            'order_date' => $jwo_od_str,
+            'completed_date' => 'NA',
+            'total_weight' => 'NA',
+            'total_quantity' => 'NA',
+            'job_queue_no' => 'NA',
+            'transfer_at' => 'NA',
+        ];
     }
-}
-$mp_ot_step_wt_qty = function ($state, $dept_id) use ($fmt_wt, $fmt_qty, $arrival_by_dept, $cur_wt_sum, $cur_qty_sum, $has_dept_transfer_logged) {
-    if ($state === 'active') {
-        if (!$has_dept_transfer_logged) {
-            return ['NA', 'NA'];
-        }
-        return [$fmt_wt($cur_wt_sum), $fmt_qty($cur_qty_sum)];
-    }
-    if ($state === 'pending') {
-        return ['NA', 'NA'];
-    }
-    if (isset($arrival_by_dept[$dept_id])) {
-        $a = $arrival_by_dept[$dept_id];
-        return [$fmt_wt($a['wt']), $fmt_qty($a['qty'])];
-    }
-    return ['NA', 'NA'];
-};
-
-if ($cur_idx === null && $cur_dept_id > 0) {
-    // Current department not in active list — show it as the active step only
-    $dept_u = $dept_name !== '' ? strtoupper($dept_name) : 'DEPARTMENT';
-    list($tw_s, $tq_s) = $mp_ot_step_wt_qty('active', $cur_dept_id);
-    $process_steps = [[
-        'title' => $dept_u,
-        'state' => 'active',
-        'order_date' => $jwo_od_str,
-        'completed_date' => 'NA',
-        'total_weight' => $tw_s,
-        'total_quantity' => $tq_s,
-        'job_queue_no' => $mp_ot_step_queue_no('active', $cur_dept_id),
-        'transfer_at' => $mp_ot_step_transfer_at('active', $cur_dept_id),
-    ]];
-} elseif (empty($dept_rows)) {
-    $dept_u = $dept_name !== '' ? strtoupper($dept_name) : 'DEPARTMENT';
-    list($tw_s, $tq_s) = $mp_ot_step_wt_qty('active', $cur_dept_id);
-    $process_steps = [[
-        'title' => $dept_u,
-        'state' => 'active',
-        'order_date' => $jwo_od_str,
-        'completed_date' => 'NA',
-        'total_weight' => $tw_s,
-        'total_quantity' => $tq_s,
-        'job_queue_no' => $mp_ot_step_queue_no('active', $cur_dept_id),
-        'transfer_at' => $mp_ot_step_transfer_at('active', $cur_dept_id),
-    ]];
-} else {
-    if ($cur_idx === null) {
-        $cur_idx = 0;
-    }
-    $process_steps = [];
-    foreach ($dept_rows as $ix => $dr) {
-        $title = strtoupper(trim((string)($dr['dept_name'] ?? '')));
-        if ($title === '') {
+    foreach ($transfer_hist as $h) {
+        $to_name = mp_ot_parse_dept_label((string) ($h['to_department'] ?? ''));
+        if ($to_name === '') {
             continue;
         }
-        $did = (int)($dr['id'] ?? 0);
-        if ($ix < $cur_idx) {
-            $state = 'completed';
-        } elseif ($ix === $cur_idx) {
-            $state = 'active';
-        } else {
-            $state = 'pending';
-        }
-        list($tw_s, $tq_s) = $mp_ot_step_wt_qty($state, $did);
+        $qn = trim((string) ($h['queue_no'] ?? ''));
         $process_steps[] = [
-            'title' => $title,
-            'state' => $state,
+            'title' => strtoupper($to_name),
+            'state' => 'completed',
+            'order_date' => $jwo_od_str,
+            'completed_date' => 'NA',
+            'total_weight' => (string) ($h['total_weight'] ?? '—'),
+            'total_quantity' => (string) ($h['total_quantity'] ?? '—'),
+            'job_queue_no' => ($qn !== '' && $qn !== '—') ? $qn : 'NA',
+            'transfer_at' => (string) ($h['date_time'] ?? 'NA'),
+            '_to_dept_id' => (int) ($h['to_dept_id'] ?? 0),
+        ];
+    }
+    $last_ix = count($process_steps) - 1;
+    if ($last_ix >= 0) {
+        $last_to_id = (int) ($process_steps[$last_ix]['_to_dept_id'] ?? 0);
+        if ($cur_dept_id > 0 && $last_to_id === $cur_dept_id) {
+            $process_steps[$last_ix]['state'] = 'active';
+            if (!$has_dept_transfer_logged) {
+                $process_steps[$last_ix]['total_weight'] = 'NA';
+                $process_steps[$last_ix]['total_quantity'] = 'NA';
+            } elseif ($cur_wt_sum > 0.0000001 || $cur_qty_sum > 0.0000001) {
+                $process_steps[$last_ix]['total_weight'] = $fmt_wt($cur_wt_sum);
+                $process_steps[$last_ix]['total_quantity'] = $fmt_qty($cur_qty_sum);
+            }
+        } else {
+            $process_steps[$last_ix]['state'] = 'completed';
+        }
+        for ($i = 0; $i < $last_ix; $i++) {
+            $process_steps[$i]['state'] = 'completed';
+        }
+    }
+    foreach ($process_steps as &$ps_clean) {
+        unset($ps_clean['_to_dept_id']);
+    }
+    unset($ps_clean);
+} else {
+    $dept_rows = getList(
+        "SELECT id, dept_name FROM tbl_departments WHERE status = 1 AND LOWER(TRIM(dept_name)) NOT LIKE '%cancel%' ORDER BY id ASC"
+    );
+    if (!is_array($dept_rows)) {
+        $dept_rows = [];
+    }
+    $cur_idx = null;
+    foreach ($dept_rows as $ix => $dr) {
+        if ((int) ($dr['id'] ?? 0) === $cur_dept_id) {
+            $cur_idx = $ix;
+            break;
+        }
+    }
+    $mp_ot_step_queue_no = function ($state, $dept_id) use ($arrival_by_dept, $jwo_queue_header) {
+        if ($state === 'pending') {
+            return 'NA';
+        }
+        if ($state === 'active') {
+            if ($jwo_queue_header !== '') {
+                return $jwo_queue_header;
+            }
+            if (isset($arrival_by_dept[$dept_id]['queue_no']) && $arrival_by_dept[$dept_id]['queue_no'] !== null && $arrival_by_dept[$dept_id]['queue_no'] !== '') {
+                return (string) $arrival_by_dept[$dept_id]['queue_no'];
+            }
+
+            return 'NA';
+        }
+        if (isset($arrival_by_dept[$dept_id]['queue_no']) && $arrival_by_dept[$dept_id]['queue_no'] !== null && $arrival_by_dept[$dept_id]['queue_no'] !== '') {
+            return (string) $arrival_by_dept[$dept_id]['queue_no'];
+        }
+
+        return 'NA';
+    };
+    $mp_ot_step_transfer_at = function ($state, $dept_id) use ($arrival_by_dept) {
+        if ($state === 'pending') {
+            return 'NA';
+        }
+        if (isset($arrival_by_dept[$dept_id]['arrival_at']) && $arrival_by_dept[$dept_id]['arrival_at'] !== '' && $arrival_by_dept[$dept_id]['arrival_at'] !== '—') {
+            return (string) $arrival_by_dept[$dept_id]['arrival_at'];
+        }
+
+        return 'NA';
+    };
+    $mp_ot_step_wt_qty = function ($state, $dept_id) use ($fmt_wt, $fmt_qty, $arrival_by_dept, $cur_wt_sum, $cur_qty_sum, $has_dept_transfer_logged) {
+        if ($state === 'active') {
+            if (!$has_dept_transfer_logged) {
+                return ['NA', 'NA'];
+            }
+
+            return [$fmt_wt($cur_wt_sum), $fmt_qty($cur_qty_sum)];
+        }
+        if ($state === 'pending') {
+            return ['NA', 'NA'];
+        }
+        if (isset($arrival_by_dept[$dept_id])) {
+            $a = $arrival_by_dept[$dept_id];
+
+            return [$fmt_wt($a['wt']), $fmt_qty($a['qty'])];
+        }
+
+        return ['NA', 'NA'];
+    };
+
+    if ($cur_idx === null && $cur_dept_id > 0) {
+        $dept_u = $dept_name !== '' ? strtoupper($dept_name) : 'DEPARTMENT';
+        list($tw_s, $tq_s) = $mp_ot_step_wt_qty('active', $cur_dept_id);
+        $process_steps = [[
+            'title' => $dept_u,
+            'state' => 'active',
             'order_date' => $jwo_od_str,
             'completed_date' => 'NA',
             'total_weight' => $tw_s,
             'total_quantity' => $tq_s,
-            'job_queue_no' => $mp_ot_step_queue_no($state, $did),
-            'transfer_at' => $mp_ot_step_transfer_at($state, $did),
-        ];
+            'job_queue_no' => $mp_ot_step_queue_no('active', $cur_dept_id),
+            'transfer_at' => $mp_ot_step_transfer_at('active', $cur_dept_id),
+        ]];
+    } elseif ($dept_rows === []) {
+        $dept_u = $dept_name !== '' ? strtoupper($dept_name) : 'DEPARTMENT';
+        list($tw_s, $tq_s) = $mp_ot_step_wt_qty('active', $cur_dept_id);
+        $process_steps = [[
+            'title' => $dept_u,
+            'state' => 'active',
+            'order_date' => $jwo_od_str,
+            'completed_date' => 'NA',
+            'total_weight' => $tw_s,
+            'total_quantity' => $tq_s,
+            'job_queue_no' => $mp_ot_step_queue_no('active', $cur_dept_id),
+            'transfer_at' => $mp_ot_step_transfer_at('active', $cur_dept_id),
+        ]];
+    } else {
+        if ($cur_idx === null) {
+            $cur_idx = 0;
+        }
+        foreach ($dept_rows as $ix => $dr) {
+            $title = strtoupper(trim((string) ($dr['dept_name'] ?? '')));
+            if ($title === '') {
+                continue;
+            }
+            $did = (int) ($dr['id'] ?? 0);
+            if ($ix < $cur_idx) {
+                $state = 'completed';
+            } elseif ($ix === $cur_idx) {
+                $state = 'active';
+            } else {
+                $state = 'pending';
+            }
+            list($tw_s, $tq_s) = $mp_ot_step_wt_qty($state, $did);
+            $process_steps[] = [
+                'title' => $title,
+                'state' => $state,
+                'order_date' => $jwo_od_str,
+                'completed_date' => 'NA',
+                'total_weight' => $tw_s,
+                'total_quantity' => $tq_s,
+                'job_queue_no' => $mp_ot_step_queue_no($state, $did),
+                'transfer_at' => $mp_ot_step_transfer_at($state, $did),
+            ];
+        }
     }
 }
 

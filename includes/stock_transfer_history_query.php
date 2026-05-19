@@ -1,7 +1,7 @@
 <?php
 /**
  * Stock transfer list: same SELECT/joins as stock-history.php inward "Stock Availability (Wt)" query,
- * with WHERE scoped to one branch: inward types opening/purchase only, positive current qty/weight, strict branch_id.
+ * with WHERE scoped to one branch: non-outward lines with positive current or (SJ inward) opening qty/wt after journal clears current_*.
  *
  * @param mysqli      $conn
  * @param int         $branch_id
@@ -15,6 +15,11 @@ function auragold_stock_transfer_list_sql($conn, $branch_id, $barcode_esc = null
     $stock_has_ref = ($ref_col_chk && mysqli_num_rows($ref_col_chk) >= 2);
     if ($ref_col_chk) {
         mysqli_free_result($ref_col_chk);
+    }
+    $sj_id_col_chk = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock LIKE 'stock_journal_id'");
+    $stock_has_sjid = ($sj_id_col_chk && mysqli_num_rows($sj_id_col_chk) > 0);
+    if ($sj_id_col_chk) {
+        mysqli_free_result($sj_id_col_chk);
     }
     $sj_ref_join = '';
     if ($stock_has_ref) {
@@ -61,10 +66,22 @@ function auragold_stock_transfer_list_sql($conn, $branch_id, $barcode_esc = null
         ? '(sj.id IS NOT NULL OR sj_ref.id IS NOT NULL OR sj_bc.id IS NOT NULL)'
         : '(sj.id IS NOT NULL OR sj_bc.id IS NOT NULL)';
 
-    // Same inward scope as stock-history.php: opening + purchase only; exclude outward/sale lines elsewhere.
-    $stock_transfer_where = "s.status = 1 AND s.stock_type IN ('opening', 'purchase')";
-    // Only lines with positive on-hand at this branch (actually transferable).
-    $stock_transfer_where .= " AND (COALESCE(s.current_weight,0) > 0 OR COALESCE(s.current_qty,0) > 0)";
+    // save-stock-journal.php zeros current_* on per-line inward purchase rows after posting consolidated outward;
+    // opening_* still holds piece weight — same fallback as stock-transfer-save.php move_wt/move_qty.
+    $sj_link_parts = [];
+    if ($stock_has_ref) {
+        $sj_link_parts[] = "IFNULL(s.reference_type,'') = 'stock_journal'";
+    }
+    if ($stock_has_sjid) {
+        $sj_link_parts[] = 'IFNULL(s.stock_journal_id,0) > 0';
+    }
+    $sj_opening_onhand = !empty($sj_link_parts)
+        ? '(s.stock_type = \'purchase\' AND (COALESCE(s.opening_weight,0) > 0 OR COALESCE(s.opening_qty,0) > 0) AND (' . implode(' OR ', $sj_link_parts) . '))'
+        : '0';
+
+    // List transferable at this branch; exclude outward rows (save rejects those).
+    $stock_transfer_where = "s.status = 1 AND IFNULL(s.stock_type,'') NOT IN ('outward')";
+    $stock_transfer_where .= ' AND (COALESCE(s.current_weight,0) > 0 OR COALESCE(s.current_qty,0) > 0 OR (' . $sj_opening_onhand . '))';
     // Strict branch: only stock assigned to the selected source branch (matches Stock History Inward branch filter).
     $stock_transfer_where .= " AND s.branch_id = " . $bid;
     if ($barcode_esc !== null && $barcode_esc !== '') {

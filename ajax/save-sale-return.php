@@ -4,6 +4,7 @@ require_once '../config.php';
 require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 
 header('Content-Type: application/json');
 
@@ -14,8 +15,23 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 mysqli_begin_transaction($conn);
 
+if (!function_exists('sale_return_validate_metal_exchange_payments')) {
+    /** @param array<int, array<string, mixed>> $payments */
+    function sale_return_validate_metal_exchange_payments($conn, array $payments): void
+    {
+        foreach ($payments as $payment) {
+            $payment = auragold_payment_merge_stored_details($payment);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $payment);
+        }
+    }
+}
+
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
+    $metal_exchange_barcodes_out = [];
 
     $has_sr_branch   = auragold_ensure_table_branch_id_column($conn, 'tbl_sale_returns');
     $hdr_branch      = auragold_transaction_header_branch_id();
@@ -521,7 +537,11 @@ try {
     }
     
     if (!empty($payments) && is_array($payments)) {
-        foreach ($payments as $payment) {
+        sale_return_validate_metal_exchange_payments($conn, $payments);
+        $__sr_was_update_local = !$is_new_return;
+        $__sr_me_has_ref = auragold_metal_exchange_document_init($conn, $__sr_was_update_local, (int) $return_id, 'sale_return_metal_exchange');
+
+        foreach ($payments as $pay_seq => $payment) {
             $payment_type = esc($payment['payment_type'] ?? '');
             $diamond_category = esc($payment['diamond_category'] ?? '');
             $transaction_no = esc($payment['transaction_no'] ?? '');
@@ -534,8 +554,8 @@ try {
             $quantity = (float)($payment['quantity'] ?? 0);
             $purity_carat = esc($payment['purity_carat'] ?? '');
             $amount = (float)($payment['amount'] ?? 0);
-            
-            if ($amount > 0) {
+
+            if (auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
                 $payment_sql = "
                     INSERT INTO tbl_sale_return_payments (
                         return_id, payment_type, diamond_category, transaction_no,
@@ -558,11 +578,28 @@ try {
                         1, NOW()
                     )
                 ";
-                
+
                 if (!mysqli_query($conn, $payment_sql)) {
                     throw new Exception("Payment insert failed: " . mysqli_error($conn));
                 }
             }
+
+            $pm = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'sale_return_metal_exchange',
+                (int) $return_id,
+                trim((string) preg_replace('/\s.+/', '', (string) $return_no)),
+                substr(trim((string) $return_date), 0, 10),
+                $pm,
+                auragold_metal_exchange_default_branch_id(),
+                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
+                $__sr_me_has_ref,
+                'Sale Return — Metal Exchange',
+                'sr_me',
+                'SR-ME-',
+                $metal_exchange_barcodes_out
+            );
         }
     }
 
@@ -980,6 +1017,11 @@ try {
         }
     }
 
+    if ((int) $return_id > 0) {
+        require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
+        auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'sale_return', (int) $return_id, $return_no, $return_date);
+    }
+
     mysqli_commit($conn);
 
     require_once __DIR__ . '/../includes/auragold_notifications.php';
@@ -1000,7 +1042,7 @@ try {
         'order_id' => $return_id,
         'return_no' => $return_no,
         'order_no' => $return_no,
-        'new_barcodes' => $new_barcodes_out,
+        'new_barcodes' => array_merge((array) $new_barcodes_out, (array) $metal_exchange_barcodes_out),
     ]);
     
 } catch (Exception $e) {

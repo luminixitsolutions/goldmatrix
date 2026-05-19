@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/stock_transfer_data.php';
+require_once __DIR__ . '/../includes/stock_transfer_pending_schema.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -10,10 +11,22 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
     exit;
 }
 
+try {
+    $conn = auragold_stock_transfer_central_mysqli();
+} catch (Throwable $e) {
+    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    exit;
+}
+
 $branch_id = isset($_GET['branch_id']) ? (int) $_GET['branch_id'] : 0;
 $barcode = isset($_GET['barcode']) ? trim((string) $_GET['barcode']) : '';
 if ($branch_id <= 0 || $barcode === '') {
     echo json_encode(['success' => false, 'message' => 'Branch and barcode are required.']);
+    exit;
+}
+if (function_exists('auragold_branch_is_main_or_sub_of_settings_main')
+    && !auragold_branch_is_main_or_sub_of_settings_main($branch_id)) {
+    echo json_encode(['success' => false, 'message' => 'Invalid branch.']);
     exit;
 }
 

@@ -86,14 +86,80 @@ $selPeriod = isset($period) ? (string) $period : 'this_month';
 .sp-lb .table { margin: 0; font-size: 13px; }
 .sp-lb thead th { background: #faf5ff; color: #6d28d9; font-size: 11px; text-transform: uppercase; border: none; }
 .sp-empty { text-align: center; color: #94a3b8; padding: 36px 16px; font-size: 14px; }
+@media (max-width: 991.98px) {
+    .sp-chart-inner { height: 240px; }
+}
+@media (max-width: 575.98px) {
+    .sp-chart-inner { height: 200px; }
+}
+@media (max-width: 767.98px) {
+    .sp-dashboard-root {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    .sp-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        margin-bottom: 12px;
+    }
+    .sp-head h1 { font-size: 1.15rem; }
+    .sp-head-actions {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .sp-head-actions .sp-badge,
+    .sp-head-actions .btn {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        box-sizing: border-box;
+        white-space: normal;
+        line-height: 1.25;
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    .sp-filters {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .sp-filters .form-select {
+        min-width: 0;
+        width: 100%;
+    }
+    .sp-kpi-row {
+        grid-template-columns: 1fr;
+    }
+    .sp-kpi {
+        min-height: 0;
+        align-items: flex-start;
+    }
+    .sp-kpi .lbl {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .sp-chart-card h2 {
+        white-space: normal;
+        line-height: 1.3;
+    }
+}
 </style>
 
+<div class="sp-dashboard-root">
 <div class="sp-head">
     <div>
         <h1>Salesperson Dashboard</h1>
-        <div style="font-size:13px;color:#64748b;margin-top:4px;">Totals and chart respect <strong>Sales person</strong> and <strong>date</strong> filters. Leaderboards use all staff for the same period.</div>
     </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+    <div class="d-flex align-items-center gap-2 flex-wrap sp-head-actions">
         <span class="sp-badge">Salesperson Dashboard</span>
         <a class="btn btn-outline-secondary btn-sm" href="dashboards-hub.php"><i class="feather icon-grid"></i> All dashboards</a>
     </div>
@@ -171,7 +237,7 @@ $selPeriod = isset($period) ? (string) $period : 'this_month';
 </div>
 
 <div class="row g-3">
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="sp-lb h-100">
             <div class="sp-lb-h">TOP SALES PERFORMERS (LEADERBOARD)</div>
             <?php if (empty($sd['top_performers'])): ?>
@@ -192,7 +258,7 @@ $selPeriod = isset($period) ? (string) $period : 'this_month';
             <?php endif; ?>
         </div>
     </div>
-    <div class="col-lg-6">
+    <div class="col-12 col-lg-6">
         <div class="sp-lb h-100">
             <div class="sp-lb-h">WEAK SALES PERFORMERS (NEED ATTENTION)</div>
             <?php if (empty($sd['weak_performers'])): ?>
@@ -213,6 +279,8 @@ $selPeriod = isset($period) ? (string) $period : 'this_month';
             <?php endif; ?>
         </div>
     </div>
+</div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
