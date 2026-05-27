@@ -79,7 +79,7 @@ if (empty($branch_list)) {
     $branch_list = $mid > 0 ? [['id' => $mid, 'name' => 'Main Branch']] : [];
 }
 
-$page_title = 'User Management — AuraGold';
+$page_title = 'User Management — ' . auragold_app_name();
 $auragold_admin_tab = 'users';
 ?>
 <!DOCTYPE html>

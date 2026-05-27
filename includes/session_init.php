@@ -2,11 +2,25 @@
 require_once __DIR__ . '/remote_license_gate.php';
 
 /**
- * Session cookie + server-side max lifetime (24 hours). Each authenticated request refreshes the cookie (sliding).
+ * Session cookie + server-side max lifetime (30 days). Each authenticated request refreshes the cookie (sliding).
  * Compatible with PHP 7.2+ (array cookie params need 7.3+).
  */
 if (!defined('AURAGOLD_SESSION_LIFETIME')) {
-    define('AURAGOLD_SESSION_LIFETIME', 86400);
+    define('AURAGOLD_SESSION_LIFETIME', 2592000);
+}
+
+/** Extended lifetime when "Remember me" is checked at login (365 days). */
+if (!defined('AURAGOLD_SESSION_REMEMBER_LIFETIME')) {
+    define('AURAGOLD_SESSION_REMEMBER_LIFETIME', 31536000);
+}
+
+if (!function_exists('auragold_session_effective_lifetime')) {
+    function auragold_session_effective_lifetime(): int {
+        if (session_status() === PHP_SESSION_ACTIVE && !empty($_SESSION['auragold_remember_me'])) {
+            return (int) AURAGOLD_SESSION_REMEMBER_LIFETIME;
+        }
+        return (int) AURAGOLD_SESSION_LIFETIME;
+    }
 }
 
 /**
@@ -136,8 +150,11 @@ if (!function_exists('auragold_session_refresh_live_cookie')) {
 
         $_SESSION['auragold_last_activity'] = time();
 
+        $lifetime = auragold_session_effective_lifetime();
+        @ini_set('session.gc_maxlifetime', (string) $lifetime);
+
         $secure   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-        $expires  = time() + AURAGOLD_SESSION_LIFETIME;
+        $expires  = time() + $lifetime;
         $name     = session_name();
         $sid      = session_id();
         $path     = '/';
@@ -157,20 +174,21 @@ if (!function_exists('auragold_session_refresh_live_cookie')) {
 }
 
 if (session_status() === PHP_SESSION_NONE) {
-    @ini_set('session.gc_maxlifetime', (string) AURAGOLD_SESSION_LIFETIME);
-    @ini_set('session.cookie_lifetime', (string) AURAGOLD_SESSION_LIFETIME);
+    $initLifetime = (int) AURAGOLD_SESSION_LIFETIME;
+    @ini_set('session.gc_maxlifetime', (string) $initLifetime);
+    @ini_set('session.cookie_lifetime', (string) $initLifetime);
 
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     if (PHP_VERSION_ID >= 70300) {
         session_set_cookie_params([
-            'lifetime' => AURAGOLD_SESSION_LIFETIME,
+            'lifetime' => $initLifetime,
             'path'     => '/',
             'secure'   => $secure,
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
     } else {
-        session_set_cookie_params(AURAGOLD_SESSION_LIFETIME, '/', '', $secure, true);
+        session_set_cookie_params($initLifetime, '/', '', $secure, true);
     }
     session_start();
 }

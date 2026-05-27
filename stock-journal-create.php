@@ -13900,8 +13900,20 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             return;
         }
         
-        // Open barcode print page in new window
-        const printUrl = 'barcode-print.php?barcode=' + encodeURIComponent(barcode.trim());
+        var metalType = '';
+        if (event && event.target) {
+            var row = event.target.closest('tr');
+            if (row && typeof sjProductListRowMetalDisplayName === 'function') {
+                metalType = sjProductListRowMetalDisplayName(row) || '';
+            } else if (row && typeof sjRowMetalDisplayName === 'function') {
+                metalType = sjRowMetalDisplayName(row) || '';
+            }
+        }
+        
+        var printUrl = 'barcode-print.php?barcode=' + encodeURIComponent(barcode.trim());
+        if (metalType) {
+            printUrl += '&metal_type=' + encodeURIComponent(metalType);
+        }
         window.open(printUrl, '_blank', 'width=800,height=600');
     }
     
@@ -13977,6 +13989,15 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         // Build URL with row data so print shows current values even before Save
         const params = new URLSearchParams();
         params.set('barcode', barcode);
+        var metalType = '';
+        if (typeof sjProductListRowMetalDisplayName === 'function') {
+            metalType = sjProductListRowMetalDisplayName(row) || '';
+        } else if (typeof sjRowMetalDisplayName === 'function') {
+            metalType = sjRowMetalDisplayName(row) || '';
+        }
+        if (metalType) {
+            params.set('metal_type', metalType);
+        }
         const rowData = getRowDataForBarcodePrint(row);
         ['gross_wt', 'less_wt', 'purity', 'final_wt', 'net_wt', 'pure_wt', 'product_name', 'design_no', 'amount', 'net_amt', 'rate', 'making_amount'].forEach(function(k) {
             const v = rowData[k];

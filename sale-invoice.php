@@ -4400,6 +4400,26 @@ window.PB_PAGE_CONFIG = {
                 triggerModalProductBarcodeCheck(self, true);
             }, 150);
         });
+
+        $(document).on('click', '#modalProductBarcodeFetchBtn', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var inp = document.getElementById('modalProductBarcode');
+            if (!inp) {
+                return;
+            }
+            var barcode = String(inp.value || '').trim();
+            if (!barcode) {
+                inp.focus();
+                alert('Please enter or scan a barcode number.');
+                return;
+            }
+            if (modalProductBarcodeCheckTimer) {
+                clearTimeout(modalProductBarcodeCheckTimer);
+                modalProductBarcodeCheckTimer = null;
+            }
+            triggerModalProductBarcodeCheck(inp, false);
+        });
         
         $('#productCreationModal').on('hidden.bs.modal', function() {
             if (modalProductBarcodeCheckTimer) {

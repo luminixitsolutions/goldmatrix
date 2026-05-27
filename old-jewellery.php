@@ -1257,11 +1257,11 @@ $total_pages = $total_records > 0 ? ceil($total_records / $per_page) : 1;
 <!DOCTYPE html>
 <html lang="en" class="default-style">
 <head>
-    <title>Old Jewellery - AuraGold Software</title>
+    <title>Old Jewellery - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software</title>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    <meta name="description" content="Old Jewellery Management - AuraGold Software" />
+    <meta name="description" content="Old Jewellery Management - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software" />
     <link rel="icon" type="image/jpeg" href="favicon.jpeg">
 <?php include 'header-script.php';?>
 </head>

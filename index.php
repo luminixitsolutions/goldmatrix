@@ -1,8 +1,9 @@
 <?php
 require_once __DIR__ . '/includes/session_init.php';
+require_once __DIR__ . '/includes/auragold_require_login.php';
 
-// Redirect if already logged in (user session active)
-if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] > 0) {
+// Redirect if already logged in — keep active session, do not show login again
+if (auragold_is_logged_in_session()) {
     header('Location: dashboard.php');
     exit;
 }
@@ -21,7 +22,7 @@ $branch_entry_id = isset($_GET['branch_entry']) ? (int) $_GET['branch_entry'] : 
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GoldMatrix – Login</title>
+<title><?php echo htmlspecialchars(auragold_app_name() . ' – Login', ENT_QUOTES, 'UTF-8'); ?></title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
@@ -712,6 +713,7 @@ window.AURAGOLD_ENTRY_BRANCH_ID = <?php echo (int) $branch_entry_id; ?>;
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 var years = (data && data.years) ? data.years : [];
+                years = years.filter(function (y) { return y && y.is_active; });
                 sel.innerHTML = '';
                 if (years.length === 0) {
                     wrap.style.display = 'none';

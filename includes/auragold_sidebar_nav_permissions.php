@@ -67,6 +67,7 @@ function auragold_nav_basename_permission_map()
         'diamond-stone-analysis.php'    => ['inventory', 'diamond_stone_analysis'],
         'diamond-stock.php'             => ['inventory', 'diamond_stone_analysis'],
         'jewelry-catalogue.php'         => ['inventory', 'jewellery_catalogue'],
+        'jewelry-catalogue-create.php'  => ['inventory', 'jewellery_catalogue'],
         'imitation-analysis.php'        => ['inventory', 'imitation_watches_analysis'],
         'rfid-barcode-scan.php'         => ['inventory', 'rfid_barcode_scan'],
         'sale-order.php'                => ['orders', 'sale_order'],
@@ -268,15 +269,6 @@ function auragold_nav_sidebar_entirely_hidden_for_session()
 
             return false;
         }
-    }
-    if (!function_exists('auragold_session_is_admin_login_type')) {
-        require_once __DIR__ . '/session_login_type.php';
-    }
-    $isAdmin = !empty($_SESSION['Admin']) && auragold_session_is_admin_login_type();
-    if (auragold_nav_administration_dropdown_visible($isAdmin)) {
-        $cached = false;
-
-        return false;
     }
     $cached = true;
 

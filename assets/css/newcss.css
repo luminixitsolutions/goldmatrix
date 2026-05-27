@@ -14,7 +14,7 @@
         --js-fw-medium: 500;
         --js-fw-nav-active: 600;
         --js-fw-heading: 700;
-        /* Main horizontal menu (#auragoldTopNav) — same as sale-invoice.php reference (12px, semibold active) */
+        /* Main horizontal menu (#auragoldTopNav) — single row, full-width strip */
         --js-text-topnav: 12px;
     }
 
@@ -161,7 +161,7 @@
         display: flex !important;
         align-items: center;
         gap: 0.5rem;
-        margin-right: 0.25rem;
+        margin-right: 0;
         text-transform: uppercase;
         letter-spacing: 0.02em;
         -webkit-font-smoothing: antialiased;
@@ -228,10 +228,7 @@
         min-width: 320px;
     }
     .top-navbar .settings-submenu {
-        min-width: 220px;
-    }
-    .top-navbar .administration-submenu {
-        min-width: 220px;
+        min-width: 260px;
     }
     /* Mega Menu Styles */
     .mega-menu {
@@ -347,6 +344,61 @@
     }
     .top-navbar .nav-tabs .nav-item {
         margin-bottom: 0 !important;
+    }
+
+    /* Desktop: single row, items packed with no distributed gaps between labels */
+    @media (min-width: 992px) {
+        #auragoldTopNav.top-navbar {
+            width: 100%;
+        }
+        #auragoldTopNav.top-navbar .top-navbar-inner {
+            width: 100%;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+        #auragoldTopNav.top-navbar .top-navbar-inner .nav.nav-tabs {
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            gap: 0 !important;
+            flex: 0 1 auto;
+            width: auto;
+            max-width: 100%;
+            margin: 0;
+            padding: 0 4px;
+        }
+        #auragoldTopNav.top-navbar .nav-tabs .nav-item {
+            flex: 0 0 auto;
+            min-width: 0;
+            display: flex;
+            margin: 0 !important;
+        }
+        #auragoldTopNav.top-navbar .nav.nav-tabs .nav-item > .nav-link,
+        #auragoldTopNav.top-navbar .nav-tabs .nav-link,
+        nav#auragoldTopNav .nav .nav-link {
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 0;
+            justify-content: center;
+            font-size: 12px !important;
+            padding: 8px 7px !important;
+            gap: 0.35rem;
+            margin: 0 !important;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+            border-radius: 4px;
+        }
+        #auragoldTopNav .nav-link i,
+        .top-navbar#auragoldTopNav .nav-link i {
+            flex-shrink: 0;
+            font-size: 14px !important;
+        }
+        .top-navbar .nav {
+            padding-left: 0;
+            padding-right: 0;
+            width: 100%;
+        }
     }
     .top-navbar .dropdown-menu li {
         list-style: none !important;

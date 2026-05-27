@@ -10,7 +10,7 @@ $auragold_mac = [
 ?><!DOCTYPE html>
 <html lang="en" class="default-style">
 <head>
-    <title>Amount to Metal - AuraGold</title>
+    <title>Amount to Metal - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?></title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <link rel="icon" type="image/jpeg" href="favicon.jpeg">

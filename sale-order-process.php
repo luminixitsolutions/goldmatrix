@@ -952,7 +952,7 @@ td[data-col="action"] { white-space: nowrap; vertical-align: middle; }
                                     <a href="jobwork-order.php?sale_order_id=<?php echo (int)$item['order_id']; ?>" class="btn-action btn-jobwork">Jobwork Order</a>
                                     <?php endif; ?>
                                 <?php endif; ?>
-                                <button type="button" class="btn-action btn-catalogue">Create Catalogue</button>
+                                <a href="jewelry-catalogue-create.php?order_kind=<?php echo $is_repair_row ? 'repair' : 'sale'; ?>&amp;order_id=<?php echo (int) $item['order_id']; ?>&amp;item_id=<?php echo (int) $item['item_id']; ?>&amp;return=<?php echo rawurlencode('sale-order-process.php'); ?>" class="btn-action btn-catalogue" title="Create jewellery catalogue for this order line">Create Catalogue</a>
                                 </div>
                             </td>
                         </tr>

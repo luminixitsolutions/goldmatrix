@@ -21,7 +21,7 @@ $sqlError = $result['error'];
 <!DOCTYPE html>
 <html lang="en" class="default-style">
 <head>
-    <title>Stock Transfer History — AuraGold</title>
+    <title>Stock Transfer History — <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?></title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/jpeg" href="favicon.jpeg">

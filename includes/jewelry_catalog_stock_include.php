@@ -69,7 +69,7 @@ function auragold_jewelry_catalog_metals(mysqli $conn): array
             COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(system_name), ''), CONCAT('Metal ', id)) AS name
          FROM tbl_metal
          WHERE status = 1
-         ORDER BY name ASC, id ASC"
+         ORDER BY id ASC"
     );
 
     return is_array($rows) ? $rows : [];

@@ -125,8 +125,6 @@ $auragold_settings_pages = [
     'invoice-print-settings.php',
     'ewaybill-api-settings.php',
     'ewaybill-authentication.php',
-];
-$auragold_administration_pages = [
     'user-management.php',
     'masters.php',
     'role-management.php',
@@ -145,7 +143,6 @@ $auragold_manufacturer_nav_active = in_array($auragold_nav_basename, $auragold_m
 $auragold_financial_statement_nav_active = in_array($auragold_nav_basename, $auragold_financial_statement_pages, true);
 $auragold_report_nav_active = in_array($auragold_nav_basename, $auragold_report_pages, true);
 $auragold_settings_nav_active = in_array($auragold_nav_basename, $auragold_settings_pages, true);
-$auragold_administration_nav_active = in_array($auragold_nav_basename, $auragold_administration_pages, true);
 
 /** Top-left mark: working-branch shop logo (my-profile / tbl_branches.logo_path). Top-right avatar: user photo, else shop logo, else default. */
 $auragold_header_avatar_src    = 'assets/img/avatars/1.png';
@@ -316,9 +313,7 @@ if (!empty($_SESSION['Admin'])) {
                             <?php endif; ?>
                             <?php if (!function_exists('auragold_nav_show_php_href') || auragold_nav_show_php_href('pos-sale-invoice.php')): ?>
                             <a href="pos-sale-invoice.php" class="pos-btn d-none d-lg-inline-block"><?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.pos'), ENT_QUOTES, 'UTF-8') : 'POS'; ?></a>
-                            <a href="pos-sale-invoice.php" class="btn-icon d-none d-lg-flex" title="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.pos'), ENT_QUOTES, 'UTF-8') : 'POS'; ?> (POS Sale Invoice)" aria-label="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.pos'), ENT_QUOTES, 'UTF-8') : 'POS'; ?>"><i class="feather icon-monitor" aria-hidden="true"></i></a>
                             <?php endif; ?>
-                                <button type="button" class="btn-icon d-none d-lg-flex" title="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.print'), ENT_QUOTES, 'UTF-8') : 'Print'; ?>" aria-label="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.print'), ENT_QUOTES, 'UTF-8') : 'Print'; ?>"><i class="feather icon-printer" aria-hidden="true"></i></button>
                                 <button type="button" class="btn-icon d-none d-lg-flex" id="fullscreenBtn" title="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.fullscreen'), ENT_QUOTES, 'UTF-8') : 'Fullscreen (Use F11 for persistent fullscreen across pages)'; ?>" aria-label="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.fullscreen'), ENT_QUOTES, 'UTF-8') : 'Fullscreen'; ?>"><i class="feather icon-maximize-2" aria-hidden="true"></i></button>
                                 <div class="auragold-notif-dropdown" id="auragoldNotifWrap">
                                     <button type="button" class="btn-icon d-flex auragold-header-notif-btn position-relative" id="auragoldNotifToggle" title="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.notifications'), ENT_QUOTES, 'UTF-8') : 'Notifications'; ?>" aria-label="<?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.notifications'), ENT_QUOTES, 'UTF-8') : 'Notifications'; ?>" aria-expanded="false" aria-haspopup="true">
@@ -463,7 +458,7 @@ if ($auragold_dropdown_branch_title === '') {
 
                             <?php if (auragold_nav_module_has_visible_link('utilities')): ?>
                             <li class="nav-item" data-mm-module="utilities">
-                                    <a class="nav-link<?php echo $auragold_utilities_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-box"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.utilities'), ENT_QUOTES, 'UTF-8') : 'Utilities'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_utilities_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-box"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.utilities'), ENT_QUOTES, 'UTF-8') : 'Opening'; ?></a>
                                     <ul class="dropdown-menu utilities-submenu">
                                         <?php if (auragold_nav_show_php_href('product-opening.php')): ?><li><a class="dropdown-item" href="product-opening.php"><i class="feather icon-package"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.product_opening'), ENT_QUOTES, 'UTF-8') : 'Product Opening'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('assign-inventory-to-sales-team.php')): ?><li><a class="dropdown-item" href="assign-inventory-to-sales-team.php"><i class="feather icon-user-check"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.assign_inv_sales'), ENT_QUOTES, 'UTF-8') : 'Assign Inventory To Sales Team'; ?></a></li><?php endif; ?>
@@ -481,7 +476,7 @@ if ($auragold_dropdown_branch_title === '') {
                             <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('transaction')): ?>
                             <li class="nav-item mega-menu-item" data-mm-module="transaction">
-                                    <a class="nav-link<?php echo $auragold_transaction_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.transaction'), ENT_QUOTES, 'UTF-8') : 'Transaction'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_transaction_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.transaction'), ENT_QUOTES, 'UTF-8') : 'Operations'; ?></a>
                                     <div class="mega-menu">
                                         <div class="mega-menu-content">
                                             <div class="mega-menu-column">
@@ -532,7 +527,7 @@ if ($auragold_dropdown_branch_title === '') {
                             <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('inventory')): ?>
                             <li class="nav-item mega-menu-item" data-mm-module="inventory">
-                                    <a class="nav-link<?php echo $auragold_inventory_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-package"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.inventory'), ENT_QUOTES, 'UTF-8') : 'Inventory'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_inventory_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-package"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.inventory'), ENT_QUOTES, 'UTF-8') : 'Stock Management'; ?></a>
                                     <div class="mega-menu inventory-mega-menu">
                                         <div class="mega-menu-content">
                                             <div class="mega-menu-column">
@@ -586,7 +581,7 @@ if ($auragold_dropdown_branch_title === '') {
                             <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('orders')): ?>
                             <li class="nav-item" data-mm-module="orders">
-                                    <a class="nav-link<?php echo $auragold_orders_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-shopping-cart"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.orders'), ENT_QUOTES, 'UTF-8') : 'Orders'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_orders_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-shopping-cart"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.orders'), ENT_QUOTES, 'UTF-8') : 'Order Management'; ?></a>
                                     <ul class="dropdown-menu orders-submenu">
                                         <?php if (auragold_nav_show_php_href('sale-order.php')): ?><li><a class="dropdown-item" href="sale-order.php"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.sale_order'), ENT_QUOTES, 'UTF-8') : 'Sale Order'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('repair-order.php')): ?><li><a class="dropdown-item" href="repair-order.php"><i class="feather icon-clipboard"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.repair_order'), ENT_QUOTES, 'UTF-8') : 'Repair Order'; ?></a></li><?php endif; ?>
@@ -601,7 +596,7 @@ if ($auragold_dropdown_branch_title === '') {
                             
                             <?php if (auragold_nav_module_has_visible_link('manufacturer')): ?>
                             <li class="nav-item" data-mm-module="manufacturer">
-                                    <a class="nav-link<?php echo $auragold_manufacturer_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-briefcase"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.manufacturer'), ENT_QUOTES, 'UTF-8') : 'Manufacturer'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_manufacturer_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-briefcase"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.manufacturer'), ENT_QUOTES, 'UTF-8') : 'Production'; ?></a>
                                     <ul class="dropdown-menu manufacturer-submenu">
                                         <?php if (auragold_nav_show_php_href('department.php')): ?><li><a class="dropdown-item" href="department.php"><i class="feather icon-grid"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('mfg.department'), ENT_QUOTES, 'UTF-8') : 'Department'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('department-report.php')): ?><li><a class="dropdown-item" href="department-report.php"><i class="feather icon-users"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('mfg.department_report'), ENT_QUOTES, 'UTF-8') : 'Department Report'; ?></a></li><?php endif; ?>
@@ -636,7 +631,7 @@ if ($auragold_dropdown_branch_title === '') {
                             <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('report')): ?>
                             <li class="nav-item" data-mm-module="report">
-                                    <a class="nav-link<?php echo $auragold_report_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.report'), ENT_QUOTES, 'UTF-8') : 'Report'; ?></a>
+                                    <a class="nav-link<?php echo $auragold_report_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.report'), ENT_QUOTES, 'UTF-8') : 'Report Analysis'; ?></a>
                                     <ul class="dropdown-menu report-submenu">
                                         <?php if (auragold_nav_show_php_href('transaction-report.php')): ?><li><a class="dropdown-item" href="transaction-report.php"><i class="feather icon-paperclip"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('rep.transactions'), ENT_QUOTES, 'UTF-8') : 'Transactions Report'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('accountledger-report.php')): ?><li><a class="dropdown-item" href="accountledger-report.php"><i class="feather icon-bar-chart-2"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('rep.account_ledger'), ENT_QUOTES, 'UTF-8') : 'Account Ledger Report'; ?></a></li><?php endif; ?>
@@ -650,7 +645,7 @@ if ($auragold_dropdown_branch_title === '') {
                                     </ul>
                             </li>
                             <?php endif; ?>
-                            <?php if (auragold_nav_module_has_visible_link('settings')): ?>
+                            <?php if (auragold_nav_module_has_visible_link('settings') || auragold_nav_administration_dropdown_visible($auragold_nav_admin_role)): ?>
                             <li class="nav-item" data-mm-module="settings">
                                     <a class="nav-link<?php echo $auragold_settings_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-settings"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.settings'), ENT_QUOTES, 'UTF-8') : 'Settings'; ?></a>
                                     <ul class="dropdown-menu settings-submenu">
@@ -659,13 +654,13 @@ if ($auragold_dropdown_branch_title === '') {
                                        
                                         <?php if (auragold_nav_show_php_href('voucher-type.php')): ?><li><a class="dropdown-item" href="voucher-type.php"><i class="feather icon-percent"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('set.voucher_type'), ENT_QUOTES, 'UTF-8') : 'Voucher Type'; ?></a></li><?php endif; ?>
                                         <!-- <?php if (auragold_nav_show_php_href('invoice-print-settings.php')): ?><li><a class="dropdown-item" href="invoice-print-settings.php"><i class="feather icon-printer"></i> Invoice print settings</a></li><?php endif; ?> -->
-                                    </ul>
-                            </li>
-                            <?php endif; ?>
-                            <?php if (auragold_nav_administration_dropdown_visible($auragold_nav_admin_role)): ?>
-                            <li class="nav-item" data-mm-module="administration">
-                                    <a class="nav-link<?php echo $auragold_administration_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-monitor"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.administration'), ENT_QUOTES, 'UTF-8') : 'Administration'; ?></a>
-                                    <ul class="dropdown-menu administration-submenu">
+                                        <?php
+                                        $auragold_settings_config_links = auragold_nav_show_php_href('set-software.php')
+                                            || auragold_nav_show_php_href('language-settings.php')
+                                            || auragold_nav_show_php_href('voucher-type.php');
+                                        if (auragold_nav_administration_dropdown_visible($auragold_nav_admin_role)):
+                                        ?>
+                                        <?php if ($auragold_settings_config_links): ?><li class="dropdown-divider" role="separator"></li><?php endif; ?>
                                         <?php if ($auragold_nav_admin_role && auragold_nav_show_php_href('user-management.php')): ?>
                                         <li><a class="dropdown-item" href="user-management.php"><i class="feather icon-users"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.user_management'), ENT_QUOTES, 'UTF-8') : 'User Management'; ?></a></li>
                                         <?php endif; ?>
@@ -686,6 +681,7 @@ if ($auragold_dropdown_branch_title === '') {
                                         <?php endif; ?> -->
                                         <?php if (auragold_nav_can_page_keys('administration', 'activity_log')): ?><li data-mm-page="administration.activity_log"><a class="dropdown-item" href="#"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.activity_log'), ENT_QUOTES, 'UTF-8') : 'Activity Log'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('crm.php')): ?><li><a class="dropdown-item" href="crm.php"><i class="feather icon-sidebar"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.crm'), ENT_QUOTES, 'UTF-8') : 'CRM'; ?></a></li><?php endif; ?>
+                                        <?php endif; ?>
                                     </ul>
                             </li>
                             <?php endif; ?>

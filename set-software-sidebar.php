@@ -39,6 +39,7 @@ $auragold_ss_menu_close = function_exists('auragold_t')
         </button>
     </div>
     <div class="set-software-sidebar-title d-none d-lg-block"><?php echo $auragold_set_ss_title; ?></div>
+    <nav class="set-software-sidebar-menu" aria-label="<?php echo $auragold_set_ss_title; ?>">
     <a href="set-software.php" class="set-software-nav-item<?php echo ($current_page === 'set-software.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-hash"></i> <?php echo $auragold_t_ss('set_software.barcode_setting'); ?></span>
         <i class="feather icon-chevron-right"></i>
@@ -107,6 +108,7 @@ $auragold_ss_menu_close = function_exists('auragold_t')
             <a href="ewaybill-authentication.php" class="set-software-nav-sub-item<?php echo ($current_page === 'ewaybill-authentication.php') ? ' active' : ''; ?>"><?php echo $auragold_t_ss('set_software.eway_bill_auth'); ?></a>
         </div>
     </details>
+    </nav>
 </aside>
 <button type="button" class="set-software-collapse-tab" title="<?php echo $auragold_collapse_hide; ?>" aria-expanded="true" aria-controls="set-software-nav-aside" data-auragold-title-show="<?php echo $auragold_collapse_show; ?>" data-auragold-title-hide="<?php echo $auragold_collapse_hide; ?>"><i class="feather icon-chevron-left"></i></button>
 <script>

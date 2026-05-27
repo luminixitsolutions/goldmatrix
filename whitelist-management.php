@@ -19,7 +19,7 @@ $ipControlOn = auragold_ip_access_control_enabled($conn_master);
 $rows          = getListMaster('SELECT * FROM tbl_ip_whitelist ORDER BY id DESC');
 $n             = is_array($rows) ? count($rows) : 0;
 
-$page_title           = 'Whitelist — Administration — AuraGold';
+$page_title           = 'Whitelist — Administration — ' . auragold_app_name();
 $auragold_admin_tab   = 'whitelist';
 ?>
 <!DOCTYPE html>

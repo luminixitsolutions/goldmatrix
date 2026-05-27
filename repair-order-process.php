@@ -298,7 +298,7 @@ body { background: #f4f6fb; /* font-family: 'Segoe UI', Arial, sans-serif; */ }
                             <td data-col="action">
                                 <a href="repair-order.php?id=<?php echo (int)$item['order_id']; ?>" class="btn-action btn-jobwork">View / Edit</a>
                                 <a href="repair-job-work-order.php?repair_order_id=<?php echo (int)$item['order_id']; ?>" class="btn btn-primary btn-sm">Job Work Order</a>
-                                <button type="button" class="btn-action btn-catalogue">Create Catalogue</button>
+                                <a href="jewelry-catalogue-create.php?order_kind=repair&amp;order_id=<?php echo (int) $item['order_id']; ?>&amp;item_id=<?php echo (int) $item['item_id']; ?>&amp;return=<?php echo rawurlencode('repair-order-process.php'); ?>" class="btn-action btn-catalogue" title="Create jewellery catalogue for this order line">Create Catalogue</a>
                             </td>
                         </tr>
                         <?php endforeach; ?>

@@ -163,7 +163,7 @@ if ($oj_scrap_focus_item_id > 0) {
 <html lang="en" class="default-style">
 
 <head>
-<title>Old Jewellery - Scrap Stock In - AuraGold Software</title>
+<title>Old Jewellery - Scrap Stock In - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software</title>
 
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />

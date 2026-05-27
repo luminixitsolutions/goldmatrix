@@ -345,7 +345,7 @@ $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</s
 <html lang="en" class="default-style">
 
 <head>
-    <title>Dashboard — AuraGold</title>
+    <title><?php echo htmlspecialchars('Dashboard — ' . auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?></title>
 
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />

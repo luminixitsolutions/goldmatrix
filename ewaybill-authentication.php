@@ -29,7 +29,7 @@ $tkrow = ewaybill_fetch_token_row_for_config(
 <!DOCTYPE html>
 <html lang="en" class="default-style">
 <head>
-    <title><?php echo function_exists('auragold_t') ? htmlspecialchars((string) auragold_t('set_software.eway_bill_auth_page_title'), ENT_QUOTES, 'UTF-8') : 'e-Way Bill authentication - Set Software - AuraGold'; ?></title>
+    <title><?php echo function_exists('auragold_t') ? htmlspecialchars((string) auragold_t('set_software.eway_bill_auth_page_title'), ENT_QUOTES, 'UTF-8') : 'e-Way Bill authentication - Set Software - ' . auragold_app_name(); ?></title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <link rel="icon" type="image/jpeg" href="favicon.jpeg">

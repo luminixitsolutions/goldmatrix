@@ -116,7 +116,30 @@ define('DB_USER', $__db_user);
 define('DB_PASS', $__db_pass);
 
 $Proj_Title = "Gold Matrix";
+/** Browser tab / page title brand (change here to update all page titles). */
+$App_Name = "GoldMatrix";
+if (!defined('APP_NAME')) {
+    define('APP_NAME', $App_Name);
+}
 $SiteUrl = "http://localhost/goldmatrix/";
+
+/**
+ * Application name for document titles and branding labels.
+ */
+function auragold_app_name(): string
+{
+    if (defined('APP_NAME') && trim((string) APP_NAME) !== '') {
+        return trim((string) APP_NAME);
+    }
+    global $App_Name, $Proj_Title;
+    if (isset($App_Name) && trim((string) $App_Name) !== '') {
+        return trim((string) $App_Name);
+    }
+    if (isset($Proj_Title) && trim((string) $Proj_Title) !== '') {
+        return trim((string) $Proj_Title);
+    }
+    return 'GoldMatrix';
+}
 
 /**
  * Normalize a stored upload path to the URL segment under $SiteUrl (no "admin/" prefix).
@@ -3038,15 +3061,288 @@ function generateNextBarcodeFromOld($conn, $old_barcode) {
     return generateNextBarcode($conn, 0);
 }
 
+function auragold_barcode_label_standard_presets() {
+    return ['100x18', '100x25', '100x48', '100x80', '64x25', '81x12', '120x50', '82x38_2box', '250x120', 'zebra-zpl'];
+}
+
+/** DB lookup key: one row per metal + label size (custom sizes use custom_WxH). */
+function auragold_barcode_label_storage_preset($preset, $labelWidthMm = null, $labelHeightMm = null) {
+    $p = trim((string) $preset);
+    if ($p === '120x50') {
+        return '120x50';
+    }
+    if ($p === '82x38_2box' || $p === '82x38-2box') {
+        return '82x38_2box';
+    }
+    if ($p !== '' && $p !== 'custom' && in_array($p, auragold_barcode_label_standard_presets(), true)) {
+        return $p;
+    }
+    if (preg_match('/^custom_\d+x\d+$/i', $p)) {
+        return strtolower($p);
+    }
+    $w = max(10, (int) round((float) ($labelWidthMm ?? 100)));
+    $h = max(10, (int) round((float) ($labelHeightMm ?? 18)));
+    return 'custom_' . $w . 'x' . $h;
+}
+
+/** Map storage preset from DB back to Label Size dropdown value. */
+function auragold_barcode_label_ui_preset($storagePreset, $labelWidthMm = null, $labelHeightMm = null) {
+    $p = trim((string) $storagePreset);
+    if (preg_match('/^custom_\d+x\d+$/i', $p)) {
+        return 'custom';
+    }
+    $standard = auragold_barcode_label_standard_presets();
+    $ui = array_merge($standard, ['custom']);
+    if ($p === 'custom' || $p === '') {
+        $dim = (int) round((float) ($labelWidthMm ?? 100)) . 'x' . (int) round((float) ($labelHeightMm ?? 18));
+        if (in_array($dim, $standard, true)) {
+            return $dim;
+        }
+        return 'custom';
+    }
+    if (in_array($p, $ui, true)) {
+        return $p;
+    }
+    $dim = (int) round((float) ($labelWidthMm ?? 100)) . 'x' . (int) round((float) ($labelHeightMm ?? 18));
+    if (in_array($dim, $ui, true)) {
+        return $dim;
+    }
+    return 'custom';
+}
+
+function auragold_barcode_settings_cache_key($metalType, $storagePreset) {
+    return trim((string) $metalType) . '::' . trim((string) $storagePreset);
+}
+
+/** Width/height in mm from storage preset (120x50, custom_100x25, …). */
+function auragold_barcode_label_mm_from_storage_preset($storagePreset, $fallbackW = 100, $fallbackH = 18) {
+    $p = trim((string) $storagePreset);
+    if (preg_match('/^custom_(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/i', $p, $m)) {
+        return [(float) $m[1], (float) $m[2]];
+    }
+    $p = str_replace(' ', '', strtolower($p));
+    if ($p === '82x38_2box' || $p === '82x38-2box') {
+        return [82.0, 38.0];
+    }
+    if (preg_match('/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/', $p, $m)) {
+        return [(float) $m[1], (float) $m[2]];
+    }
+    return [(float) $fallbackW, (float) $fallbackH];
+}
+
+/** Fix rows where label_size_preset=120x50 but label_width_mm/height_mm were saved as stale custom values. */
+function auragold_barcode_settings_normalize_label_mm($row) {
+    if (!is_array($row) || empty($row)) {
+        return $row;
+    }
+    [$w, $h] = auragold_barcode_label_mm_from_storage_preset(
+        $row['label_size_preset'] ?? '100x18',
+        $row['label_width_mm'] ?? 100,
+        $row['label_height_mm'] ?? 18
+    );
+    $row['label_width_mm'] = $w;
+    $row['label_height_mm'] = $h;
+    return $row;
+}
+
+/**
+ * Ensure tbl_barcode_settings.is_default_print exists (one default label per metal for printing).
+ */
+function auragold_ensure_barcode_settings_is_default_print_column($conn) {
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $table = 'tbl_barcode_settings';
+    $exists = @mysqli_query($conn, "SHOW TABLES LIKE '$table'");
+    if (!$exists || mysqli_num_rows($exists) === 0) {
+        if ($exists) {
+            mysqli_free_result($exists);
+        }
+        return;
+    }
+    mysqli_free_result($exists);
+    if (!auragold_tbl_has_column($conn, $table, 'is_default_print')) {
+        @mysqli_query(
+            $conn,
+            "ALTER TABLE `$table` ADD COLUMN `is_default_print` tinyint(1) NOT NULL DEFAULT 0"
+            . " COMMENT '1 = default print layout for this metal_type (only one per metal+branch)' AFTER `metal_type`"
+        );
+    }
+    $done = true;
+}
+
+/**
+ * Barcode setting marked as default print for a metal type (branch-scoped when branch_id is used).
+ *
+ * @param string $metalType
+ * @return array|null
+ */
+function getBarcodeDefaultPrintSettings($metalType) {
+    global $conn;
+    $metal = trim((string) $metalType);
+    if ($metal === '') {
+        return null;
+    }
+    auragold_ensure_barcode_settings_is_default_print_column($conn);
+    $table = 'tbl_barcode_settings';
+    if (!auragold_tbl_has_column($conn, $table, 'is_default_print')) {
+        return null;
+    }
+    auragold_ensure_branch_id_on_settings_tables($conn);
+    $bid = auragold_settings_branch_id();
+    $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
+    $branchWhere = ($hasBranch && $bid > 0) ? (' AND branch_id = ' . (int) $bid) : '';
+    $mtEsc = mysqli_real_escape_string($conn, $metal);
+    $r = getRecord(
+        "SELECT label_size_preset, label_width_mm, label_height_mm FROM `$table`"
+        . " WHERE metal_type = '$mtEsc' AND is_default_print = 1 $branchWhere"
+        . ' ORDER BY updated_at DESC, id DESC LIMIT 1'
+    );
+    if (!$r || empty($r['label_size_preset'])) {
+        return null;
+    }
+    return getBarcodeSettings(
+        $metal,
+        $r['label_size_preset'],
+        isset($r['label_width_mm']) ? (float) $r['label_width_mm'] : null,
+        isset($r['label_height_mm']) ? (float) $r['label_height_mm'] : null
+    );
+}
+
+/**
+ * Any metal's default print row (branch-scoped). Used when item metal is unknown.
+ *
+ * @return array|null
+ */
+function getGlobalBarcodeDefaultPrintSettings() {
+    global $conn;
+    auragold_ensure_barcode_settings_is_default_print_column($conn);
+    $table = 'tbl_barcode_settings';
+    if (!auragold_tbl_has_column($conn, $table, 'is_default_print')) {
+        return null;
+    }
+    auragold_ensure_branch_id_on_settings_tables($conn);
+    $bid = auragold_settings_branch_id();
+    $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
+    $branchWhere = ($hasBranch && $bid > 0) ? (' WHERE branch_id = ' . (int) $bid . ' AND') : ' WHERE';
+    $r = getRecord(
+        "SELECT metal_type, label_size_preset, label_width_mm, label_height_mm FROM `$table`"
+        . $branchWhere . " is_default_print = 1 AND metal_type IS NOT NULL AND TRIM(metal_type) != ''"
+        . ' ORDER BY updated_at DESC, id DESC LIMIT 1'
+    );
+    if (!$r || empty($r['metal_type']) || empty($r['label_size_preset'])) {
+        return null;
+    }
+    return getBarcodeSettings(
+        trim((string) $r['metal_type']),
+        $r['label_size_preset'],
+        isset($r['label_width_mm']) ? (float) $r['label_width_mm'] : null,
+        isset($r['label_height_mm']) ? (float) $r['label_height_mm'] : null
+    );
+}
+
+/**
+ * Guess metal display name from barcode prefix (product characteristics registry).
+ *
+ * @param string $barcode
+ * @return string
+ */
+function auragold_resolve_metal_name_from_barcode($barcode) {
+    global $conn;
+    $barcode = trim((string) $barcode);
+    if ($barcode === '') {
+        return '';
+    }
+    $esc = mysqli_real_escape_string($conn, $barcode);
+    $r = getRecord("
+        SELECT m.display_name AS metal_name
+        FROM tbl_product_characteristics pc
+        INNER JOIN tbl_metal m ON m.id = pc.metal_id AND m.status = 1
+        WHERE pc.status = 1 AND TRIM(pc.barcode_prefix) != ''
+          AND '$esc' LIKE CONCAT(TRIM(pc.barcode_prefix), '%')
+        ORDER BY CHAR_LENGTH(TRIM(pc.barcode_prefix)) DESC
+        LIMIT 1
+    ");
+    if ($r && !empty($r['metal_name'])) {
+        return trim((string) $r['metal_name']);
+    }
+    return '';
+}
+
+function auragold_barcode_settings_apply_default_print_flag($conn, $savedRowId, $metalType, $isDefaultPrint, $branchId = 0) {
+    $savedRowId = (int) $savedRowId;
+    if ($savedRowId <= 0) {
+        return;
+    }
+    auragold_ensure_barcode_settings_is_default_print_column($conn);
+    $table = 'tbl_barcode_settings';
+    if (!auragold_tbl_has_column($conn, $table, 'is_default_print')) {
+        return;
+    }
+    $metal = trim((string) $metalType);
+    $flag = ((int) $isDefaultPrint === 1) ? 1 : 0;
+    if ($metal === '') {
+        @mysqli_query($conn, "UPDATE `$table` SET `is_default_print` = $flag WHERE `id` = $savedRowId");
+        return;
+    }
+    $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
+    $branchSql = ($hasBranch && (int) $branchId > 0) ? (' AND branch_id = ' . (int) $branchId) : '';
+    $mtEsc = mysqli_real_escape_string($conn, $metal);
+    if ($flag === 1) {
+        @mysqli_query($conn, "UPDATE `$table` SET `is_default_print` = 0 WHERE metal_type = '$mtEsc' $branchSql");
+        @mysqli_query($conn, "UPDATE `$table` SET `is_default_print` = 1 WHERE `id` = $savedRowId");
+    } else {
+        @mysqli_query($conn, "UPDATE `$table` SET `is_default_print` = 0 WHERE `id` = $savedRowId");
+    }
+}
+
+/**
+ * Load barcode print settings: metal + optional label preset, with mm synced to preset name.
+ *
+ * @param string|null $metalType
+ * @param string|null $labelPresetHint
+ * @return array|null
+ */
+function getBarcodeSettingsForPrint($metalType = null, $labelPresetHint = null) {
+    $metal = ($metalType !== null && trim((string) $metalType) !== '') ? trim((string) $metalType) : '';
+    $labelHint = ($labelPresetHint !== null && trim((string) $labelPresetHint) !== '') ? trim((string) $labelPresetHint) : '';
+    $row = null;
+    if ($metal !== '') {
+        if ($labelHint !== '') {
+            $row = getBarcodeSettings($metal, $labelHint);
+        } else {
+            $row = getBarcodeDefaultPrintSettings($metal);
+        }
+        if (!$row) {
+            $row = getBarcodeSettings($metal);
+        }
+    }
+    if (!$row) {
+        $row = getGlobalBarcodeDefaultPrintSettings();
+    }
+    if (!$row) {
+        $row = getBarcodeSettings();
+    }
+    if ($row) {
+        $row = auragold_barcode_settings_normalize_label_mm($row);
+    }
+    return $row;
+}
+
 /**
  * Fetch the latest barcode printing settings (for label size, font, show/hide options, print copies).
  * Returns associative array or null if table/row missing.
  *
+ * @param string|null $metalType        Display name e.g. Gold, Silver.
+ * @param string|null $labelSizePreset  UI or storage preset (100x18, custom, custom_100x80, …).
+ * @param float|null  $labelWidthMm     Used when preset is custom / 120x50.
+ * @param float|null  $labelHeightMm
  * @return array|null  Keys: id, label_size_preset, label_width_mm, label_height_mm, font_size,
  *                     show_product_name, show_price, show_barcode_number, print_copies,
  *                     barcode_bar_width, barcode_bar_height (when columns exist), metal_type, design_layout
  */
-function getBarcodeSettings() {
+function getBarcodeSettings($metalType = null, $labelSizePreset = null, $labelWidthMm = null, $labelHeightMm = null) {
     global $conn;
     $table = 'tbl_barcode_settings';
     $exists = @mysqli_query($conn, "SHOW TABLES LIKE '$table'");
@@ -3056,6 +3352,7 @@ function getBarcodeSettings() {
     }
     mysqli_free_result($exists);
     auragold_ensure_branch_id_on_settings_tables($conn);
+    auragold_ensure_barcode_settings_is_default_print_column($conn);
     $bid = auragold_settings_branch_id();
     $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
     $branchSql = ($hasBranch && $bid > 0) ? (' WHERE branch_id = ' . (int) $bid) : '';
@@ -3079,21 +3376,71 @@ function getBarcodeSettings() {
         $colsBase .= ", barcode_bar_width, barcode_bar_height";
     }
     $colsBase .= ", metal_type";
-    $row = getRecord("SELECT $colsBase FROM $table $branchSql ORDER BY id DESC LIMIT 1");
-    if ($row) {
+    if (auragold_tbl_has_column($conn, $table, 'is_default_print')) {
+        $colsBase .= ", is_default_print";
+    }
+    $row = null;
+    $metalFilter = ($metalType !== null && trim((string) $metalType) !== '') ? trim((string) $metalType) : '';
+    $storagePreset = null;
+    if ($labelSizePreset !== null && trim((string) $labelSizePreset) !== '') {
+        $storagePreset = auragold_barcode_label_storage_preset($labelSizePreset, $labelWidthMm, $labelHeightMm);
+    }
+    if ($metalFilter !== '') {
+        $mtEsc = mysqli_real_escape_string($conn, $metalFilter);
+        if ($storagePreset !== null && $storagePreset !== '') {
+            $psEsc = mysqli_real_escape_string($conn, $storagePreset);
+            $metalWhere = ($branchSql !== '' ? $branchSql . ' AND' : ' WHERE') . " metal_type = '$mtEsc' AND label_size_preset = '$psEsc'";
+            $row = getRecord("SELECT $colsBase FROM $table $metalWhere ORDER BY id DESC LIMIT 1");
+            if (empty($row) && strpos($storagePreset, 'custom_') === 0) {
+                $legacyWhere = ($branchSql !== '' ? $branchSql . ' AND' : ' WHERE') . " metal_type = '$mtEsc' AND label_size_preset = 'custom'";
+                $row = getRecord("SELECT $colsBase FROM $table $legacyWhere ORDER BY id DESC LIMIT 1");
+            }
+            if (empty($row) && strpos($storagePreset, 'custom_') !== 0 && $storagePreset !== 'custom') {
+                [$legW, $legH] = auragold_barcode_label_mm_from_storage_preset($storagePreset);
+                $legacyDimWhere = ($branchSql !== '' ? $branchSql . ' AND' : ' WHERE')
+                    . " metal_type = '$mtEsc' AND label_size_preset = 'custom'"
+                    . ' AND label_width_mm = ' . (float) $legW
+                    . ' AND label_height_mm = ' . (float) $legH;
+                $row = getRecord("SELECT $colsBase FROM $table $legacyDimWhere ORDER BY id DESC LIMIT 1");
+                if ($row && $storagePreset !== 'custom') {
+                    $row['label_size_preset'] = $storagePreset;
+                    $rowId = (int) ($row['id'] ?? 0);
+                    if ($rowId > 0) {
+                        $psUp = mysqli_real_escape_string($conn, $storagePreset);
+                        @mysqli_query($conn, "UPDATE `$table` SET `label_size_preset`='$psUp', updated_at=NOW() WHERE `id`=$rowId");
+                    }
+                }
+            }
+        } elseif (empty($row)) {
+            $metalWhere = ($branchSql !== '' ? $branchSql . ' AND' : ' WHERE') . " metal_type = '$mtEsc'";
+            $row = getRecord("SELECT $colsBase FROM $table $metalWhere ORDER BY updated_at DESC, id DESC LIMIT 1");
+        }
+    } else {
+        $row = getRecord("SELECT $colsBase FROM $table $branchSql ORDER BY id DESC LIMIT 1");
+        if (!$row && $hasBranch && $bid > 0) {
+            $row = getRecord("SELECT $colsBase FROM $table WHERE (branch_id IS NULL OR branch_id = 0) ORDER BY id DESC LIMIT 1");
+        }
+        if (!$row && $branchSql !== '') {
+            $row = getRecord("SELECT $colsBase FROM $table ORDER BY id DESC LIMIT 1");
+        }
+    }
+    if ($row && !empty($row['id'])) {
+        $rowId = (int) $row['id'];
         $chk = @mysqli_query($conn, "SHOW COLUMNS FROM $table LIKE 'design_layout'");
         if ($chk && mysqli_num_rows($chk) > 0) {
             mysqli_free_result($chk);
-            $r2 = getRecord("SELECT design_layout FROM $table $branchSql ORDER BY id DESC LIMIT 1");
+            $r2 = getRecord("SELECT design_layout FROM $table WHERE id = $rowId LIMIT 1");
             $row['design_layout'] = $r2 ? $r2['design_layout'] : null;
         } else {
-            if ($chk) mysqli_free_result($chk);
+            if ($chk) {
+                mysqli_free_result($chk);
+            }
             $row['design_layout'] = null;
         }
         $chkQr = @mysqli_query($conn, "SHOW COLUMNS FROM $table LIKE 'design_layout_qr'");
         if ($chkQr && mysqli_num_rows($chkQr) > 0) {
             mysqli_free_result($chkQr);
-            $r3 = getRecord("SELECT design_layout_qr, default_print_code_type FROM $table $branchSql ORDER BY id DESC LIMIT 1");
+            $r3 = getRecord("SELECT design_layout_qr, default_print_code_type FROM $table WHERE id = $rowId LIMIT 1");
             if ($r3) {
                 $row['design_layout_qr'] = $r3['design_layout_qr'] ?? null;
                 $row['default_print_code_type'] = isset($r3['default_print_code_type']) && $r3['default_print_code_type'] === 'qr' ? 'qr' : 'barcode';
@@ -3143,8 +3490,146 @@ function getBarcodeSettings() {
         } else {
             $row['show_barcode_number_qr'] = (int)$row['show_barcode_number_qr'];
         }
+        if (!isset($row['is_default_print'])) {
+            $row['is_default_print'] = 0;
+        } else {
+            $row['is_default_print'] = ((int) $row['is_default_print'] === 1) ? 1 : 0;
+        }
+    }
+    if ($row) {
+        $row = auragold_barcode_settings_normalize_label_mm($row);
     }
     return $row;
+}
+
+/**
+ * All saved barcode rows for branch, keyed "Metal::label_size_preset" (storage preset).
+ *
+ * @return array<string, array> designer snapshots for JS cache
+ */
+function getBarcodeSettingsCacheMap() {
+    global $conn;
+    $table = 'tbl_barcode_settings';
+    $exists = @mysqli_query($conn, "SHOW TABLES LIKE '$table'");
+    if (!$exists || mysqli_num_rows($exists) === 0) {
+        if ($exists) {
+            mysqli_free_result($exists);
+        }
+        return [];
+    }
+    mysqli_free_result($exists);
+    auragold_ensure_branch_id_on_settings_tables($conn);
+    $bid = auragold_settings_branch_id();
+    $hasBranch = auragold_tbl_has_column($conn, $table, 'branch_id');
+    $branchSql = ($hasBranch && $bid > 0) ? (' WHERE branch_id = ' . (int) $bid) : '';
+    $listWhere = ($branchSql !== '' ? $branchSql . ' AND' : ' WHERE') . " metal_type IS NOT NULL AND metal_type != '' AND label_size_preset IS NOT NULL AND label_size_preset != ''";
+    $rows = getList("SELECT id, metal_type, label_size_preset FROM $table $listWhere ORDER BY metal_type ASC, label_size_preset ASC");
+    if (!is_array($rows)) {
+        return [];
+    }
+    $cache = [];
+    foreach ($rows as $r) {
+        $mt = trim((string) ($r['metal_type'] ?? ''));
+        $ps = trim((string) ($r['label_size_preset'] ?? ''));
+        if ($mt === '' || $ps === '') {
+            continue;
+        }
+        $full = getBarcodeSettings($mt, $ps);
+        $snap = auragold_barcode_settings_designer_snapshot($full);
+        if (!$snap) {
+            continue;
+        }
+        $snap['label_size_storage_preset'] = $ps;
+        $snap['label_size_ui_preset'] = auragold_barcode_label_ui_preset($ps, $snap['label_width_mm'], $snap['label_height_mm']);
+        $snap['cache_key'] = auragold_barcode_settings_cache_key($mt, $ps);
+        $cache[$snap['cache_key']] = $snap;
+        if ($ps === 'custom') {
+            $dimKey = (int) round((float) ($snap['label_width_mm'] ?? 0)) . 'x' . (int) round((float) ($snap['label_height_mm'] ?? 0));
+            if (in_array($dimKey, auragold_barcode_label_standard_presets(), true)) {
+                $aliasSnap = $snap;
+                $aliasSnap['label_size_storage_preset'] = $dimKey;
+                $aliasSnap['label_size_ui_preset'] = $dimKey;
+                $aliasSnap['cache_key'] = auragold_barcode_settings_cache_key($mt, $dimKey);
+                $cache[$aliasSnap['cache_key']] = $aliasSnap;
+            }
+        }
+    }
+    return $cache;
+}
+
+/** @deprecated Use getBarcodeSettingsCacheMap() */
+function getBarcodeSettingsByMetalMap() {
+    return getBarcodeSettingsCacheMap();
+}
+
+/**
+ * Normalized payload for barcode designer JS (per-metal cache / AJAX load).
+ *
+ * @param array|null $bs Row from getBarcodeSettings()
+ * @return array|null
+ */
+function auragold_barcode_settings_designer_snapshot($bs) {
+    if (!is_array($bs) || empty($bs)) {
+        return null;
+    }
+    $dl = isset($bs['design_layout']) ? trim((string) $bs['design_layout']) : '';
+    $dlq = isset($bs['design_layout_qr']) ? trim((string) $bs['design_layout_qr']) : '';
+    $dl_dec = ($dl !== '') ? @json_decode($dl, true) : [];
+    if (!is_array($dl_dec)) {
+        $dl_dec = [];
+    }
+    if ($dl !== '' && empty($dl_dec)) {
+        $try = @json_decode(stripslashes($dl), true);
+        if (is_array($try)) {
+            $dl_dec = $try;
+        }
+    }
+    $dlq_dec = ($dlq !== '') ? @json_decode($dlq, true) : [];
+    if (!is_array($dlq_dec)) {
+        $dlq_dec = [];
+    }
+    if ($dlq !== '' && empty($dlq_dec)) {
+        $tryq = @json_decode(stripslashes($dlq), true);
+        if (is_array($tryq)) {
+            $dlq_dec = $tryq;
+        }
+    }
+    $dpt = (isset($bs['default_print_code_type']) && $bs['default_print_code_type'] === 'qr') ? 'qr' : 'barcode';
+    $dl_js = !empty($dl_dec) ? json_encode($dl_dec, JSON_UNESCAPED_UNICODE) : ($dl !== '' ? $dl : '{}');
+    $dlq_js = !empty($dlq_dec) ? json_encode($dlq_dec, JSON_UNESCAPED_UNICODE) : ($dlq !== '' ? $dlq : '{}');
+    $leg_pn = (int) ($bs['show_product_name'] ?? 1);
+    $leg_pr = (int) ($bs['show_price'] ?? 1);
+    $leg_bn = (int) ($bs['show_barcode_number'] ?? 1);
+    $storagePreset = trim((string) ($bs['label_size_preset'] ?? '100x18'));
+    $uiPreset = auragold_barcode_label_ui_preset($storagePreset, $bs['label_width_mm'] ?? 100, $bs['label_height_mm'] ?? 18);
+    return [
+        'metal_type' => trim((string) ($bs['metal_type'] ?? '')),
+        'label_size_preset' => $storagePreset,
+        'label_size_storage_preset' => $storagePreset,
+        'label_size_ui_preset' => $uiPreset,
+        'label_width_mm' => (float) ($bs['label_width_mm'] ?? 100),
+        'label_height_mm' => (float) ($bs['label_height_mm'] ?? 18),
+        'font_size' => (int) ($bs['font_size'] ?? 12),
+        'print_copies' => (int) ($bs['print_copies'] ?? 1),
+        'default_print_code_type' => $dpt,
+        'show_product_name_barcode' => (int) ($bs['show_product_name_barcode'] ?? $leg_pn),
+        'show_product_name_qr' => (int) ($bs['show_product_name_qr'] ?? $leg_pn),
+        'show_price_barcode' => (int) ($bs['show_price_barcode'] ?? $leg_pr),
+        'show_price_qr' => (int) ($bs['show_price_qr'] ?? $leg_pr),
+        'show_barcode_number_barcode' => (int) ($bs['show_barcode_number_barcode'] ?? $leg_bn),
+        'show_barcode_number_qr' => (int) ($bs['show_barcode_number_qr'] ?? $leg_bn),
+        'barcode_bar_width' => (int) ($bs['barcode_bar_width'] ?? 2),
+        'barcode_bar_height' => (int) ($bs['barcode_bar_height'] ?? 28),
+        'qr_width' => (int) ($dlq_dec['qr_width'] ?? $dl_dec['qr_width'] ?? 60),
+        'qr_height' => (int) ($dlq_dec['qr_height'] ?? $dl_dec['qr_height'] ?? 60),
+        'label_pad_top' => (int) ($dl_dec['label_pad_top'] ?? $dlq_dec['label_pad_top'] ?? 0),
+        'label_pad_right' => (int) ($dl_dec['label_pad_right'] ?? $dlq_dec['label_pad_right'] ?? 0),
+        'label_pad_bottom' => (int) ($dl_dec['label_pad_bottom'] ?? $dlq_dec['label_pad_bottom'] ?? 0),
+        'label_pad_left' => (int) ($dl_dec['label_pad_left'] ?? $dlq_dec['label_pad_left'] ?? 0),
+        'design_layout_barcode' => $dl_js,
+        'design_layout_qr' => $dlq_js,
+        'is_default_print' => ((int) ($bs['is_default_print'] ?? 0) === 1) ? 1 : 0,
+    ];
 }
 
 /** Default voucher setting row (one per metal) */
@@ -3921,7 +4406,15 @@ function getBarcodePrintData($barcode) {
             $row['net_amount'] = $row['value'] ?? 0;
         }
     }
-    if (!$row) return ['BarcodeNo' => $barcode];
+    if (!$row) {
+        $metalFromPrefix = auragold_resolve_metal_name_from_barcode($barcode);
+        $out = ['BarcodeNo' => $barcode];
+        if ($metalFromPrefix !== '') {
+            $out['metal_name'] = $metalFromPrefix;
+            $out['MetalName'] = $metalFromPrefix;
+        }
+        return $out;
+    }
     $r = $row;
     $purity_val = null;
     if (isset($r['purity']) && $r['purity'] !== '' && $r['purity'] !== null) $purity_val = $r['purity'];
@@ -3956,6 +4449,13 @@ function getBarcodePrintData($barcode) {
         'Comment' => $r['comment'] ?? '',
         'GroupName' => $r['group_name'] ?? '',
     ];
+    if (trim((string) ($out['metal_name'] ?? '')) === '') {
+        $resolvedMetal = auragold_resolve_metal_name_from_barcode($barcode);
+        if ($resolvedMetal !== '') {
+            $out['metal_name'] = $resolvedMetal;
+            $out['MetalName'] = $resolvedMetal;
+        }
+    }
     foreach ($row as $k => $v) {
         if (!array_key_exists($k, $out) && $v !== null && $v !== '') $out[$k] = $v;
     }
@@ -4068,7 +4568,14 @@ function renderBarcodeLayout($productData, $settings) {
             } else {
                 $code_box_style = 'position:absolute;left:' . round($left_mm, 2) . 'mm;top:' . round($top_mm, 2) . 'mm;width:' . round($w, 2) . 'mm;height:' . round($height_mm, 2) . 'mm;margin:0;padding:0;overflow:hidden;box-sizing:border-box;z-index:2;';
                 $html .= '<div class="barcode-print-wrap" style="' . $code_box_style . '">';
-                $html .= '<svg class="barcode-svg" data-barcode="' . htmlspecialchars($barcode) . '"></svg>';
+                $svgClass = 'barcode-svg';
+                if (!empty($settings['barcode_svg_class'])) {
+                    $svgClass .= ' ' . trim((string) $settings['barcode_svg_class']);
+                }
+                $svgIdAttr = !empty($settings['barcode_svg_id'])
+                    ? (' id="' . htmlspecialchars((string) $settings['barcode_svg_id'], ENT_QUOTES, 'UTF-8') . '"')
+                    : '';
+                $html .= '<svg class="' . htmlspecialchars($svgClass, ENT_QUOTES, 'UTF-8') . '" data-barcode="' . htmlspecialchars($barcode) . '"' . $svgIdAttr . '></svg>';
                 $html .= '</div>';
             }
             continue;
@@ -4144,6 +4651,240 @@ function renderBarcodeLayout($productData, $settings) {
     return $html;
 }
 
+/** Recovered 82×38 two-box sticker helpers (from conversation transcript). */
+
+/** True when label preset is 82 mm × 38 mm sticker with two barcode boxes. */
+function auragold_is_82x38_2box_sticker($preset): bool {
+    $p = str_replace(' ', '', strtolower(trim((string) $preset)));
+    return ($p === '82x38_2box' || $p === '82x38-2box');
+}
+
+/** Fixed inner print box for 82×38 two-box sticker (2 cm × 2.5 cm). */
+function auragold_82x38_box_size_mm(): array {
+    return ['width' => 20.0, 'height' => 25.0];
+}
+
+/** Default geometry for 82×38 mm two-box sticker (mm). */
+function auragold_82x38_2box_defaults(): array {
+    $box = auragold_82x38_box_size_mm();
+    return [
+        'sticker_w'                => 82.0,
+        'sticker_h'                => 38.0,
+        'box_width_mm'             => (float) $box['width'],
+        'box_height_mm'            => (float) $box['height'],
+        'box1_left_mm'             => 0.0,
+        'box1_top_mm'              => 13.0,
+        'box2_left_mm'             => 62.0,
+        'box2_top_mm'              => 0.0,
+        'barcode_width_mm'         => 18.0,
+        'barcode_height_mm'        => 7.0,
+        'box1_barcode_left_mm'     => 2.0,
+        'box1_barcode_top_mm'      => 3.0,
+        'box2_barcode_left_mm'     => 2.0,
+        'box2_barcode_top_mm'      => 3.0,
+        'barcode_left_mm'          => 2.0,
+        'barcode_top_mm'           => 3.0,
+        'barcode_no_font_size'     => 7.0,
+        'barcode_no_margin_top_mm' => 1.0,
+    ];
+}
+
+/** Resolved box layout for 82×38 two-box sticker from saved design_layout JSON. */
+function auragold_82x38_2box_layout(array $snapshot = []): array {
+    $def = auragold_82x38_2box_defaults();
+    $boxFixed = auragold_82x38_box_size_mm();
+    $boxW = (float) $boxFixed['width'];
+    $boxH = (float) $boxFixed['height'];
+    $stickerW = (float) $def['sticker_w'];
+    $stickerH = (float) $def['sticker_h'];
+    /* Inner boxes are fixed: box1 bottom-left, box2 top-right (not user-movable). */
+    $b1L = (float) $def['box1_left_mm'];
+    $b1T = (float) $def['box1_top_mm'];
+    $b2L = (float) $def['box2_left_mm'];
+    $b2T = (float) $def['box2_top_mm'];
+    $b1L = max(0.0, min($stickerW - $boxW, $b1L));
+    $b1T = max(0.0, min($stickerH - $boxH, $b1T));
+    $b2L = max(0.0, min($stickerW - $boxW, $b2L));
+    $b2T = max(0.0, min($stickerH - $boxH, $b2T));
+    $sharedBarW = (float) ($snapshot['barcode_width_mm'] ?? $snapshot['box_barcode_width_mm'] ?? $def['barcode_width_mm']);
+    $sharedBarH = (float) ($snapshot['barcode_height_mm'] ?? $snapshot['box_barcode_height_mm'] ?? $def['barcode_height_mm']);
+    $box1BarW = (float) ($snapshot['box1_barcode_width_mm'] ?? $sharedBarW);
+    $box1BarH = (float) ($snapshot['box1_barcode_height_mm'] ?? $sharedBarH);
+    $box2BarW = (float) ($snapshot['box2_barcode_width_mm'] ?? $sharedBarW);
+    $box2BarH = (float) ($snapshot['box2_barcode_height_mm'] ?? $sharedBarH);
+    $box1BarLeft = (float) ($snapshot['box1_barcode_left_mm'] ?? ($snapshot['barcode1']['left_mm'] ?? ($snapshot['barcode_left_mm'] ?? $def['box1_barcode_left_mm'])));
+    $box1BarTop = (float) ($snapshot['box1_barcode_top_mm'] ?? ($snapshot['barcode1']['top_mm'] ?? ($snapshot['barcode_top_mm'] ?? $def['box1_barcode_top_mm'])));
+    $box2BarLeft = (float) ($snapshot['box2_barcode_left_mm'] ?? ($snapshot['barcode2']['left_mm'] ?? ($snapshot['barcode_left_mm'] ?? $def['box2_barcode_left_mm'])));
+    $box2BarTop = (float) ($snapshot['box2_barcode_top_mm'] ?? ($snapshot['barcode2']['top_mm'] ?? ($snapshot['barcode_top_mm'] ?? $def['box2_barcode_top_mm'])));
+    $numFont = (float) ($snapshot['barcode_no_font_size'] ?? $snapshot['barcode_number_font_pt'] ?? $def['barcode_no_font_size']);
+    $numMargin = (float) ($snapshot['barcode_no_margin_top_mm'] ?? $snapshot['barcode_number_gap_mm'] ?? $def['barcode_no_margin_top_mm']);
+    $box1BarW = max(4.0, min($boxW, $box1BarW));
+    $box1BarH = max(3.0, min($boxH - 2.0, $box1BarH));
+    $box2BarW = max(4.0, min($boxW, $box2BarW));
+    $box2BarH = max(3.0, min($boxH - 2.0, $box2BarH));
+    $box1BarLeft = max(0.0, min($boxW - $box1BarW, $box1BarLeft));
+    $box1BarTop = max(0.0, min($boxH - $box1BarH - 3.0, $box1BarTop));
+    $box2BarLeft = max(0.0, min($boxW - $box2BarW, $box2BarLeft));
+    $box2BarTop = max(0.0, min($boxH - $box2BarH - 3.0, $box2BarTop));
+    $numFont = max(5.0, min(24.0, $numFont));
+    $numMargin = max(0.0, min(10.0, $numMargin));
+    return [
+        'sticker_w'                  => $stickerW,
+        'sticker_h'                  => $stickerH,
+        'box_width_mm'               => round($boxW, 2),
+        'box_height_mm'              => round($boxH, 2),
+        'box1'                       => ['left' => round($b1L, 2), 'top' => round($b1T, 2)],
+        'box2'                       => ['left' => round($b2L, 2), 'top' => round($b2T, 2)],
+        'box2_left_mm'               => round($b2L, 2),
+        'box1_barcode_width_mm'      => round($box1BarW, 2),
+        'box1_barcode_height_mm'     => round($box1BarH, 2),
+        'box2_barcode_width_mm'      => round($box2BarW, 2),
+        'box2_barcode_height_mm'     => round($box2BarH, 2),
+        'box1_barcode_left_mm'       => round($box1BarLeft, 2),
+        'box1_barcode_top_mm'        => round($box1BarTop, 2),
+        'box2_barcode_left_mm'       => round($box2BarLeft, 2),
+        'box2_barcode_top_mm'        => round($box2BarTop, 2),
+        'barcode_width_mm'           => round($box1BarW, 2),
+        'barcode_height_mm'          => round($box1BarH, 2),
+        'barcode_left_mm'            => round($box1BarLeft, 2),
+        'barcode_top_mm'             => round($box1BarTop, 2),
+        'barcode_no_font_size'       => round($numFont, 2),
+        'barcode_no_margin_top_mm'   => round($numMargin, 2),
+    ];
+}
+
+function auragold_82x38_sticker_css_vars(array $layout): string {
+    return '--box-width:' . $layout['box_width_mm'] . 'mm;'
+        . '--box-height:' . $layout['box_height_mm'] . 'mm;'
+        . '--barcode-width:' . $layout['barcode_width_mm'] . 'mm;'
+        . '--barcode-height:' . $layout['barcode_height_mm'] . 'mm;'
+        . '--barcode-left:' . $layout['barcode_left_mm'] . 'mm;'
+        . '--barcode-top:' . $layout['barcode_top_mm'] . 'mm;'
+        . '--number-font:' . $layout['barcode_no_font_size'] . 'px;'
+        . '--number-margin-top:' . $layout['barcode_no_margin_top_mm'] . 'mm;';
+}
+
+function auragold_82x38_box_barcode_item(array $snapshot, int $boxNum): ?array {
+    $layout = auragold_82x38_2box_layout($snapshot);
+    $key = 'barcode' . (int) $boxNum;
+    if (isset($snapshot[$key]) && is_array($snapshot[$key]) && isset($snapshot[$key]['left_mm'])) {
+        return [
+            'type'   => 'barcode_image',
+            'left'   => (float) $snapshot[$key]['left_mm'],
+            'top'    => (float) ($snapshot[$key]['top_mm'] ?? 0),
+            'width'  => (float) ($snapshot[$key]['width_mm'] ?? ($boxNum === 2 ? $layout['box2_barcode_width_mm'] : $layout['box1_barcode_width_mm'])),
+            'height' => (float) ($snapshot[$key]['height_mm'] ?? ($boxNum === 2 ? $layout['box2_barcode_height_mm'] : $layout['box1_barcode_height_mm'])),
+        ];
+    }
+    return null;
+}
+
+function auragold_82x38_box_design_items(array $snapshot, int $boxNum): array {
+    if ($boxNum === 2) {
+        if (isset($snapshot['box2']['items']) && is_array($snapshot['box2']['items'])) {
+            return $snapshot['box2']['items'];
+        }
+        if (isset($snapshot['items2']) && is_array($snapshot['items2'])) {
+            return $snapshot['items2'];
+        }
+        if (isset($snapshot['fields2']) && is_array($snapshot['fields2'])) {
+            return $snapshot['fields2'];
+        }
+        return [];
+    }
+    if (isset($snapshot['box1']['items']) && is_array($snapshot['box1']['items'])) {
+        return $snapshot['box1']['items'];
+    }
+    if (isset($snapshot['items']) && is_array($snapshot['items'])) {
+        return $snapshot['items'];
+    }
+    if (isset($snapshot['fields']) && is_array($snapshot['fields'])) {
+        return $snapshot['fields'];
+    }
+    return [];
+}
+
+function auragold_82x38_default_box_design_items(array $snapshot, int $boxNum = 1): array {
+    $layout = auragold_82x38_2box_layout($snapshot);
+    if ($boxNum === 2) {
+        $barLeft = (float) ($layout['box2_barcode_left_mm'] ?? $layout['barcode_left_mm']);
+        $barTop = (float) ($layout['box2_barcode_top_mm'] ?? $layout['barcode_top_mm']);
+        $barW = (float) ($layout['box2_barcode_width_mm'] ?? $layout['barcode_width_mm']);
+        $barH = (float) ($layout['box2_barcode_height_mm'] ?? $layout['barcode_height_mm']);
+    } else {
+        $barLeft = (float) ($layout['box1_barcode_left_mm'] ?? $layout['barcode_left_mm']);
+        $barTop = (float) ($layout['box1_barcode_top_mm'] ?? $layout['barcode_top_mm']);
+        $barW = (float) ($layout['box1_barcode_width_mm'] ?? $layout['barcode_width_mm']);
+        $barH = (float) ($layout['box1_barcode_height_mm'] ?? $layout['barcode_height_mm']);
+    }
+    return [
+        [
+            'type'   => 'barcode_image',
+            'left'   => $barLeft,
+            'top'    => $barTop,
+            'width'  => $barW,
+            'height' => $barH,
+        ],
+    ];
+}
+
+function render82x38DesignStickerLabel(array $print_item, array $settings, array $decoded_snapshot = [], int $page_index = 0): string {
+    $snapshot = is_array($decoded_snapshot) ? $decoded_snapshot : [];
+    $layout = auragold_82x38_2box_layout($snapshot);
+    $boxW = (float) $layout['box_width_mm'];
+    $boxH = (float) $layout['box_height_mm'];
+    $idSuffix = ($page_index > 0) ? ('_' . (int) $page_index) : '';
+    $html = '<div class="sticker-page" style="width:82mm;height:38mm;position:relative;overflow:hidden;">';
+    $pairs = [
+        1 => ['pos' => $layout['box1'], 'item' => $print_item['box1'] ?? null],
+        2 => ['pos' => $layout['box2'], 'item' => $print_item['box2'] ?? null],
+    ];
+    foreach ($pairs as $num => $pair) {
+        if (!is_array($pair['item']) || empty($pair['item']['barcode'])) {
+            continue;
+        }
+        $productData = array_merge($pair['item']['row'] ?? [], ['barcode' => $pair['item']['barcode']]);
+        $boxDesign = auragold_82x38_box_design_items($snapshot, (int) $num);
+        $barcodeItem = auragold_82x38_box_barcode_item($snapshot, (int) $num);
+        if ($barcodeItem !== null) {
+            $extra = [];
+            foreach ($boxDesign as $el) {
+                if (!is_array($el) || ($el['type'] ?? '') === 'barcode_image') {
+                    continue;
+                }
+                $extra[] = $el;
+            }
+            $boxDesign = array_merge([$barcodeItem], $extra);
+        } elseif (empty($boxDesign)) {
+            $boxDesign = auragold_82x38_default_box_design_items($snapshot, (int) $num);
+        }
+        $boxSettings = array_merge($settings, [
+            'label_width_mm'    => $boxW,
+            'label_height_mm'   => $boxH,
+            'design_layout'     => $boxDesign,
+            'barcode_svg_class' => 'barcode-svg-box' . (int) $num,
+            'barcode_svg_id'    => 'barcodeSvgBox' . (int) $num . $idSuffix,
+        ]);
+        $inner = renderBarcodeLayout($productData, $boxSettings);
+        if (strpos($inner, 'barcode-svg') === false) {
+            $def = auragold_82x38_default_box_design_items($snapshot, (int) $num);
+            $inner = renderBarcodeLayout($productData, array_merge($boxSettings, ['design_layout' => $def]));
+        }
+        $boxStyle = 'left:' . $pair['pos']['left'] . 'mm;top:' . $pair['pos']['top'] . 'mm;'
+            . 'width:20mm;height:25mm;';
+        $html .= '<div class="barcode-box barcode-box--' . (int) $num . '" style="' . htmlspecialchars($boxStyle, ENT_QUOTES, 'UTF-8') . '">';
+        $html .= '<div class="barcode-box-inner" style="position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;">';
+        $html .= $inner;
+        $html .= '</div></div>';
+    }
+    $html .= '</div>';
+    return $html;
+}
+
+function render82x38DoubleStickerLabel(array $print_item, array $settings, array $decoded_snapshot = [], int $page_index = 0): string {
+    return render82x38DesignStickerLabel($print_item, $settings, $decoded_snapshot, $page_index);
+}
+
 /**
  * True when barcode print uses two tags on one 120×50 mm sticker.
  */
@@ -4163,13 +4904,249 @@ function auragold_is_120x50_double_barcode(array $settings, $decoded_snapshot = 
 }
 
 /**
+ * White printable area X origin for left/right tag on a 120×50 sticker (mm from sheet left).
+ */
+function auragold_120x50_tag_white_origin_mm(string $side, array $snapshot = []): float {
+    $half = (float) ($snapshot['dual_tag_half_width_mm'] ?? 59.0);
+    $gap = (float) ($snapshot['dual_tag_gap_mm'] ?? 2.0);
+    $strip = 6.0;
+    if ($side === 'left') {
+        return $strip;
+    }
+    return $half + $gap + $strip;
+}
+
+/** User target barcode size (mm); scaled down to fit each 120×50 quadrant. */
+function auragold_120x50_target_barcode_mm(): array {
+    return ['width' => 83.0, 'height' => 37.0];
+}
+
+/** Physical print box per quadrant on 120×50 butterfly tags (2 cm × 2.5 cm). */
+function auragold_120x50_quadrant_box_mm(array $snapshot = []): array {
+    return [
+        'width'  => (float) ($snapshot['dual_quadrant_width_mm'] ?? 20.0),
+        'height' => (float) ($snapshot['dual_quadrant_height_mm'] ?? 25.0),
+    ];
+}
+
+/**
+ * Max barcode graphic size (mm) inside one 2×2.5 cm print box.
+ *
+ * @return array{width:float,height:float}
+ */
+function auragold_120x50_quadrant_barcode_mm(array $snapshot = []): array {
+    $box = auragold_120x50_quadrant_box_mm($snapshot);
+    $margin = 1.0;
+    $textMm = 3.5;
+    return [
+        'width'  => round(max(8.0, $box['width'] - ($margin * 2)), 2),
+        'height' => round(max(5.0, $box['height'] - $margin - $textMm), 2),
+    ];
+}
+
+/**
+ * Saved barcode_image element for left (tag 1) or right (tag 2) from design_layout JSON.
+ *
+ * @return array<string,mixed>|null
+ */
+function auragold_120x50_snapshot_barcode_el(array $snapshot, string $side): ?array {
+    $lists = [];
+    if ($side === 'left') {
+        if (!empty($snapshot['items']) && is_array($snapshot['items'])) {
+            $lists[] = $snapshot['items'];
+        }
+        if (!empty($snapshot['fields']) && is_array($snapshot['fields'])) {
+            $lists[] = $snapshot['fields'];
+        }
+    } else {
+        if (!empty($snapshot['items2']) && is_array($snapshot['items2'])) {
+            $lists[] = $snapshot['items2'];
+        }
+        if (!empty($snapshot['fields2']) && is_array($snapshot['fields2'])) {
+            $lists[] = $snapshot['fields2'];
+        }
+    }
+    foreach ($lists as $arr) {
+        foreach ($arr as $el) {
+            if (is_array($el) && ($el['type'] ?? '') === 'barcode_image') {
+                return $el;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Barcode image size from saved layout items for one tag side.
+ *
+ * @return array{width:float,height:float}
+ */
+function auragold_120x50_barcode_size_from_snapshot(array $snapshot, string $side): array {
+    $fit = auragold_120x50_quadrant_barcode_mm($snapshot);
+    $size = ['width' => $fit['width'], 'height' => $fit['height']];
+    $el = auragold_120x50_snapshot_barcode_el($snapshot, $side);
+    if (!$el) {
+        return $size;
+    }
+    $savedW = (float) ($el['width'] ?? 0);
+    $savedH = (float) ($el['height'] ?? 0);
+    // Older saves stored JsBarcode natural width (~15mm), not designer display width.
+    if ($savedW > 0 && $savedW < ($fit['width'] * 0.75)) {
+        $savedW = $fit['width'];
+    }
+    if (isset($el['display_width_mm']) && (float) $el['display_width_mm'] > 0) {
+        $savedW = max($savedW, (float) $el['display_width_mm']);
+    }
+    if ($savedW > 0) {
+        $size['width'] = max(8.0, min($fit['width'], round($savedW, 2)));
+    }
+    if ($savedH > 0) {
+        $size['height'] = max(5.0, min($fit['height'], round($savedH, 2)));
+    }
+    return $size;
+}
+
+/**
+ * Default vertical position (mm) for diagonal 120×50 layout.
+ */
+function auragold_120x50_default_quadrant_top_mm(string $side, float $height, float $margin = 3.0): float {
+    $stickerH = 50.0;
+    $foldY = $stickerH / 2.0;
+    $textMm = 4.5;
+    if ($side === 'left') {
+        $minTop = $foldY + 1.0;
+        return max($minTop, $stickerH - $height - $textMm - $margin);
+    }
+    return $margin;
+}
+
+/**
+ * Keep barcode in correct half: left pocket = bottom-left, right pocket = top-right.
+ */
+function auragold_120x50_normalize_quadrant_top_mm(string $side, float $top, float $height, float $margin = 3.0): float {
+    $stickerH = 50.0;
+    $foldY = $stickerH / 2.0;
+    $textMm = 4.5;
+    if ($side === 'left') {
+        if ($top >= $foldY - 0.5) {
+            return max($foldY + 1.0, min($stickerH - $height - $textMm - $margin, $top));
+        }
+        return auragold_120x50_default_quadrant_top_mm('left', $height, $margin);
+    }
+    if ($top < $foldY - 0.5) {
+        return max($margin, min($foldY - $height - 1.0, $top));
+    }
+    return auragold_120x50_default_quadrant_top_mm('right', $height, $margin);
+}
+
+/**
+ * Physical tag geometry on a 120×50 butterfly sticker (mm).
+ *
+ * @return array{sticker_w:float,sticker_h:float,half_w:float,gap:float,strip_mm:float,handle_mm:float,fold_y:float,left_white_x:float,left_white_w:float,right_white_x:float,right_white_w:float}
+ */
+function auragold_120x50_tag_layout_mm(array $snapshot = []): array {
+    $stickerW = 120.0;
+    $stickerH = 50.0;
+    $gap = (float) ($snapshot['dual_tag_gap_mm'] ?? 2.0);
+    $half = (float) ($snapshot['dual_tag_half_width_mm'] ?? 0.0);
+    if ($half <= 0) {
+        $half = ($stickerW - $gap) / 2.0;
+    }
+    $strip = 6.0;
+    $handle = 10.0;
+    $whiteW = max(8.0, $half - $strip - $handle);
+    $rightTagX = $half + $gap;
+    return [
+        'sticker_w'     => $stickerW,
+        'sticker_h'     => $stickerH,
+        'half_w'        => $half,
+        'gap'           => $gap,
+        'strip_mm'      => $strip,
+        'handle_mm'     => $handle,
+        'fold_y'        => $stickerH / 2.0,
+        'left_white_x'  => $strip,
+        'left_white_w'  => $whiteW,
+        'right_white_x' => $rightTagX + $strip,
+        'right_white_w' => $whiteW,
+    ];
+}
+
+/**
+ * Sticker origin (mm) for one 2×2.5 cm print box on 120×50.
+ * Horizontally centered in each tag; vertically in the bottom half so the
+ * horizontal fold line (sticker center) sits above the print box.
+ *
+ * @return array{left:float,top:float}
+ */
+function auragold_120x50_quadrant_origin_mm(string $side, array $snapshot = []): array {
+    $layout = auragold_120x50_tag_layout_mm($snapshot);
+    $box = auragold_120x50_quadrant_box_mm($snapshot);
+    $boxW = (float) $box['width'];
+    $boxH = (float) $box['height'];
+    $stickerH = (float) $layout['sticker_h'];
+    $foldY = (float) $layout['fold_y'];
+    $top = round(max($foldY, $stickerH - $boxH), 2);
+    if ($side === 'left') {
+        $whiteW = (float) $layout['left_white_w'];
+        $left = (float) $layout['left_white_x'] + max(0.0, ($whiteW - $boxW) / 2.0);
+        return ['left' => round($left, 2), 'top' => $top];
+    }
+    $whiteW = (float) $layout['right_white_w'];
+    $left = (float) $layout['right_white_x'] + max(0.0, ($whiteW - $boxW) / 2.0);
+    return ['left' => round($left, 2), 'top' => $top];
+}
+
+/**
+ * Fixed mm pockets for 120×50 butterfly label — one centered box per tag.
+ *
+ * @return array{top:float,width:float,height:float,left:float,barcode_width:float,barcode_height:float,barcode_left:float,barcode_top:float,anchor:string}
+ */
+function auragold_120x50_pocket_mm(string $side, array $snapshot = []): array {
+    $box = auragold_120x50_quadrant_box_mm($snapshot);
+    $origin = auragold_120x50_quadrant_origin_mm($side, $snapshot);
+    $barcodeSize = auragold_120x50_barcode_size_from_snapshot($snapshot, $side);
+    $el = auragold_120x50_snapshot_barcode_el($snapshot, $side);
+
+    $insetLeft = max(0.0, ((float) $box['width'] - $barcodeSize['width']) / 2.0);
+    $insetTop = max(0.0, ((float) $box['height'] - $barcodeSize['height']) / 2.0);
+    if ($el) {
+        $insetLeft = max(0.0, min(max(0.0, $box['width'] - $barcodeSize['width']), (float) ($el['left'] ?? $insetLeft)));
+        $insetTop = max(0.0, min(max(0.0, $box['height'] - $barcodeSize['height']), (float) ($el['top'] ?? $insetTop)));
+    }
+
+    return [
+        'anchor'         => 'left',
+        'left'           => round($origin['left'], 2),
+        'top'            => round($origin['top'], 2),
+        'width'          => round($box['width'], 2),
+        'height'         => round($box['height'], 2),
+        'barcode_width'  => round($barcodeSize['width'], 2),
+        'barcode_height' => round($barcodeSize['height'], 2),
+        'barcode_left'   => round($insetLeft, 2),
+        'barcode_top'    => round($insetTop, 2),
+    ];
+}
+
+/**
  * One fixed-position copy (right or left pocket) on a 120×50 jewelry sticker.
  */
-function render120x50FixedCopy(string $code, string $side, bool $show_barcode_number): string {
+function render120x50FixedCopy(string $code, string $side, bool $show_barcode_number, array $snapshot = []): string {
     $copyClass = ($side === 'right') ? 'barcode-copy-right' : 'barcode-copy-left';
-    $html = '<div class="' . htmlspecialchars($copyClass, ENT_QUOTES, 'UTF-8') . '">';
-    $html .= '<div class="barcode-120x50-graphic">';
-    $html .= '<svg class="barcode-svg barcode-svg--120x50" data-barcode="' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '"></svg>';
+    $pocket = auragold_120x50_pocket_mm($side, $snapshot);
+    $boxW = (float) ($pocket['width'] ?? 20);
+    $boxH = (float) ($pocket['height'] ?? 25);
+    $graphicW = (float) ($pocket['barcode_width'] ?? $boxW);
+    $graphicH = (float) ($pocket['barcode_height'] ?? min(12.0, $boxH * 0.55));
+    $style = 'top:' . round($pocket['top'], 2) . 'mm;width:' . round($boxW, 2) . 'mm;height:' . round($boxH, 2) . 'mm;';
+    $style .= 'left:' . round($pocket['left'], 2) . 'mm;right:auto;';
+    $graphicWmm = round(max(8.0, min($boxW, $graphicW)), 2);
+    $graphicHmm = round(max(5.0, min($boxH, $graphicH)), 2);
+    $graphicStyle = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden;box-sizing:border-box;'
+        . 'display:flex;align-items:center;justify-content:center;';
+    $html = '<div class="' . htmlspecialchars($copyClass, ENT_QUOTES, 'UTF-8') . ' barcode-print-box-120x50" style="' . htmlspecialchars($style, ENT_QUOTES, 'UTF-8') . '" title="Print box 2 cm × 2.5 cm">';
+    $html .= '<span class="barcode-print-box-label no-print">2 cm × 2.5 cm</span>';
+    $html .= '<div class="barcode-120x50-graphic" style="' . htmlspecialchars($graphicStyle, ENT_QUOTES, 'UTF-8') . '" data-graphic-w-mm="' . $graphicWmm . '" data-graphic-h-mm="' . $graphicHmm . '">';
+    $html .= '<svg class="barcode-svg barcode-svg--120x50" data-barcode="' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '" data-pocket-width-mm="' . $graphicWmm . '" data-pocket-height-mm="' . $graphicHmm . '"></svg>';
     $html .= '</div>';
     if ($show_barcode_number) {
         $html .= '<div class="barcode-copy-text">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</div>';
@@ -4227,24 +5204,51 @@ function auragold_120x50_side_layout(array $layout, array $decoded_snapshot, str
 }
 
 /**
- * One 120x50 sticker: same barcode in right pocket then left; center blank (one page per item).
+ * One 120x50 sticker: different barcode in left and right pockets (pair from print list).
  *
- * @param array $print_item ['barcode' => string, 'row' => array]
+ * @param array $print_item ['left' => ['barcode','row'], 'right' => ['barcode','row']] or legacy single ['barcode','row']
  */
 function render120x50DoubleStickerLabel(array $print_item, array $settings, array $decoded_snapshot = []): string {
-    unset($decoded_snapshot);
-    $code = trim((string) ($print_item['barcode'] ?? ''));
-    if ($code === '') {
+    $snapshot = is_array($decoded_snapshot) ? $decoded_snapshot : [];
+
+    $left_code = '';
+    $right_code = '';
+    if (isset($print_item['left']) && is_array($print_item['left'])) {
+        $left_code = trim((string) ($print_item['left']['barcode'] ?? ''));
+    }
+    if (isset($print_item['right']) && is_array($print_item['right'])) {
+        $right_code = trim((string) ($print_item['right']['barcode'] ?? ''));
+    }
+    if ($left_code === '' && $right_code === '') {
+        $left_code = trim((string) ($print_item['barcode'] ?? ''));
+    }
+    if ($left_code === '' && $right_code === '') {
         return '';
     }
 
     $sticker_w = (float) ($settings['label_width_mm'] ?? 120);
     $sticker_h = (float) ($settings['label_height_mm'] ?? 50);
-    $show_number = !empty($settings['show_barcode_number']);
+    $show_number = isset($settings['show_barcode_number']) && (int) $settings['show_barcode_number'] === 1;
 
-    $html = '<div class="full-sticker" style="width:' . round($sticker_w, 2) . 'mm;height:' . round($sticker_h, 2) . 'mm;">';
-    $html .= render120x50FixedCopy($code, 'right', $show_number);
-    $html .= render120x50FixedCopy($code, 'left', $show_number);
+    $screen_w_cm = 8.2;
+    $screen_h_cm = 3.8;
+    $html = '<div class="barcode-sticker-measure-wrap">';
+    $html .= '<div class="full-sticker" data-screen-w-cm="' . $screen_w_cm . '" data-screen-h-cm="' . $screen_h_cm . '" data-sheet-w-mm="' . round($sticker_w, 2) . '" data-sheet-h-mm="' . round($sticker_h, 2) . '">';
+    $html .= '<div class="full-sticker-inner" style="width:' . round($sticker_w, 2) . 'mm;height:' . round($sticker_h, 2) . 'mm;">';
+    // Print order: right tag first, then left tag (side by side on one row)
+    if ($right_code !== '') {
+        $html .= render120x50FixedCopy($right_code, 'right', $show_number, $snapshot);
+    }
+    if ($left_code !== '') {
+        $html .= render120x50FixedCopy($left_code, 'left', $show_number, $snapshot);
+    }
+    $html .= '</div></div>';
+    $html .= '<div class="barcode-dim-ruler barcode-dim-ruler--width no-print" aria-hidden="true">'
+        . '<span class="barcode-dim-line barcode-dim-line--h"></span>'
+        . '<span class="barcode-dim-width-val">W = 8.2 cm</span></div>';
+    $html .= '<div class="barcode-dim-ruler barcode-dim-ruler--height no-print" aria-hidden="true">'
+        . '<span class="barcode-dim-line barcode-dim-line--v"></span>'
+        . '<span class="barcode-dim-height-val">H = 3.8 cm</span></div>';
     $html .= '</div>';
     return $html;
 }

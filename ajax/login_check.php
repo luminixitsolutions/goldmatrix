@@ -68,6 +68,13 @@ if (!empty($result['success'])) {
         exit;
     }
 
+    $remember = !empty($_POST['remember']) && (string) $_POST['remember'] !== '0';
+    if ($remember) {
+        $_SESSION['auragold_remember_me'] = 1;
+    } else {
+        unset($_SESSION['auragold_remember_me']);
+    }
+
     if (function_exists('session_regenerate_id')) {
         @session_regenerate_id(true);
     }

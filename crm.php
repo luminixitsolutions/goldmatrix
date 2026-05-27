@@ -9,7 +9,7 @@ if (empty($_SESSION['Admin'])) {
     exit;
 }
 
-$page_title = 'CRM — AuraGold';
+$page_title = 'CRM — ' . auragold_app_name();
 
 auragold_ensure_crm_whatsapp_tables($conn);
 auragold_ensure_crm_contact_groups_tables($conn);

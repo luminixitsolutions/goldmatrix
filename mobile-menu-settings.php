@@ -55,7 +55,7 @@ $t = static function (string $key, string $fallback = ''): string {
 
 $page_title = function_exists('auragold_t')
     ? (string) auragold_t('mobile_menu_settings.page_title')
-    : 'Mobile Menu Setting - Set Software - GoldMatrix';
+    : 'Mobile Menu Setting - Set Software - ' . auragold_app_name();
 
 ?>
 <!DOCTYPE html>

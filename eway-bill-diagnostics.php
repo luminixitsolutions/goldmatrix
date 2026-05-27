@@ -69,7 +69,7 @@ $branch_gst = auragold_branch_gstin_for_eway($conn);
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>e-Way Bill diagnostics — Aura Gold</title>
+    <title>e-Way Bill diagnostics — <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?></title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
     <style>
         body { background: #f1f5f9; padding: 1.5rem; }

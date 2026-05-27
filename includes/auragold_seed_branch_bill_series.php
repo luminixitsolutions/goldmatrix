@@ -41,6 +41,12 @@ if (!function_exists('auragold_default_bill_series_prefix_for_voucher_name')) {
                 'sale receipt voucher' => 'SRV-',
                 'advance payment'   => 'AP-',
                 'advance'           => 'AP-',
+                'jewellery catalogue' => 'JC-',
+                'jewelry catalogue'   => 'JC-',
+                'jewellery catalog'   => 'JC-',
+                'jewelry catalog'     => 'JC-',
+                'jewellery catelog'   => 'JC-',
+                'jewelry catelog'     => 'JC-',
             ];
         }
 

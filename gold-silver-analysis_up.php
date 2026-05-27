@@ -268,7 +268,7 @@ $metals = getList("SELECT id, display_name as name FROM tbl_metal WHERE status =
 <html lang="en" class="default-style">
 
 <head>
-    <title>Gold / Silver Analysis - AuraGold Software</title>
+    <title>Gold / Silver Analysis - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software</title>
 
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />

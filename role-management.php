@@ -17,7 +17,7 @@ auragold_ensure_roles_table($conn_master);
 
 $roles = getListMaster('SELECT * FROM tbl_roles ORDER BY role_name ASC');
 
-$page_title = 'Roles — Administration — AuraGold';
+$page_title = 'Roles — Administration — ' . auragold_app_name();
 $auragold_admin_tab = 'roles';
 ?>
 <!DOCTYPE html>

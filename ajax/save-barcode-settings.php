@@ -11,23 +11,18 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // Validation helpers
 $label_size_preset = isset($_POST['label_size_preset']) ? trim($_POST['label_size_preset']) : '100x18';
-$valid_presets = ['100x18', '100x80', '100x25', '100x48', '120x50', '250x120', '64x25', '81x12', 'zebra-zpl', 'custom'];
+$valid_presets = ['100x18', '100x80', '100x25', '100x48', '120x50', '82x38_2box', '250x120', '64x25', '81x12', 'zebra-zpl', 'custom'];
 if (!in_array($label_size_preset, $valid_presets)) {
     $label_size_preset = '100x18';
 }
 
 $label_width_mm = isset($_POST['label_width_mm']) ? (float)$_POST['label_width_mm'] : 100;
 $label_height_mm = isset($_POST['label_height_mm']) ? (float)$_POST['label_height_mm'] : 18;
-if ($label_size_preset === 'custom' || $label_size_preset === '120x50') {
-    $label_width_mm = max(10, min(500, $label_width_mm));
-    $label_height_mm = max(10, min(300, $label_height_mm));
-} else {
-    // Parse preset e.g. 100x18
-    if (preg_match('/^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)$/i', str_replace(' ', '', $label_size_preset), $m)) {
-        $label_width_mm = (float)$m[1];
-        $label_height_mm = (float)$m[2];
-    }
-}
+/** One DB row per metal + label size (custom sizes stored as custom_WxH). */
+$label_size_preset = auragold_barcode_label_storage_preset($label_size_preset, $label_width_mm, $label_height_mm);
+[$label_width_mm, $label_height_mm] = auragold_barcode_label_mm_from_storage_preset($label_size_preset, $label_width_mm, $label_height_mm);
+$label_width_mm = max(10, min(500, $label_width_mm));
+$label_height_mm = max(10, min(300, $label_height_mm));
 
 $font_size = isset($_POST['font_size']) ? (int)$_POST['font_size'] : 12;
 $font_size = max(6, min(72, $font_size));
@@ -37,18 +32,25 @@ if ($dpt_save !== 'qr') {
     $dpt_save = 'barcode';
 }
 
-$legacy_pn_post = isset($_POST['show_product_name']) ? (int)(bool)$_POST['show_product_name'] : 1;
-$legacy_pr_post = isset($_POST['show_price']) ? (int)(bool)$_POST['show_price'] : 1;
-$legacy_bn_post = isset($_POST['show_barcode_number']) ? (int)(bool)$_POST['show_barcode_number'] : 1;
+$legacy_pn_post = isset($_POST['show_product_name']) ? (((int) $_POST['show_product_name'] === 1) ? 1 : 0) : 1;
+$legacy_pr_post = isset($_POST['show_price']) ? (((int) $_POST['show_price'] === 1) ? 1 : 0) : 1;
+$legacy_bn_post = isset($_POST['show_barcode_number']) ? (((int) $_POST['show_barcode_number'] === 1) ? 1 : 0) : 1;
 
-$has_split_show = isset($_POST['show_product_name_barcode']) && isset($_POST['show_product_name_qr']);
+$parse_post_flag = static function ($key, $default = 1) {
+    if (!array_key_exists($key, $_POST)) {
+        return $default;
+    }
+    return ((int) $_POST[$key] === 1) ? 1 : 0;
+};
+
+$has_split_show = array_key_exists('show_product_name_barcode', $_POST) && array_key_exists('show_product_name_qr', $_POST);
 if ($has_split_show) {
-    $show_product_name_barcode = isset($_POST['show_product_name_barcode']) ? (int)(bool)$_POST['show_product_name_barcode'] : 1;
-    $show_product_name_qr = isset($_POST['show_product_name_qr']) ? (int)(bool)$_POST['show_product_name_qr'] : 1;
-    $show_price_barcode = isset($_POST['show_price_barcode']) ? (int)(bool)$_POST['show_price_barcode'] : 1;
-    $show_price_qr = isset($_POST['show_price_qr']) ? (int)(bool)$_POST['show_price_qr'] : 1;
-    $show_barcode_number_barcode = isset($_POST['show_barcode_number_barcode']) ? (int)(bool)$_POST['show_barcode_number_barcode'] : 1;
-    $show_barcode_number_qr = isset($_POST['show_barcode_number_qr']) ? (int)(bool)$_POST['show_barcode_number_qr'] : 1;
+    $show_product_name_barcode = $parse_post_flag('show_product_name_barcode', 1);
+    $show_product_name_qr = $parse_post_flag('show_product_name_qr', 1);
+    $show_price_barcode = $parse_post_flag('show_price_barcode', 1);
+    $show_price_qr = $parse_post_flag('show_price_qr', 1);
+    $show_barcode_number_barcode = $parse_post_flag('show_barcode_number_barcode', 1);
+    $show_barcode_number_qr = $parse_post_flag('show_barcode_number_qr', 1);
 } else {
     $show_product_name_barcode = $legacy_pn_post;
     $show_product_name_qr = $legacy_pn_post;
@@ -64,6 +66,8 @@ $show_barcode_number = ($dpt_save === 'qr') ? $show_barcode_number_qr : $show_ba
 
 $print_copies = isset($_POST['print_copies']) ? (int)$_POST['print_copies'] : 1;
 $print_copies = max(1, min(100, $print_copies));
+
+$is_default_print = isset($_POST['is_default_print']) ? (((int) $_POST['is_default_print'] === 1) ? 1 : 0) : 0;
 
 $metal_type = isset($_POST['metal_type']) ? trim($_POST['metal_type']) : '';
 if ($metal_type !== '' && strlen($metal_type) > 50) {
@@ -116,9 +120,35 @@ mysqli_free_result($chk);
 
 auragold_ensure_branch_id_on_settings_tables($conn);
 $settings_bid = auragold_settings_branch_id();
+if (isset($_POST['settings_branch_id']) && (int) $_POST['settings_branch_id'] > 0) {
+    $post_bid = (int) $_POST['settings_branch_id'];
+    if (function_exists('auragold_settings_branch_id_valid') && auragold_settings_branch_id_valid($post_bid)) {
+        $settings_bid = $post_bid;
+    }
+}
 $has_branch_col = auragold_tbl_has_column($conn, $table, 'branch_id');
 $branch_where = ($has_branch_col && $settings_bid > 0) ? (' AND branch_id = ' . (int) $settings_bid) : '';
-$existing = getRecord("SELECT id FROM $table WHERE 1=1 $branch_where ORDER BY id DESC LIMIT 1");
+if ($metal_type !== '') {
+    $mt_esc = mysqli_real_escape_string($conn, $metal_type);
+    $ps_esc = mysqli_real_escape_string($conn, $label_size_preset);
+    $existing = getRecord("SELECT id FROM $table WHERE 1=1 $branch_where AND metal_type = '$mt_esc' AND label_size_preset = '$ps_esc' ORDER BY id DESC LIMIT 1");
+    if (!$existing && strpos($label_size_preset, 'custom_') === 0) {
+        $existing = getRecord("SELECT id FROM $table WHERE 1=1 $branch_where AND metal_type = '$mt_esc' AND label_size_preset = 'custom' ORDER BY id DESC LIMIT 1");
+    }
+    if (!$existing && strpos($label_size_preset, 'custom_') !== 0 && $label_size_preset !== 'custom') {
+        $existing = getRecord(
+            "SELECT id FROM $table WHERE 1=1 $branch_where AND metal_type = '$mt_esc' AND label_size_preset = 'custom'"
+            . ' AND label_width_mm = ' . (float) $label_width_mm
+            . ' AND label_height_mm = ' . (float) $label_height_mm
+            . ' ORDER BY id DESC LIMIT 1'
+        );
+    }
+} else {
+    $existing = getRecord("SELECT id FROM $table WHERE 1=1 $branch_where AND (metal_type IS NULL OR metal_type = '') ORDER BY id DESC LIMIT 1");
+    if (!$existing) {
+        $existing = getRecord("SELECT id FROM $table WHERE 1=1 $branch_where ORDER BY id DESC LIMIT 1");
+    }
+}
 $ok = false;
 
 // Check if design_layout column exists (for older DBs)
@@ -322,8 +352,21 @@ if ($ok && $saved_row_id > 0 && auragold_tbl_has_column($conn, $table, 'show_pro
     }
 }
 
+auragold_ensure_barcode_settings_is_default_print_column($conn);
+if ($ok && $saved_row_id > 0) {
+    auragold_barcode_settings_apply_default_print_flag($conn, $saved_row_id, $metal_type, $is_default_print, $settings_bid);
+}
+
 if ($ok) {
-    echo json_encode(['success' => 1, 'message' => 'Barcode settings saved successfully.']);
+    echo json_encode([
+        'success' => 1,
+        'message' => 'Barcode settings saved successfully.',
+        'id' => $saved_row_id,
+        'metal_type' => $metal_type,
+        'label_size_preset' => $label_size_preset,
+        'is_default_print' => $is_default_print,
+    ]);
 } else {
-    echo json_encode(['success' => 0, 'message' => 'Failed to save settings.']);
+    $db_err = mysqli_error($conn);
+    echo json_encode(['success' => 0, 'message' => 'Failed to save settings.' . ($db_err ? ' ' . $db_err : '')]);
 }

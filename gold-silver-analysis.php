@@ -285,7 +285,7 @@ $gsa_export_query = isset($_SERVER['QUERY_STRING']) ? (string) $_SERVER['QUERY_S
 <html lang="en" class="default-style">
 
 <head>
-    <title>Gold / Silver Analysis - AuraGold Software</title>
+    <title>Gold / Silver Analysis - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software</title>
 
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />

@@ -99,7 +99,7 @@ if ($selId > 0) {
 }
 
 $tree = auragold_permission_tree();
-$page_title = 'Permissions — Administration — AuraGold';
+$page_title = 'Permissions — Administration — ' . auragold_app_name();
 $auragold_admin_tab = 'permissions';
 ?>
 <!DOCTYPE html>

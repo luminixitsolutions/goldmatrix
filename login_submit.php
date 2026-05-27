@@ -96,6 +96,13 @@ if (!empty($result['success'])) {
             auragold_login_abort_after_failed_financial_year($fyRes['message'] ?? 'Financial year required.');
         }
 
+        $remember = !empty($_POST['remember']) && (string) $_POST['remember'] !== '0';
+        if ($remember) {
+            $_SESSION['auragold_remember_me'] = 1;
+        } else {
+            unset($_SESSION['auragold_remember_me']);
+        }
+
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }

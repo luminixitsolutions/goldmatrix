@@ -27,7 +27,7 @@ function bl_format_dt($v)
     return $t ? date('d M Y, h:i A', $t) : '—';
 }
 
-$page_title         = 'Blocklist — Administration — AuraGold';
+$page_title         = 'Blocklist — Administration — ' . auragold_app_name();
 $auragold_admin_tab = 'blocklist';
 ?>
 <!DOCTYPE html>

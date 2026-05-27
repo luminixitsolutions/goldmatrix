@@ -63,7 +63,7 @@ function auragold_fetch_financial_years_for_branch_login($branchRowId) {
     mysqli_free_result($t);
 
     $data = [];
-    $q    = mysqli_query($useConn, "SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years WHERE status = 1 ORDER BY start_date ASC, id ASC");
+    $q    = mysqli_query($useConn, "SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years WHERE status = 1 AND IFNULL(is_active, 0) = 1 ORDER BY start_date ASC, id ASC");
     if ($q) {
         while ($r = mysqli_fetch_assoc($q)) {
             $data[] = [
@@ -96,6 +96,79 @@ function auragold_login_default_financial_year_id_for_branch(int $loginBranchId)
         }
     }
     return (int) ($years[0]['id'] ?? 0);
+}
+
+/**
+ * Current active financial year row from an open mysqli (branch or main DB).
+ *
+ * @return ?array{id:int,start_date:string,end_date:string,is_active:int}
+ */
+function auragold_fetch_active_financial_year_row_from_link(mysqli $link): ?array {
+    $q = mysqli_query(
+        $link,
+        'SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years '
+        . 'WHERE status = 1 AND IFNULL(is_active, 0) = 1 '
+        . 'ORDER BY start_date DESC, id DESC LIMIT 1'
+    );
+    if (!$q || mysqli_num_rows($q) === 0) {
+        if ($q) {
+            mysqli_free_result($q);
+        }
+        return null;
+    }
+    $r = mysqli_fetch_assoc($q);
+    mysqli_free_result($q);
+    if (!$r) {
+        return null;
+    }
+    return [
+        'id'          => (int) $r['id'],
+        'start_date'  => (string) ($r['start_date'] ?? ''),
+        'end_date'    => (string) ($r['end_date'] ?? ''),
+        'is_active'   => (int) ($r['is_active'] ?? 0),
+    ];
+}
+
+function auragold_store_financial_year_in_session(array $row): void {
+    $_SESSION['financial_year_id'] = (int) $row['id'];
+    $_SESSION['financial_year']    = [
+        'id'          => (int) $row['id'],
+        'start_date'  => (string) ($row['start_date'] ?? ''),
+        'end_date'    => (string) ($row['end_date'] ?? ''),
+        'is_active'   => (int) ($row['is_active'] ?? 0),
+    ];
+}
+
+/**
+ * Resolve a financial year row by id, or fall back to the current active year
+ * (e.g. after Accounting Masters switches which year is active).
+ *
+ * @return ?array{id:int,start_date:string,end_date:string,is_active:int}
+ */
+function auragold_resolve_financial_year_row_for_login(mysqli $link, int $fyId): ?array {
+    if ($fyId > 0) {
+        $fyIdEsc = (int) $fyId;
+        $q       = mysqli_query(
+            $link,
+            "SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years "
+            . "WHERE id = $fyIdEsc AND status = 1 AND IFNULL(is_active, 0) = 1 LIMIT 1"
+        );
+        if ($q && mysqli_num_rows($q) > 0) {
+            $r = mysqli_fetch_assoc($q);
+            mysqli_free_result($q);
+            if ($r) {
+                return [
+                    'id'          => (int) $r['id'],
+                    'start_date'  => (string) ($r['start_date'] ?? ''),
+                    'end_date'    => (string) ($r['end_date'] ?? ''),
+                    'is_active'   => (int) ($r['is_active'] ?? 0),
+                ];
+            }
+        } elseif ($q) {
+            mysqli_free_result($q);
+        }
+    }
+    return auragold_fetch_active_financial_year_row_from_link($link);
 }
 
 /**
@@ -259,36 +332,27 @@ function auragold_financial_year_login_validate_and_store() {
     }
 
     if ($fyId <= 0) {
+        $r = auragold_fetch_active_financial_year_row_from_link($link);
         if ($closeLink) {
             mysqli_close($link);
         }
-        return ['ok' => false, 'message' => 'Please select a financial year.'];
+        if (!$r) {
+            return ['ok' => false, 'message' => 'Please select a financial year.'];
+        }
+        auragold_store_financial_year_in_session($r);
+        return ['ok' => true, 'message' => ''];
     }
 
-    $fyIdEsc = (int) $fyId;
-    $r       = null;
-    $q       = mysqli_query(
-        $link,
-        "SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years WHERE id = $fyIdEsc AND status = 1 AND IFNULL(is_active, 0) = 1 LIMIT 1"
-    );
-    if ($q && mysqli_num_rows($q) > 0) {
-        $r = mysqli_fetch_assoc($q);
-    }
+    $r = auragold_resolve_financial_year_row_for_login($link, $fyId);
     if ($closeLink) {
         mysqli_close($link);
     }
 
     if (!$r) {
-        return ['ok' => false, 'message' => 'Invalid or inactive financial year. Choose an active year from the list.'];
+        return ['ok' => false, 'message' => 'No active financial year. Mark the current year as active in Accounting Masters, then sign in again.'];
     }
 
-    $_SESSION['financial_year_id'] = (int) $r['id'];
-    $_SESSION['financial_year']    = [
-        'id'          => (int) $r['id'],
-        'start_date'  => (string) ($r['start_date'] ?? ''),
-        'end_date'    => (string) ($r['end_date'] ?? ''),
-        'is_active'   => (int) ($r['is_active'] ?? 0),
-    ];
+    auragold_store_financial_year_in_session($r);
 
     return ['ok' => true, 'message' => ''];
 }
@@ -415,30 +479,13 @@ function auragold_enforce_session_operational_health() {
     if ($fyId <= 0 && !empty($_SESSION['financial_year']) && is_array($_SESSION['financial_year'])) {
         $fyId = (int) ($_SESSION['financial_year']['id'] ?? 0);
     }
-    if ($fyId <= 0) {
-        auragold_login_abort_to_index('No active financial year in this session. Please sign in again and select an active financial year.');
-    }
 
-    $fyIdEsc = (int) $fyId;
-    $fyRes   = mysqli_query(
-        $conn,
-        "SELECT id, start_date, end_date, is_active FROM tbl_accounting_financial_years WHERE id = $fyIdEsc AND status = 1 AND IFNULL(is_active, 0) = 1 LIMIT 1"
-    );
-    $fyRow   = ($fyRes && mysqli_num_rows($fyRes) > 0) ? mysqli_fetch_assoc($fyRes) : null;
-    if ($fyRes) {
-        mysqli_free_result($fyRes);
-    }
+    $fyRow = auragold_resolve_financial_year_row_for_login($conn, $fyId);
     if (!$fyRow) {
-        auragold_login_abort_to_index('The selected financial year is no longer active. Please sign in again.');
+        auragold_login_abort_to_index('No active financial year. Please sign in after the administrator marks the current year as active in Accounting Masters.');
     }
 
-    $_SESSION['financial_year_id'] = (int) $fyRow['id'];
-    $_SESSION['financial_year']    = [
-        'id'          => (int) $fyRow['id'],
-        'start_date'  => (string) ($fyRow['start_date'] ?? ''),
-        'end_date'    => (string) ($fyRow['end_date'] ?? ''),
-        'is_active'   => (int) ($fyRow['is_active'] ?? 0),
-    ];
+    auragold_store_financial_year_in_session($fyRow);
 
     if (auragold_session_financial_year_short_label() === '') {
         auragold_login_abort_to_index('Financial year could not be loaded for this session. Please sign in again.');

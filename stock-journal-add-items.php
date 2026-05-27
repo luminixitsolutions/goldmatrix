@@ -10681,8 +10681,22 @@ text-transform: uppercase;
             return;
         }
         
-        // Open barcode print page in new window
-        const printUrl = 'barcode-print.php?barcode=' + encodeURIComponent(barcode.trim());
+        var metalType = '';
+        if (event && event.target) {
+            var row = event.target.closest('tr');
+            if (row) {
+                metalType = (row.getAttribute('data-metal-name') || '').trim();
+                if (!metalType && row.getAttribute('data-metal-id')) {
+                    var tab = document.querySelector('.category-tab-btn[data-metal-id="' + String(row.getAttribute('data-metal-id')).replace(/"/g, '') + '"]');
+                    if (tab) metalType = (tab.getAttribute('data-metal-name') || '').trim();
+                }
+            }
+        }
+        
+        var printUrl = 'barcode-print.php?barcode=' + encodeURIComponent(barcode.trim());
+        if (metalType) {
+            printUrl += '&metal_type=' + encodeURIComponent(metalType);
+        }
         window.open(printUrl, '_blank', 'width=800,height=600');
     }
     

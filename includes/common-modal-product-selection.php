@@ -143,9 +143,11 @@ if (empty($common_modal_show_checkbox_column)) {
                         <div class="form-group mb-2">
                             <label>Barcode</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm" id="modalProductBarcode" placeholder="Scan or enter">
+                                <input type="text" class="form-control form-control-sm" id="modalProductBarcode" placeholder="Scan or enter" autocomplete="off">
                                 <div class="input-group-append">
-                                    <span class="input-group-text" style="background: #f8fafc;"><i class="feather icon-image"></i></span>
+                                    <button type="button" class="btn btn-sm" id="modalProductBarcodeFetchBtn" title="Fetch product by barcode" style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.25rem 0.5rem;">
+                                        <i class="feather icon-image"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>

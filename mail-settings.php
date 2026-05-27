@@ -53,7 +53,7 @@ $t = static function (string $key, string $fallback = ''): string {
     return htmlspecialchars($fallback !== '' ? $fallback : $key, ENT_QUOTES, 'UTF-8');
 };
 
-$page_title = function_exists('auragold_t') ? (string) auragold_t('mail_settings.page_title') : 'Mail Setting - Set Software - GoldMatrix';
+$page_title = function_exists('auragold_t') ? (string) auragold_t('mail_settings.page_title') : 'Mail Setting - Set Software - ' . auragold_app_name();
 
 ?>
 <!DOCTYPE html>

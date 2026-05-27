@@ -109,7 +109,7 @@ try {
 <html lang="en" class="default-style">
 
 <head>
-    <title>Sale Fixing Direct Invoice - AuraGold Software</title>
+    <title>Sale Fixing Direct Invoice - <?php echo htmlspecialchars(auragold_app_name(), ENT_QUOTES, 'UTF-8'); ?> Software</title>
 
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />

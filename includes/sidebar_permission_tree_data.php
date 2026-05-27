@@ -27,7 +27,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'utilities',
-            'label' => 'Utilities',
+            'label' => 'Opening',
             'menu'  => true,
             'pages' => [
                 ['key' => 'product_opening', 'label' => 'Product Opening', 'actions' => $c],
@@ -47,7 +47,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'transaction',
-            'label' => 'Transaction',
+            'label' => 'Operations',
             'menu'  => true,
             'pages' => [
                 ['key' => 'sale_invoice', 'label' => 'Sale Invoice', 'group' => 'Sales & Purchase', 'actions' => $c],
@@ -78,7 +78,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'inventory',
-            'label' => 'Inventory',
+            'label' => 'Stock Management',
             'menu'  => true,
             'pages' => [
                 ['key' => 'jewellery_catalogue', 'label' => 'Jewellery Catalogue', 'group' => 'Catalogue & Stock', 'actions' => $c],
@@ -111,7 +111,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'orders',
-            'label' => 'Orders',
+            'label' => 'Order Management',
             'menu'  => true,
             'pages' => [
                 ['key' => 'sale_order', 'label' => 'Sale Order', 'actions' => $c],
@@ -128,7 +128,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'manufacturer',
-            'label' => 'Manufacturer',
+            'label' => 'Production',
             'menu'  => true,
             'pages' => [
                 ['key' => 'department', 'label' => 'Department', 'actions' => $c],
@@ -163,7 +163,7 @@ function auragold_sidebar_permission_tree_data()
         ],
         [
             'key'   => 'report',
-            'label' => 'Report',
+            'label' => 'Report Analysis',
             'menu'  => true,
             'pages' => [
                 ['key' => 'transaction_report', 'label' => 'Transactions Report', 'actions' => $v],
@@ -187,21 +187,14 @@ function auragold_sidebar_permission_tree_data()
                 ['key' => 'set_software', 'label' => 'Set Software', 'actions' => $c],
                 ['key' => 'voucher_type', 'label' => 'Voucher Type', 'actions' => $c],
                 ['key' => 'invoice_print_settings', 'label' => 'Invoice print settings', 'actions' => $c],
-            ],
-        ],
-        [
-            'key'   => 'administration',
-            'label' => 'Administration',
-            'menu'  => true,
-            'pages' => [
-                ['key' => 'user_management', 'label' => 'User Management', 'actions' => $c],
-                ['key' => 'masters', 'label' => 'Masters', 'actions' => $c],
-                ['key' => 'activity_log', 'label' => 'Activity Log', 'actions' => $v],
-                ['key' => 'crm', 'label' => 'CRM', 'actions' => $c],
-                ['key' => 'role_management', 'label' => 'Role Management', 'actions' => $c],
-                ['key' => 'permission_management', 'label' => 'Permission Management', 'actions' => $c],
-                ['key' => 'whitelist_management', 'label' => 'Whitelist Management', 'actions' => $c],
-                ['key' => 'blocklist_management', 'label' => 'Blocklist Management', 'actions' => $c],
+                ['key' => 'user_management', 'label' => 'User Management', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'masters', 'label' => 'Masters', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'activity_log', 'label' => 'Activity Log', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $v],
+                ['key' => 'crm', 'label' => 'CRM', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'role_management', 'label' => 'Role Management', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'permission_management', 'label' => 'Permission Management', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'whitelist_management', 'label' => 'Whitelist Management', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
+                ['key' => 'blocklist_management', 'label' => 'Blocklist Management', 'group' => 'Administration', 'grant_namespace' => 'administration', 'actions' => $c],
             ],
         ],
     ];
