@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/auragold_carat_dashboard_image_schema.php';
+require_once __DIR__ . '/../includes/auragold_carat_purity_for_schema.php';
 
 header('Content-Type: application/json');
 
@@ -10,9 +11,67 @@ $action  = $_POST['action'] ?? ($_GET['action'] ?? '');
 $table   = 'tbl_carat';
 
 auragold_ensure_tbl_carat_dashboard_images($conn);
+auragold_ensure_tbl_carat_purity_split($conn);
 
 $has_metal_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
 $has_img_cols = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'dashboard_image_path');
+$has_split_purity = function_exists('auragold_carat_has_split_purity') && auragold_carat_has_split_purity($conn);
+
+$carat_parse_purity_post = static function () use ($has_split_purity): array {
+    if ($has_split_purity) {
+        $sales = auragold_carat_normalize_purity_input($_POST['purity_sales'] ?? '');
+        $purchase = auragold_carat_normalize_purity_input($_POST['purity_purchase'] ?? '');
+        $common = auragold_carat_normalize_purity_input($_POST['purity_common'] ?? '');
+        $legacy = auragold_carat_normalize_purity_input($_POST['purity'] ?? '');
+        if ($common === '') {
+            $common = $legacy;
+        }
+        $purity = $common !== '' ? $common : ($sales !== '' ? $sales : $purchase);
+        return [
+            'purity' => $purity,
+            'purity_sales' => $sales,
+            'purity_purchase' => $purchase,
+            'purity_common' => $common,
+        ];
+    }
+    $purity = auragold_carat_normalize_purity_input($_POST['purity'] ?? '');
+    return [
+        'purity' => $purity,
+        'purity_sales' => '',
+        'purity_purchase' => '',
+        'purity_common' => $purity,
+    ];
+};
+
+$carat_purity_sql_literals = static function (mysqli $conn, array $p): array {
+    $purity = mysqli_real_escape_string($conn, (string) $p['purity']);
+    $sales = mysqli_real_escape_string($conn, (string) $p['purity_sales']);
+    $purchase = mysqli_real_escape_string($conn, (string) $p['purity_purchase']);
+    $common = mysqli_real_escape_string($conn, (string) $p['purity_common']);
+    return compact('purity', 'sales', 'purchase', 'common');
+};
+
+$carat_purity_out_fields = static function (array $p): array {
+    return [
+        'purity' => $p['purity'],
+        'purity_sales' => auragold_carat_format_purity_display($p['purity_sales']),
+        'purity_purchase' => auragold_carat_format_purity_display($p['purity_purchase']),
+        'purity_common' => auragold_carat_format_purity_display($p['purity_common']),
+    ];
+};
+
+$carat_validate_split_purity = static function (array $p) use ($has_split_purity): ?string {
+    if (!$has_split_purity) {
+        return null;
+    }
+    if ((string) ($p['purity_sales'] ?? '') === '') {
+        return 'Sale Purity % is required';
+    }
+    if ((string) ($p['purity_purchase'] ?? '') === '') {
+        return 'Purchase Purity % is required';
+    }
+    return null;
+};
 
 $resolve_metal_name = static function ($conn, $metal_id) {
     $metal_id = (int) $metal_id;
@@ -108,6 +167,9 @@ if ($action === 'get') {
         exit;
     }
     $cols = 'id,name,metal_id,purity,description';
+    if ($has_split_purity) {
+        $cols .= ',purity_sales,purity_purchase,purity_common';
+    }
     if ($has_img_cols) {
         $cols .= ',dashboard_image_path,dashboard_image_url';
     }
@@ -125,8 +187,19 @@ if ($action === 'get') {
 if ($action === 'add') {
 
     $name   = esc($_POST['name'] ?? '');
-    $purity = esc($_POST['purity'] ?? '');
     $desc   = esc($_POST['description'] ?? '');
+    $purityParsed = $carat_parse_purity_post();
+    $purityErr = $carat_validate_split_purity($purityParsed);
+    if ($purityErr !== null) {
+        echo json_encode(['status' => 'error', 'message' => $purityErr]);
+        exit;
+    }
+    $puritySql = $carat_purity_sql_literals($conn, $purityParsed);
+    $purity = esc($puritySql['purity']);
+    $split_cols = $has_split_purity ? ', purity_sales, purity_purchase, purity_common' : '';
+    $split_vals = $has_split_purity
+        ? ",'{$puritySql['sales']}','{$puritySql['purchase']}','{$puritySql['common']}'"
+        : '';
     $metal_id = isset($_POST['metal_id']) ? (int) $_POST['metal_id'] : 0;
     $ext_url_in = $normalize_ext_url((string) ($_POST['dashboard_image_url'] ?? ''));
     $ext_url_sql = mysqli_real_escape_string($conn, $ext_url_in);
@@ -151,25 +224,25 @@ if ($action === 'add') {
         }
         if ($has_img_cols) {
             mysqli_query($conn,"
-                INSERT INTO tbl_carat (name, metal_id, purity, description, dashboard_image_url, branch_id, created_by)
-                VALUES ('$name','$metal_id','$purity','$desc','" . ($clear_img ? '' : $ext_url_sql) . "','$bid','$user_id')
+                INSERT INTO tbl_carat (name, metal_id, purity{$split_cols}, description, dashboard_image_url, branch_id, created_by)
+                VALUES ('$name','$metal_id','$purity'{$split_vals},'$desc','" . ($clear_img ? '' : $ext_url_sql) . "','$bid','$user_id')
             ");
         } else {
             mysqli_query($conn,"
-                INSERT INTO tbl_carat (name, metal_id, purity, description, branch_id, created_by)
-                VALUES ('$name','$metal_id','$purity','$desc','$bid','$user_id')
+                INSERT INTO tbl_carat (name, metal_id, purity{$split_cols}, description, branch_id, created_by)
+                VALUES ('$name','$metal_id','$purity'{$split_vals},'$desc','$bid','$user_id')
             ");
         }
     } else {
         if ($has_img_cols) {
             mysqli_query($conn,"
-                INSERT INTO tbl_carat (name, purity, description, dashboard_image_url, branch_id, created_by)
-                VALUES ('$name','$purity','$desc','" . ($clear_img ? '' : $ext_url_sql) . "','$bid','$user_id')
+                INSERT INTO tbl_carat (name, purity{$split_cols}, description, dashboard_image_url, branch_id, created_by)
+                VALUES ('$name','$purity'{$split_vals},'$desc','" . ($clear_img ? '' : $ext_url_sql) . "','$bid','$user_id')
             ");
         } else {
             mysqli_query($conn,"
-                INSERT INTO tbl_carat (name, purity, description, branch_id, created_by)
-                VALUES ('$name','$purity','$desc','$bid','$user_id')
+                INSERT INTO tbl_carat (name, purity{$split_cols}, description, branch_id, created_by)
+                VALUES ('$name','$purity'{$split_vals},'$desc','$bid','$user_id')
             ");
         }
     }
@@ -202,6 +275,9 @@ if ($action === 'add') {
         $out['metal_id'] = $metal_id;
         $out['metal_name'] = $resolve_metal_name($conn, $metal_id);
     }
+    if ($has_split_purity) {
+        $out = array_merge($out, $carat_purity_out_fields($purityParsed));
+    }
     if ($has_img_cols) {
         $out['dashboard_image_path'] = $saved_path_display;
         $out['dashboard_image_url'] = $clear_img ? '' : $ext_url_in;
@@ -216,8 +292,18 @@ if ($action === 'update') {
 
     $id     = intval($_POST['id']);
     $name   = esc($_POST['name'] ?? '');
-    $purity = esc($_POST['purity'] ?? '');
     $desc   = esc($_POST['description'] ?? '');
+    $purityParsed = $carat_parse_purity_post();
+    $purityErr = $carat_validate_split_purity($purityParsed);
+    if ($purityErr !== null) {
+        echo json_encode(['status' => 'error', 'message' => $purityErr]);
+        exit;
+    }
+    $puritySql = $carat_purity_sql_literals($conn, $purityParsed);
+    $purity = esc($puritySql['purity']);
+    $split_set = $has_split_purity
+        ? "purity_sales='{$puritySql['sales']}', purity_purchase='{$puritySql['purchase']}', purity_common='{$puritySql['common']}',"
+        : '';
     $metal_id = isset($_POST['metal_id']) ? (int) $_POST['metal_id'] : 0;
     $ext_url_in = $normalize_ext_url((string) ($_POST['dashboard_image_url'] ?? ''));
     $ext_url_sql = mysqli_real_escape_string($conn, $ext_url_in);
@@ -260,6 +346,7 @@ if ($action === 'update') {
                 SET name='$name',
                     metal_id='$metal_id',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     dashboard_image_path=NULL,
                     dashboard_image_url=NULL,
@@ -286,6 +373,7 @@ if ($action === 'update') {
                 SET name='$name',
                     metal_id='$metal_id',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     dashboard_image_path='$path_sql',
                     dashboard_image_url='$ext_url_sql',
@@ -298,6 +386,7 @@ if ($action === 'update') {
                 SET name='$name',
                     metal_id='$metal_id',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     modified_by='$user_id'
                 WHERE id='$id'
@@ -312,6 +401,7 @@ if ($action === 'update') {
                 UPDATE tbl_carat
                 SET name='$name',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     dashboard_image_path=NULL,
                     dashboard_image_url=NULL,
@@ -337,6 +427,7 @@ if ($action === 'update') {
                 UPDATE tbl_carat
                 SET name='$name',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     dashboard_image_path='$path_sql',
                     dashboard_image_url='$ext_url_sql',
@@ -348,6 +439,7 @@ if ($action === 'update') {
                 UPDATE tbl_carat
                 SET name='$name',
                     purity='$purity',
+                    {$split_set}
                     description='$desc',
                     modified_by='$user_id'
                 WHERE id='$id'
@@ -365,6 +457,9 @@ if ($action === 'update') {
     if ($has_metal_col) {
         $out['metal_id'] = $metal_id;
         $out['metal_name'] = $resolve_metal_name($conn, $metal_id);
+    }
+    if ($has_split_purity) {
+        $out = array_merge($out, $carat_purity_out_fields($purityParsed));
     }
     if ($has_img_cols) {
         $r2 = @getRecord('SELECT dashboard_image_path, dashboard_image_url FROM tbl_carat WHERE id = ' . (int) $id . ' LIMIT 1');

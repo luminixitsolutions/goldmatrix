@@ -210,7 +210,8 @@ if (!function_exists('sale_order_post_metal_exchange_to_stock')) {
         int $branch_id,
         int $pay_seq,
         bool $tbl_stock_has_reference,
-        array &$created_barcodes_out
+        array &$created_barcodes_out,
+        array $reserved_barcodes = []
     ): void {
         auragold_post_metal_exchange_payment_to_stock(
             $conn,
@@ -225,7 +226,8 @@ if (!function_exists('sale_order_post_metal_exchange_to_stock')) {
             'Sale Order — Metal Exchange',
             'so_me',
             'SO-ME-',
-            $created_barcodes_out
+            $created_barcodes_out,
+            $reserved_barcodes
         );
     }
 }
@@ -240,6 +242,8 @@ mysqli_begin_transaction($conn);
 try {
     $user_id = isset($_SESSION['Admin']['id']) ? (int)$_SESSION['Admin']['id'] : 0;
     $metal_exchange_barcodes_out = [];
+    $new_item_barcodes_out = [];
+    $request_used_barcodes = [];
 
     // Get order data
     $order_no = esc($_POST['order_no'] ?? '');
@@ -408,9 +412,13 @@ try {
             throw new Exception("Order update failed: " . mysqli_error($conn));
         }
         
-        // Delete existing items and payments
+        // Delete existing items; replace only customer payment lines (keep internal JWO ME rows)
         mysqli_query($conn, "DELETE FROM tbl_sale_order_items WHERE order_id = $order_id");
-        mysqli_query($conn, "DELETE FROM tbl_sale_order_payments WHERE order_id = $order_id");
+        if (function_exists('auragold_sale_order_delete_customer_payments')) {
+            auragold_sale_order_delete_customer_payments($conn, (int) $order_id);
+        } else {
+            mysqli_query($conn, "DELETE FROM tbl_sale_order_payments WHERE order_id = $order_id");
+        }
     } else {
         // Insert new order
         $ins_f = "order_no, customer_id, customer_name, against_of, currency, ref_no, sales_person, order_date, due_date, layaways_id, fixing_type, previous_balance, previous_gold, previous_silver, subtotal, additional_amt, net_total, reward_points, coupon_code, coupon_discount, discount_amt, redeem_points, grand_total, advance_payment, metal_amt, round_off, paid_amt, balance_amt, group_name, comment";
@@ -493,7 +501,6 @@ try {
     }
 
     if (!empty($items) && is_array($items)) {
-        $request_used_barcodes = [];
         foreach ($items as $item) {
             $product_id = (int)($item['product_id'] ?? 0);
             $characteristic_id = isset($item['characteristic_id']) ? (int)$item['characteristic_id'] : NULL;
@@ -538,7 +545,16 @@ try {
             $reverse = (float)($item['reverse'] ?? 0);
             
             if ($product_id > 0) {
-                $barcode = esc(auragold_resolve_unique_invoice_item_barcode($conn, $item, $request_used_barcodes));
+                $incoming_barcode = trim((string) ($item['barcode'] ?? ''));
+                $raw_bc = auragold_resolve_unique_invoice_item_barcode($conn, $item, $request_used_barcodes);
+                $barcode = esc($raw_bc);
+                if ($raw_bc !== '' && ($incoming_barcode === '' || strcasecmp($incoming_barcode, $raw_bc) !== 0)) {
+                    $new_item_barcodes_out[] = [
+                        'barcode' => $raw_bc,
+                        'product_name' => trim((string) ($item['product_name'] ?? '')),
+                        'source' => 'product',
+                    ];
+                }
                 $item_cols = "order_id, product_id, product_characteristic_id, barcode, product_name, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax, design_no, status, created_at";
                 $item_vals = "$order_id, $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ", " . ($barcode ? "'$barcode'" : "NULL") . ", '$product_name', " . ($carat ? "'$carat'" : "NULL") . ", $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax, $net_amount, $net_amt_with_tax, " . ($design_no ? "'$design_no'" : "NULL") . ", 1, NOW()";
                 if ($oi_diamond_category) { $item_cols .= ", diamond_category"; $item_vals .= ", " . ($diamond_category ? "'" . mysqli_real_escape_string($conn, $diamond_category) . "'" : "NULL"); }
@@ -668,6 +684,9 @@ try {
     );
 
     if (!empty($payments) && is_array($payments)) {
+        if (function_exists('auragold_sale_order_filter_customer_payments')) {
+            auragold_sale_order_filter_customer_payments($payments);
+        }
         foreach ($payments as $pay_seq => $payment) {
             sale_order_validate_metal_exchange_for_stock($conn, $payment);
             if (!sale_order_should_persist_payment_row($conn, $payment)) {
@@ -842,8 +861,18 @@ try {
                 $sale_order_stock_branch_id,
                 is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
                 $sale_order_tbl_stock_has_ref,
-                $metal_exchange_barcodes_out
+                $metal_exchange_barcodes_out,
+                $request_used_barcodes
             );
+            foreach ($metal_exchange_barcodes_out as $__me_bc_row) {
+                if (!is_array($__me_bc_row)) {
+                    continue;
+                }
+                $__me_bc = trim((string) ($__me_bc_row['barcode'] ?? ''));
+                if ($__me_bc !== '' && !in_array($__me_bc, $request_used_barcodes, true)) {
+                    $request_used_barcodes[] = $__me_bc;
+                }
+            }
         }
 
         $computed_metal_amt = sale_order_metal_amt_from_payments($conn, $payments);
@@ -1318,7 +1347,9 @@ try {
         'message' => 'Order saved successfully',
         'order_id' => $order_id,
         'order_no' => $order_no,
-        'new_barcodes' => $metal_exchange_barcodes_out,
+        'new_barcodes' => array_merge((array) $new_item_barcodes_out, (array) $metal_exchange_barcodes_out),
+        'product_barcodes' => $new_item_barcodes_out,
+        'metal_exchange_barcodes' => $metal_exchange_barcodes_out,
     ]);
     
 } catch (Exception $e) {

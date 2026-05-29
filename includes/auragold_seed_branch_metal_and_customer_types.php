@@ -2,7 +2,11 @@
 /**
  * After a new tbl_branches row: default tbl_metal (scoped by branch_id when present)
  * and tbl_customer_types (idempotent by `name`, matching UNIQUE `name`; optional branch_id on insert).
+ *
+ * Sub-branches: copy tbl_metal + tbl_carat from the parent main branch (branch_id remapped), not hardcoded defaults.
  */
+require_once __DIR__ . '/auragold_seed_sub_branch_ledger_customers.php';
+require_once __DIR__ . '/branch_create_db_after_save.php';
 if (!function_exists('auragold_schema_table_reachable')) {
     function auragold_schema_table_reachable(mysqli $conn, string $table): bool {
         $t = preg_replace('/[^a-zA-Z0-9_]/', '', (string) $table);
@@ -51,12 +55,249 @@ if (!function_exists('auragold_customer_type_default_rows_for_new_branch')) {
     }
 }
 
+if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
+    /**
+     * Replace provisioned tbl_metal / tbl_carat in a new sub-branch DB with copies from the main branch,
+     * keeping the same `id` values as main (only branch_id changes to the new sub-branch).
+     *
+     * @return array{ok:bool,message:string,metals?:int,carats?:int}
+     */
+    function auragold_seed_sub_branch_metal_and_carat_from_main(
+        mysqli $conn_master,
+        int $mainBranchId,
+        int $newSubBranchId,
+        string $targetDbName,
+        string $targetDbUser,
+        string $targetDbPass
+    ): array {
+        $mainBranchId   = (int) $mainBranchId;
+        $newSubBranchId = (int) $newSubBranchId;
+        $targetDbName   = trim($targetDbName);
+        if ($mainBranchId <= 0 || $newSubBranchId <= 0) {
+            return ['ok' => false, 'message' => 'Invalid main or sub-branch id.'];
+        }
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $targetDbName)) {
+            return ['ok' => false, 'message' => 'Invalid target database name.'];
+        }
+
+        if (!function_exists('auragold_resolve_main_branch_source_database')) {
+            return ['ok' => false, 'message' => 'Main branch database resolver is not available.'];
+        }
+        $resolved = auragold_resolve_main_branch_source_database($conn_master, $mainBranchId);
+        if (empty($resolved['ok'])) {
+            return ['ok' => false, 'message' => $resolved['message'] !== '' ? $resolved['message'] : 'Could not resolve main branch database.'];
+        }
+        $sourceDb = trim((string) ($resolved['db_name'] ?? ''));
+        if ($sourceDb === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $sourceDb)) {
+            return ['ok' => false, 'message' => 'Invalid main branch database name.'];
+        }
+
+        $host = defined('DB_HOST') ? (string) DB_HOST : 'localhost';
+
+        if (strcasecmp($sourceDb, $targetDbName) === 0) {
+            if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
+                require_once __DIR__ . '/auragold_branch_data_scope.php';
+            }
+            $link = $GLOBALS['conn'] ?? null;
+            if (!$link instanceof mysqli) {
+                $link = auragold_mysqli_connect_branch_or_registry($host, $targetDbName, $targetDbUser, $targetDbPass);
+            }
+            if (!$link) {
+                return ['ok' => false, 'message' => 'Could not connect to branch database for metal/carat copy.'];
+            }
+            $seed = auragold_seed_subbranch_masters_from_main($link, $mainBranchId, $newSubBranchId);
+            $metals = (int) ($seed['tables']['tbl_metal'] ?? 0);
+            $carats = (int) ($seed['tables']['tbl_carat'] ?? 0);
+            return [
+                'ok'      => true,
+                'message' => 'Copied ' . $metals . ' metal(s) and ' . $carats . ' carat row(s) from main branch.',
+                'metals'  => $metals,
+                'carats'  => $carats,
+            ];
+        }
+
+        $srcConn = auragold_mysqli_connect_branch_or_registry($host, $sourceDb, $resolved['db_user'], $resolved['db_pass']);
+        if (!$srcConn) {
+            return ['ok' => false, 'message' => 'Could not connect to main branch database `' . $sourceDb . '` for metal/carat copy.'];
+        }
+        mysqli_set_charset($srcConn, 'utf8mb4');
+
+        $tgtConn = auragold_mysqli_connect_branch_or_registry($host, $targetDbName, $targetDbUser, $targetDbPass);
+        if (!$tgtConn) {
+            mysqli_close($srcConn);
+            return ['ok' => false, 'message' => 'Could not connect to new sub-branch database for metal/carat copy.'];
+        }
+        mysqli_set_charset($tgtConn, 'utf8mb4');
+
+        if (!function_exists('auragold_tbl_has_column')) {
+            require_once __DIR__ . '/auragold_branch_data_scope.php';
+        }
+
+        $sq = '`' . str_replace('`', '``', $sourceDb) . '`';
+        $tq = '`' . str_replace('`', '``', $targetDbName) . '`';
+
+        foreach (['tbl_metal', 'tbl_carat'] as $t) {
+            if (!auragold_schema_table_exists_on_link($srcConn, $sourceDb, $t)
+                || !auragold_schema_table_exists_on_link($tgtConn, $targetDbName, $t)) {
+                mysqli_close($srcConn);
+                mysqli_close($tgtConn);
+                return ['ok' => false, 'message' => 'Required table `' . $t . '` missing on source or target.'];
+            }
+        }
+
+        $metalHasBranch = auragold_tbl_has_column($srcConn, 'tbl_metal', 'branch_id');
+        $caratHasBranch = auragold_tbl_has_column($srcConn, 'tbl_carat', 'branch_id');
+        $metalWhere     = '`status` = 1';
+        if ($metalHasBranch) {
+            $metalWhere = '`branch_id` = ' . (int) $mainBranchId;
+            if (auragold_tbl_has_column($srcConn, 'tbl_metal', 'status')) {
+                $metalWhere .= ' AND `status` = 1';
+            }
+        }
+        $caratWhere = '`status` = 1';
+        if ($caratHasBranch) {
+            $caratWhere = '`branch_id` = ' . (int) $mainBranchId;
+            if (auragold_tbl_has_column($srcConn, 'tbl_carat', 'status')) {
+                $caratWhere .= ' AND `status` = 1';
+            }
+        }
+
+        $tgtMetalCols = auragold_tbl_columns_set($tgtConn, 'tbl_metal');
+        $tgtCaratCols = auragold_tbl_columns_set($tgtConn, 'tbl_carat');
+
+        $backtickCol = static function (string $c): string {
+            return '`' . str_replace('`', '``', $c) . '`';
+        };
+
+        $resetAutoInc = static function (mysqli $link, string $dbQ, string $table) use ($backtickCol): void {
+            $t = str_replace('`', '``', $table);
+            $r = @mysqli_query($link, 'SELECT COALESCE(MAX(`id`), 0) + 1 AS n FROM ' . $dbQ . '.`' . $t . '`');
+            if ($r && ($mx = mysqli_fetch_assoc($r))) {
+                $n = (int) ($mx['n'] ?? 1);
+                if ($n < 1) {
+                    $n = 1;
+                }
+                @mysqli_query($link, 'ALTER TABLE ' . $dbQ . '.`' . $t . '` AUTO_INCREMENT = ' . $n);
+            }
+            if ($r) {
+                mysqli_free_result($r);
+            }
+        };
+
+        $insertRow = static function (mysqli $link, string $dbQ, string $table, array $row, array $allowedCols, array $overrides) use ($backtickCol): bool {
+            $cols = [];
+            $vals = [];
+            foreach ($row as $col => $val) {
+                if (!is_string($col)) {
+                    continue;
+                }
+                $lc = strtolower($col);
+                if (!isset($allowedCols[$lc])) {
+                    continue;
+                }
+                if (array_key_exists($lc, $overrides)) {
+                    $val = $overrides[$lc];
+                }
+                $cols[] = $backtickCol($col);
+                if ($val === null) {
+                    $vals[] = 'NULL';
+                } elseif (is_int($val) || is_float($val)) {
+                    $vals[] = (string) $val;
+                } else {
+                    $vals[] = '\'' . mysqli_real_escape_string($link, (string) $val) . '\'';
+                }
+            }
+            if ($cols === []) {
+                return false;
+            }
+            $sql = 'INSERT INTO ' . $dbQ . '.`' . str_replace('`', '``', $table) . '` ('
+                . implode(',', $cols) . ') VALUES (' . implode(',', $vals) . ')';
+
+            return (bool) mysqli_query($link, $sql);
+        };
+
+        mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=0');
+        mysqli_query($tgtConn, 'DELETE FROM ' . $tq . '.`tbl_carat`');
+        mysqli_query($tgtConn, 'DELETE FROM ' . $tq . '.`tbl_metal`');
+
+        $metalCount = 0;
+        $rMetals    = mysqli_query($srcConn, 'SELECT * FROM ' . $sq . '.`tbl_metal` WHERE ' . $metalWhere . ' ORDER BY `id` ASC');
+        if (!$rMetals) {
+            $err = mysqli_error($srcConn);
+            mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+            mysqli_close($srcConn);
+            mysqli_close($tgtConn);
+            return ['ok' => false, 'message' => 'Could not read metals from main branch: ' . $err];
+        }
+        while ($metalRow = mysqli_fetch_assoc($rMetals)) {
+            $overrides = [];
+            if (isset($tgtMetalCols['branch_id'])) {
+                $overrides['branch_id'] = $newSubBranchId;
+            }
+            if (!$insertRow($tgtConn, $tq, 'tbl_metal', $metalRow, $tgtMetalCols, $overrides)) {
+                $err = mysqli_error($tgtConn);
+                mysqli_free_result($rMetals);
+                mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+                mysqli_close($srcConn);
+                mysqli_close($tgtConn);
+                return ['ok' => false, 'message' => 'Copy tbl_metal failed: ' . $err];
+            }
+            $metalCount++;
+        }
+        mysqli_free_result($rMetals);
+        if ($metalCount > 0) {
+            $resetAutoInc($tgtConn, $tq, 'tbl_metal');
+        }
+
+        $caratCount = 0;
+        $rCarats    = mysqli_query($srcConn, 'SELECT * FROM ' . $sq . '.`tbl_carat` WHERE ' . $caratWhere . ' ORDER BY `id` ASC');
+        if (!$rCarats) {
+            $err = mysqli_error($srcConn);
+            mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+            mysqli_close($srcConn);
+            mysqli_close($tgtConn);
+            return ['ok' => false, 'message' => 'Could not read carats from main branch: ' . $err];
+        }
+        while ($caratRow = mysqli_fetch_assoc($rCarats)) {
+            $overrides = [];
+            if (isset($tgtCaratCols['branch_id'])) {
+                $overrides['branch_id'] = $newSubBranchId;
+            }
+            if (!$insertRow($tgtConn, $tq, 'tbl_carat', $caratRow, $tgtCaratCols, $overrides)) {
+                $err = mysqli_error($tgtConn);
+                mysqli_free_result($rCarats);
+                mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+                mysqli_close($srcConn);
+                mysqli_close($tgtConn);
+                return ['ok' => false, 'message' => 'Copy tbl_carat failed: ' . $err];
+            }
+            $caratCount++;
+        }
+        mysqli_free_result($rCarats);
+        if ($caratCount > 0) {
+            $resetAutoInc($tgtConn, $tq, 'tbl_carat');
+        }
+
+        mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+        mysqli_close($srcConn);
+        mysqli_close($tgtConn);
+
+        return [
+            'ok'      => true,
+            'message' => 'Copied ' . $metalCount . ' metal(s) and ' . $caratCount . ' carat row(s) from main branch (same ids, branch_id ' . $newSubBranchId . ').',
+            'metals'  => $metalCount,
+            'carats'  => $caratCount,
+        ];
+    }
+}
+
 if (!function_exists('auragold_seed_metal_and_customer_types_for_new_branch')) {
     /**
      * @param mysqli $conn             Operational (branch) database
      * @param int    $registryBranchId New tbl_branches.id
+     * @param array  $opts             skip_metal (bool) — when metals were copied from main branch
      */
-    function auragold_seed_metal_and_customer_types_for_new_branch(mysqli $conn, int $registryBranchId): void {
+    function auragold_seed_metal_and_customer_types_for_new_branch(mysqli $conn, int $registryBranchId, array $opts = []): void {
         $registryBranchId = (int) $registryBranchId;
         if ($registryBranchId < 1) {
             return;
@@ -68,10 +309,11 @@ if (!function_exists('auragold_seed_metal_and_customer_types_for_new_branch')) {
             return;
         }
 
-        $bid = (int) $registryBranchId;
+        $bid       = (int) $registryBranchId;
+        $skipMetal = !empty($opts['skip_metal']);
 
         // --- tbl_metal ---
-        if (auragold_schema_table_reachable($conn, 'tbl_metal')) {
+        if (!$skipMetal && auragold_schema_table_reachable($conn, 'tbl_metal')) {
             $hasBranch   = auragold_tbl_has_column($conn, 'tbl_metal', 'branch_id');
             $metals      = auragold_metal_default_rows_for_new_branch();
             if ($hasBranch) {

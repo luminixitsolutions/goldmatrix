@@ -97,6 +97,11 @@
         { value: 'GemStones', name: 'GemStones' },
         { value: 'Jewellery', name: 'Jewellery' }
     ];
+    /** Loose / Certified Diamond & Stones tab — row filter + diamond category column. */
+    const LOOSE_DIAMOND_CATEGORY_OPTIONS = [
+        { value: 'Diamond', name: 'Diamond' },
+        { value: 'Stone', name: 'Stone' }
+    ];
     const DIAMOND_CATEGORY_PLACEHOLDER = 'Select Diamond Category';
     const DIAMOND_CALCULATION_OPTIONS = ['Carat X Rate', 'Rate X Gross Wt', 'Rate X Purity Wt', 'Rate X Net Wt', 'Rate X Final Wt', 'Fix', 'Stone Charge', 'Attach Image Type'];
     /** Diamond Category = Jewellery (six weight/rate modes + Fix). */
@@ -115,6 +120,7 @@
     window.METAL_GROUP_PANEL_COLUMNS = METAL_GROUP_PANEL_COLUMNS;
     window.DIAMOND_TAB_HEADER_LABELS = DIAMOND_TAB_HEADER_LABELS;
     window.DIAMOND_CATEGORY_OPTIONS = DIAMOND_CATEGORY_OPTIONS;
+    window.LOOSE_DIAMOND_CATEGORY_OPTIONS = LOOSE_DIAMOND_CATEGORY_OPTIONS;
     window.DIAMOND_CATEGORY_PLACEHOLDER = DIAMOND_CATEGORY_PLACEHOLDER;
     window.DIAMOND_CALCULATION_OPTIONS = DIAMOND_CALCULATION_OPTIONS;
     window.JEWELLERY_DIAMOND_CATEGORY_CALCULATION_OPTIONS = JEWELLERY_DIAMOND_CATEGORY_CALCULATION_OPTIONS;
@@ -148,19 +154,263 @@
     }
     window.isLoosOrLooseDiamondMetalDisplayName = isLoosOrLooseDiamondMetalDisplayName;
 
-    // Populate category dropdown: Diamond tab = Diamonds/GemStones/Jewellery; other tabs = API categories
+    function getActiveProductModalMetalName() {
+        var activeTabBtn = document.querySelector('.product-category-tabs .category-tab-btn.active')
+            || document.querySelector('#productSelectionModal .category-tab-btn.active');
+        return (activeTabBtn && activeTabBtn.getAttribute('data-metal-name')) || (typeof currentMetalName !== 'undefined' ? currentMetalName : '');
+    }
+
+    function isLooseDiamondTabActive() {
+        var name = getActiveProductModalMetalName();
+        return isLoosOrLooseDiamondMetalDisplayName(name) && !isDiamondStonesMetalDisplayName(name);
+    }
+    window.isLooseDiamondTabActive = isLooseDiamondTabActive;
+
+    function getDiamondCategoryOptionsForActiveTab() {
+        return isLooseDiamondTabActive() ? LOOSE_DIAMOND_CATEGORY_OPTIONS : DIAMOND_CATEGORY_OPTIONS;
+    }
+    window.getDiamondCategoryOptionsForActiveTab = getDiamondCategoryOptionsForActiveTab;
+
+    /** Map DB / legacy diamond_category to loose-tab select value (Diamond | Stone). */
+    function normalizeDiamondCategoryForLooseTab(val) {
+        var v = (val || '').trim();
+        if (!v) return '';
+        var lower = v.toLowerCase();
+        if (lower === 'diamond' || lower === 'diamonds') return 'Diamond';
+        if (lower === 'stone' || lower === 'stones' || lower === 'gemstones' || lower === 'gem stones') return 'Stone';
+        return v;
+    }
+    window.normalizeDiamondCategoryForLooseTab = normalizeDiamondCategoryForLooseTab;
+
+    function normalizeDiamondCategoryKey(catVal) {
+        var v = (catVal || '').trim();
+        if (!v) return '';
+        var lower = v.toLowerCase();
+        if (lower === 'diamond' || lower === 'diamonds') return 'Diamonds';
+        if (lower === 'stone' || lower === 'stones' || lower === 'gemstones' || lower === 'gem stones') return 'GemStones';
+        if (lower === 'jewellery') return 'Jewellery';
+        return v;
+    }
+    window.normalizeDiamondCategoryKey = normalizeDiamondCategoryKey;
+
+    function isJewelleryDiamondCategory(catVal) {
+        return normalizeDiamondCategoryKey(catVal) === 'Jewellery';
+    }
+    function isDiamondsLineCategory(catVal) {
+        return normalizeDiamondCategoryKey(catVal) === 'Diamonds';
+    }
+    function isGemStonesLineCategory(catVal) {
+        return normalizeDiamondCategoryKey(catVal) === 'GemStones';
+    }
+    function isDiamondOrGemStoneLineCategory(catVal) {
+        var k = normalizeDiamondCategoryKey(catVal);
+        return k === 'Diamonds' || k === 'GemStones';
+    }
+    function isAnyDiamondTabCategory(catVal) {
+        var k = normalizeDiamondCategoryKey(catVal);
+        return k === 'Jewellery' || k === 'Diamonds' || k === 'GemStones';
+    }
+    window.isJewelleryDiamondCategory = isJewelleryDiamondCategory;
+    window.isDiamondsLineCategory = isDiamondsLineCategory;
+    window.isGemStonesLineCategory = isGemStonesLineCategory;
+    window.isDiamondOrGemStoneLineCategory = isDiamondOrGemStoneLineCategory;
+    window.isAnyDiamondTabCategory = isAnyDiamondTabCategory;
+
+    /** Read numeric value from a modal/product-list cell (input or text). */
+    function modalRowCellNumber(row, col) {
+        if (!row) return 0;
+        var c = row.querySelector('[data-column="' + col + '"]');
+        if (!c) return 0;
+        var inp = c.querySelector('input');
+        if (inp) return parseFloat(inp.value) || 0;
+        var t = (c.textContent || '').replace(/,/g, '').trim();
+        return parseFloat(t) || 0;
+    }
+    window.modalRowCellNumber = modalRowCellNumber;
+
+    /**
+     * Diamonds / GemStones line total (JewelStep): Fix/Carat lines store value in net-amt or amount, not always diamond-amount.
+     */
+    function modalRowDiamondComponentLineAmount(row) {
+        if (!row) return 0;
+        var net = modalRowCellNumber(row, 'net-amt');
+        if (net > 0) return net;
+        var amt = modalRowCellNumber(row, 'amount');
+        if (amt > 0) return amt;
+        var da = modalRowCellNumber(row, 'diamond-amount');
+        if (da > 0) return da;
+        var lineMetal = modalRowCellNumber(row, 'diamond-line-metal-value');
+        if (lineMetal > 0) return lineMetal;
+        return modalRowCellNumber(row, 'metal-value');
+    }
+    window.modalRowDiamondComponentLineAmount = modalRowDiamondComponentLineAmount;
+
+    function modalRowCategoryValue(row) {
+        var catSel = row ? row.querySelector('[data-column="category"] select') : null;
+        return normalizeDiamondCategoryKey((catSel && catSel.value) ? String(catSel.value).trim() : '');
+    }
+
+    /** Carat for "Carat X Rate" — stone-weight (D.Weight) or carat column; never multiplied by quantity. */
+    function getCaratForCaratXRateCalc(row) {
+        if (!row) return 0;
+        var stoneWtInp = row.querySelector('[data-column="stone-weight"] input');
+        var stoneWt = stoneWtInp ? (parseFloat(stoneWtInp.value) || 0) : 0;
+        var caratSel = row.querySelector('[data-column="carat"] select');
+        var caratFromSel = caratSel ? (parseFloat(caratSel.value) || 0) : 0;
+        var caratInp = row.querySelector('[data-column="carat"] input');
+        var caratFromInp = caratInp ? (parseFloat(caratInp.value) || 0) : 0;
+        var caratCol = caratFromSel > 0 ? caratFromSel : caratFromInp;
+        if (stoneWt > 0) return stoneWt;
+        if (caratCol > 0) {
+            if (stoneWtInp) stoneWtInp.value = parseFloat(caratCol.toFixed(3)).toString();
+            return caratCol;
+        }
+        return 0;
+    }
+    window.getCaratForCaratXRateCalc = getCaratForCaratXRateCalc;
+
+    function isKnownDiamondCategoryValue(v) {
+        v = (v || '').trim();
+        if (!v) return false;
+        var i;
+        for (i = 0; i < DIAMOND_CATEGORY_OPTIONS.length; i++) {
+            if (DIAMOND_CATEGORY_OPTIONS[i].value === v) return true;
+        }
+        for (i = 0; i < LOOSE_DIAMOND_CATEGORY_OPTIONS.length; i++) {
+            if (LOOSE_DIAMOND_CATEGORY_OPTIONS[i].value === v) return true;
+        }
+        return false;
+    }
+    window.isKnownDiamondCategoryValue = isKnownDiamondCategoryValue;
+
+    function itemDiamondCategoryKey(it) {
+        if (!it) return '';
+        return (it.diamond_category || it.category || '').toString().trim();
+    }
+    window.itemDiamondCategoryKey = itemDiamondCategoryKey;
+
+    /** Pick product-modal metal tab from saved lines (sale order / invoice items). */
+    function resolveBestMetalTabIdFromItems(items, metalsList) {
+        if (!items || !items.length) return null;
+        metalsList = metalsList || (typeof metals !== 'undefined' ? metals : []);
+        if (!metalsList || !metalsList.length) return null;
+
+        function metalIdFromItem(it) {
+            if (!it) return '';
+            var m = it.metal_id != null && it.metal_id !== '' ? String(it.metal_id) : '';
+            return m;
+        }
+
+        var hasLooseCat = items.some(function(it) {
+            var c = itemDiamondCategoryKey(it).toLowerCase();
+            return c === 'diamond' || c === 'stone';
+        });
+        if (hasLooseCat) {
+            for (var li = 0; li < metalsList.length; li++) {
+                var ln = (metalsList[li].display_name || metalsList[li].name || '').toString();
+                if (isLoosOrLooseDiamondMetalDisplayName(ln) && !isDiamondStonesMetalDisplayName(ln)) {
+                    return String(metalsList[li].id);
+                }
+            }
+        }
+
+        var hasDiamondStonesCat = items.some(function(it) {
+            var c = itemDiamondCategoryKey(it);
+            return c === 'Jewellery' || c === 'Diamonds' || c === 'GemStones';
+        });
+        if (hasDiamondStonesCat) {
+            for (var di = 0; di < metalsList.length; di++) {
+                var dn = (metalsList[di].display_name || metalsList[di].name || '').toString();
+                if (isDiamondStonesMetalDisplayName(dn)) {
+                    return String(metalsList[di].id);
+                }
+            }
+        }
+
+        var metalCounts = {};
+        items.forEach(function(it) {
+            var m = metalIdFromItem(it);
+            if (m) metalCounts[m] = (metalCounts[m] || 0) + 1;
+        });
+        var bestMetalId = null;
+        var maxCount = 0;
+        for (var mk in metalCounts) {
+            if (metalCounts[mk] > maxCount) {
+                maxCount = metalCounts[mk];
+                bestMetalId = mk;
+            }
+        }
+        if (bestMetalId) return bestMetalId;
+        var firstMid = metalIdFromItem(items[0]);
+        return firstMid || null;
+    }
+    window.resolveBestMetalTabIdFromItems = resolveBestMetalTabIdFromItems;
+
+    function applyPreferredProductModalMetalTab(metalId) {
+        if (metalId == null || metalId === '') return;
+        window.preferredProductModalMetalId = String(metalId);
+        if (typeof switchToMetalTab === 'function') {
+            switchToMetalTab(String(metalId));
+        }
+    }
+    window.applyPreferredProductModalMetalTab = applyPreferredProductModalMetalTab;
+
+    function syncModalDiamondCategoryFilterForActiveTab() {
+        var sel = document.getElementById('modalDiamondCategoryFilter');
+        var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
+        var show = typeof isDiamondTabActive === 'function' && isDiamondTabActive();
+        if (filterRow) {
+            filterRow.style.display = show ? '' : 'none';
+        }
+        if (!sel || !show) {
+            return;
+        }
+        var current = (sel.value || '').trim();
+        var options = getDiamondCategoryOptionsForActiveTab();
+        sel.innerHTML = '<option value="">All categories</option>';
+        options.forEach(function(opt) {
+            sel.appendChild(new Option(opt.name, opt.value));
+        });
+        if (current && options.some(function(o) { return o.value === current; })) {
+            sel.value = current;
+        } else {
+            sel.value = '';
+        }
+    }
+    window.syncModalDiamondCategoryFilterForActiveTab = syncModalDiamondCategoryFilterForActiveTab;
+
+    function auragoldGetModalDiamondCategoryFilter() {
+        var sel = document.getElementById('modalDiamondCategoryFilter');
+        if (!sel) return '';
+        var v = (sel.value || '').trim();
+        if (!v) return '';
+        var allowed = getDiamondCategoryOptionsForActiveTab().map(function(o) { return o.value; });
+        return allowed.indexOf(v) !== -1 ? v : '';
+    }
+    window.auragoldGetModalDiamondCategoryFilter = auragoldGetModalDiamondCategoryFilter;
+
+    // Populate category dropdown: Diamond tab = Diamonds/GemStones/Jewellery; Loose tab = Diamond/Stone; else API categories
     function populateCategorySelectForModal(select, isDiamondTab) {
         if (!select) return;
         if (isDiamondTab) {
+            var looseTab = typeof isLooseDiamondTabActive === 'function' && isLooseDiamondTabActive();
+            var options = looseTab ? LOOSE_DIAMOND_CATEGORY_OPTIONS : DIAMOND_CATEGORY_OPTIONS;
+            var defaultVal = looseTab ? 'Diamond' : 'Jewellery';
             var currentVal = (select.value || '').trim();
             select.innerHTML = '<option value="">' + DIAMOND_CATEGORY_PLACEHOLDER + '</option>';
-            DIAMOND_CATEGORY_OPTIONS.forEach(function(opt) {
+            options.forEach(function(opt) {
                 select.appendChild(new Option(opt.name, opt.value));
             });
-            if (currentVal && DIAMOND_CATEGORY_OPTIONS.some(function(o) { return o.value === currentVal; })) {
+            if (looseTab && currentVal) {
+                var mapped = normalizeDiamondCategoryForLooseTab(currentVal);
+                if (mapped && options.some(function(o) { return o.value === mapped; })) {
+                    currentVal = mapped;
+                }
+            }
+            if (currentVal && options.some(function(o) { return o.value === currentVal; })) {
                 select.value = currentVal;
             } else {
-                select.value = 'Jewellery';
+                select.value = defaultVal;
             }
             select.classList.add('diamond-category-select');
             select.classList.remove('category-select');
@@ -175,9 +425,7 @@
     window.populateCategorySelectForModal = populateCategorySelectForModal;
 
     function isDiamondTabActive() {
-        var activeTabBtn = document.querySelector('.product-category-tabs .category-tab-btn.active')
-            || document.querySelector('#productSelectionModal .category-tab-btn.active');
-        var name = (activeTabBtn && activeTabBtn.getAttribute('data-metal-name')) || (typeof currentMetalName !== 'undefined' ? currentMetalName : '');
+        var name = getActiveProductModalMetalName();
         return isDiamondStonesMetalDisplayName(name) || isLoosOrLooseDiamondMetalDisplayName(name);
     }
     window.isDiamondTabActive = isDiamondTabActive;
@@ -210,7 +458,10 @@
         if (!select) return;
         var baseDiamond = getCalculationModeOptionsFromMaster(DIAMOND_CALCULATION_OPTIONS);
         var baseFull = getCalculationModeOptionsFromMaster(FULL_CALCULATION_OPTIONS);
-        var opts = isDiamondTab ? baseDiamond : baseFull;
+        var baseLooseDiamond = getCalculationModeOptionsFromMaster(DIAMONDS_GEMSTONES_CALCULATION_OPTIONS);
+        var opts = isDiamondTab
+            ? ((typeof isLooseDiamondTabActive === 'function' && isLooseDiamondTabActive()) ? baseLooseDiamond : baseDiamond)
+            : baseFull;
         var current = select.value;
         select.innerHTML = '';
         for (var i = 0; i < opts.length; i++) {
@@ -232,12 +483,13 @@
         } else {
             var catSel = row.querySelector('[data-column="category"] select');
             var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery') {
+            if (isJewelleryDiamondCategory(catVal)) {
                 opts = JEWELLERY_DIAMOND_CATEGORY_CALCULATION_OPTIONS.slice();
-            } else if (catVal === 'Diamonds' || catVal === 'GemStones') {
+            } else if (isDiamondOrGemStoneLineCategory(catVal)) {
+                opts = DIAMONDS_GEMSTONES_CALCULATION_OPTIONS.slice();
+            } else if (typeof isLooseDiamondTabActive === 'function' && isLooseDiamondTabActive()) {
                 opts = DIAMONDS_GEMSTONES_CALCULATION_OPTIONS.slice();
             } else {
-                // New row: placeholder "Select…" has no value — same calc list as Jewellery (default diamond line type).
                 opts = JEWELLERY_DIAMOND_CATEGORY_CALCULATION_OPTIONS.slice();
             }
         }
@@ -294,15 +546,28 @@
             try {
                 var cat = row.querySelector('[data-column="category"] select');
                 if (!cat) return false;
-                var v = (cat.value || '').trim();
-                return v === 'Diamonds' || v === 'GemStones' || v === 'Jewellery';
+                return isAnyDiamondTabCategory((cat.value || '').trim());
             } catch (e) { return false; }
         }
         function isJewelleryCategoryRow() {
             try {
                 var cat = row.querySelector('[data-column="category"] select');
-                return cat && (cat.value || '').trim() === 'Jewellery';
+                return cat && isJewelleryDiamondCategory((cat.value || '').trim());
             } catch (e) { return false; }
+        }
+        function syncCaratColumnToStoneWeight() {
+            try {
+                if (!shouldSyncDiamondCaratAndDWt() || isJewelleryCategoryRow()) return;
+                if (!stoneWeightInput) return;
+                var c = 0;
+                if (caratSelect) c = parseFloat(caratSelect.value) || 0;
+                var caratInpEl = row.querySelector('[data-column="carat"] input');
+                if (c <= 0 && caratInpEl) c = parseFloat(caratInpEl.value) || 0;
+                if (c > 0) {
+                    stoneWeightInput.value = formatWt(c);
+                    syncDiamondCaratAndLessWt('carat');
+                }
+            } catch (e) {}
         }
         function syncDiamondCaratAndLessWt(source) {
             try {
@@ -343,6 +608,8 @@
         const settingChargeInput = row.querySelector('[data-column="setting-charge"] input');
         addListeners(settingChargeInput, function() { calculateModalRowNetWeight(row); });
         addSelectListeners(caratSelect, function() {
+            syncCaratColumnToStoneWeight();
+            auragoldSyncPurityFromCaratSelect(row);
             if (typeof window.applyDashboardMetalRateFromCaratSelect === 'function') {
                 window.applyDashboardMetalRateFromCaratSelect(row, function() {
                     calculateModalRowNetWeight(row);
@@ -350,6 +617,11 @@
             } else {
                 calculateModalRowNetWeight(row);
             }
+        });
+        var caratInpListen = row.querySelector('[data-column="carat"] input');
+        addListeners(caratInpListen, function() {
+            syncCaratColumnToStoneWeight();
+            calculateModalRowNetWeight(row);
         });
         addSelectListeners(stoneChargeTypeSelect, function() { calculateModalRowNetWeight(row); });
         addListeners(stoneWeightInput, function() { syncDiamondCaratAndLessWt('carat'); calculateModalRowNetWeight(row); if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone(); });
@@ -770,7 +1042,7 @@
         var catSelForGrossSync = row.querySelector('[data-column="category"] select');
         var catTrimForGrossSync = (catSelForGrossSync && catSelForGrossSync.value) ? String(catSelForGrossSync.value).trim() : '';
         if (grossWtInput && metalWeightInput && metalWtForGrossSync > 0.00001) {
-            if (catTrimForGrossSync !== 'Diamonds' && catTrimForGrossSync !== 'GemStones' && catTrimForGrossSync !== 'Jewellery') {
+            if (!isAnyDiamondTabCategory(catTrimForGrossSync)) {
                 grossWtInput.value = parseFloat((metalWtForGrossSync + lessWtForGrossSync).toFixed(3)).toString();
             }
         }
@@ -784,7 +1056,7 @@
         try {
             var catSel = row.querySelector('[data-column="category"] select');
             catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            isDiamondOrGemStone = (catVal === 'Diamonds' || catVal === 'GemStones');
+            isDiamondOrGemStone = isDiamondOrGemStoneLineCategory(catVal);
         } catch (e) {}
         if (purity > 1) purity = purity / 100;
         const metalWtForCalc = metalWeightInput ? (parseFloat(metalWeightInput.value) || 0) : 0;
@@ -797,7 +1069,7 @@
         }
         if (netWtInput) netWtInput.value = parseFloat(netWt.toFixed(3)).toString();
         var baseGoldWt = netWt > 0.00001 ? netWt : (metalWtForCalc > 0 ? metalWtForCalc : 0);
-        if (!isDiamondOrGemStone && catVal === 'Jewellery' && netWt > 0 && metalWeightInput) {
+        if (!isDiamondOrGemStone && isJewelleryDiamondCategory(catVal) && netWt > 0 && metalWeightInput) {
             metalWeightInput.value = parseFloat(netWt.toFixed(3)).toString();
             baseGoldWt = netWt;
         }
@@ -833,14 +1105,13 @@
         const metalRateInput = row.querySelector('[data-column="metal-rate"] input');
         const metalRate = parseFloat(metalRateInput?.value) || 0;
         const metalWeightForCalc = parseFloat(row.querySelector('[data-column="metal-weight"] input')?.value) || 0;
-        const isJewellery = (categoryId === 'Jewellery');
-        const isDiamondOrStone = (categoryId === 'Diamonds' || categoryId === 'GemStones');
+        const isJewellery = isJewelleryDiamondCategory(categoryId);
+        const isDiamondOrStone = isDiamondOrGemStoneLineCategory(categoryId);
         const rateForMetalValue = isDiamondOrStone ? goldRate : metalRate;
         let metalValue = 0;
-        const stoneWeightForCalc = parseFloat(stoneWeightInput?.value) || 0;
         const quantityForCalc = parseFloat(row.querySelector('[data-column="quantity"] input')?.value) || 1;
         if (calculationType === 'Fix') metalValue = rateForMetalValue;
-        else if (calculationType === 'Carat X Rate') metalValue = stoneWeightForCalc * goldRate * quantityForCalc;
+        else if (calculationType === 'Carat X Rate') metalValue = getCaratForCaratXRateCalc(row) * goldRate;
         else if (calculationType === 'Quantity X Rate') metalValue = quantityForCalc * rateForMetalValue;
         else if (calculationType === 'Stone Charge') {
             const stoneWeight = parseFloat(stoneWeightInput?.value) || 0;
@@ -890,7 +1161,7 @@
         }
         let stoneAmount = 0;
         const settingChargeInput = row.querySelector('[data-column="setting-charge"] input');
-        const isDiamondCatForSetting = (categoryId === 'Diamonds' || categoryId === 'GemStones' || isDiamondOrGemStone);
+        const isDiamondCatForSetting = isDiamondOrGemStoneLineCategory(categoryId);
         if (settingChargeInput && isDiamondCatForSetting) {
             const diamondQty = parseFloat(quantityInput?.value) || 1;
             const settingCharge = parseFloat(settingChargeInput.value) || 0;
@@ -1074,8 +1345,12 @@
 
         var rowTbody = row.closest('tbody');
         if (rowTbody && (rowTbody.id === 'productListBody' || rowTbody.id === 'productListBodyPage')) {
-            if (categoryId !== 'Jewellery' && typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-            if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+            if (categoryId !== 'Jewellery' && typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') {
+                updateJewelleryDiamondCaratFromDiamondAndGemstone();
+            } else if (isAnyDiamondTabCategory(categoryId)) {
+                if (typeof updateDiamondTabFcAmountAndLineMetalValue === 'function') updateDiamondTabFcAmountAndLineMetalValue();
+                if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+            }
         }
     }
     window.calculateModalRowNetWeight = calculateModalRowNetWeight;
@@ -1150,7 +1425,7 @@
         else if (metalCellEarly) mwEarly = parseFloat(String(metalCellEarly.textContent || '').replace(/,/g, '')) || 0;
         var lessEarly = lessInp ? (parseFloat(lessInp.value) || 0) : 0;
         if (grossInp && mwEarly > 0.00001) {
-            if (catTrimEarly !== 'Diamonds' && catTrimEarly !== 'GemStones' && catTrimEarly !== 'Jewellery') {
+            if (!isAnyDiamondTabCategory(catTrimEarly)) {
                 grossInp.value = (mwEarly + lessEarly).toFixed(3);
             }
         }
@@ -1180,7 +1455,7 @@
         if (!metalWt && metalWeightCell) {
             metalWt = parseFloat(metalWeightCell.textContent) || 0;
         }
-        const rateForMetalValue = (categoryId === 'Jewellery' || metalWt > 0) ? metalRate : rate;
+        const rateForMetalValue = (isJewelleryDiamondCategory(categoryId) || metalWt > 0) ? metalRate : rate;
         const calculationSelect = row.querySelector('[data-column="calculation"] select');
         const calculationType = calculationSelect ? (calculationSelect.value || 'Rate X Gross Wt') : (row.getAttribute('data-calculation-type') || 'Rate X Gross Wt');
         var purityDecimal = parseFloat(purityInput?.value);
@@ -1221,10 +1496,9 @@
         const effectiveFinalWt = calculatedFinalWt;
         if (metalWeightInputPl) metalWt = parseFloat(metalWeightInputPl.value) || metalWt;
         let metalValue = 0;
-        const stoneWeightForCalc = parseFloat(row.querySelector('[data-column="stone-weight"] input')?.value) || 0;
         const quantityForCalc = parseFloat(row.querySelector('[data-column="quantity"] input')?.value) || 1;
         if (calculationType === 'Fix') metalValue = rateForMetalValue;
-        else if (calculationType === 'Carat X Rate') metalValue = stoneWeightForCalc * rate * quantityForCalc;
+        else if (calculationType === 'Carat X Rate') metalValue = getCaratForCaratXRateCalc(row) * rate;
         else if (calculationType === 'Quantity X Rate') metalValue = quantityForCalc * rateForMetalValue;
         else if (calculationType === 'Stone Charge') metalValue = stoneCharges;
         else if (calculationType === 'Weight X Rate') metalValue = rateForMetalValue * effectiveFinalWt;
@@ -1256,7 +1530,7 @@
         const makingAmount = makingAmountCol ? readNumericCell('making-amount', making) : making;
         let stoneAmount = readNumericCell('stone-amount', stoneCharges);
         const settingChargeInpPl = row.querySelector('[data-column="setting-charge"] input');
-        if (settingChargeInpPl && (categoryId === 'Diamonds' || categoryId === 'GemStones')) {
+        if (settingChargeInpPl && isDiamondOrGemStoneLineCategory(categoryId)) {
             const diamondQtyPl = parseFloat(row.querySelector('[data-column="quantity"] input')?.value) || 1;
             stoneAmount = diamondQtyPl * (parseFloat(settingChargeInpPl.value) || 0);
         }
@@ -2527,6 +2801,9 @@
 
     if (typeof jQuery !== 'undefined') {
         jQuery(document).on('shown.bs.modal', '#productSelectionModal', function() {
+            if (typeof auragoldPopulateModalSpecSelectsAllRows === 'function') {
+                auragoldPopulateModalSpecSelectsAllRows();
+            }
             if (typeof applyMetalGroupHeaderLabelsToGrids === 'function') {
                 applyMetalGroupHeaderLabelsToGrids();
             }
@@ -2559,25 +2836,15 @@
         var hasDiamondOrGemStoneRows = false;
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Diamonds') {
+            var catVal = modalRowCategoryValue(r);
+            if (isDiamondOrGemStoneLineCategory(catVal)) {
                 hasDiamondOrGemStoneRows = true;
                 var swInp = r.querySelector('[data-column="stone-weight"] input');
                 if (swInp) sumCarat += parseFloat(swInp.value) || 0;
                 var lessInp = r.querySelector('[data-column="less-wt"] input');
                 if (lessInp) sumDWeight += parseFloat(lessInp.value) || 0;
-                var amtInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (amtInp) sumAmountFromDiamondAndStone += parseFloat(amtInp.value) || 0;
-            } else if (catVal === 'GemStones') {
-                hasDiamondOrGemStoneRows = true;
-                var swInp2 = r.querySelector('[data-column="stone-weight"] input');
-                if (swInp2) sumCarat += parseFloat(swInp2.value) || 0;
-                var lessInp2 = r.querySelector('[data-column="less-wt"] input');
-                if (lessInp2) sumDWeight += parseFloat(lessInp2.value) || 0;
-                var amtInp2 = r.querySelector('[data-column="diamond-amount"] input');
-                if (amtInp2) sumAmountFromDiamondAndStone += parseFloat(amtInp2.value) || 0;
-            } else if (catVal === 'Jewellery') {
+                sumAmountFromDiamondAndStone += modalRowDiamondComponentLineAmount(r);
+            } else if (isJewelleryDiamondCategory(catVal)) {
                 jewelleryRows.push(r);
             }
         }
@@ -2597,9 +2864,126 @@
             if (typeof calculateModalRowNetWeight === 'function') calculateModalRowNetWeight(jr);
         }
         });
+        updateDiamondTabFcAmountAndLineMetalValue();
         if (typeof window.updateJewelleryNetAmountAndFinal === 'function') window.updateJewelleryNetAmountAndFinal();
     }
     window.updateJewelleryDiamondCaratFromDiamondAndGemstone = updateJewelleryDiamondCaratFromDiamondAndGemstone;
+
+    /**
+     * JewelStep-style Diamond tab: FC Amount on Jewellery = sum of Diamonds + GemStones line totals;
+     * Metal Value (diamond-line-metal-value) per component row; Jewellery row shows the same sum.
+     */
+    function updateDiamondTabFcAmountAndLineMetalValue() {
+        ['productListBody', 'productListBodyPage'].forEach(function(tbodyId) {
+            var tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            var rows = tbody.querySelectorAll('.product-row');
+            var componentRows = [];
+            var jewelleryRows = [];
+            var sumComponentLine = 0;
+            var hasCompositeGrid = false;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var catVal = modalRowCategoryValue(r);
+                if (!isAnyDiamondTabCategory(catVal)) continue;
+                hasCompositeGrid = true;
+                if (isDiamondOrGemStoneLineCategory(catVal)) {
+                    componentRows.push(r);
+                    var lineAmt = modalRowDiamondComponentLineAmount(r);
+                    sumComponentLine += lineAmt;
+                    var lineMetalInp = r.querySelector('[data-column="diamond-line-metal-value"] input');
+                    if (lineMetalInp) lineMetalInp.value = lineAmt.toFixed(2);
+                    var fcComp = r.querySelector('[data-column="fc-amount"] input');
+                    if (fcComp) fcComp.value = '0.00';
+                } else if (isJewelleryDiamondCategory(catVal)) {
+                    jewelleryRows.push(r);
+                }
+            }
+            if (!hasCompositeGrid || !componentRows.length) return;
+            jewelleryRows.forEach(function(jr) {
+                var fcInp = jr.querySelector('[data-column="fc-amount"] input');
+                if (fcInp) fcInp.value = sumComponentLine.toFixed(2);
+                var lineMetalInp = jr.querySelector('[data-column="diamond-line-metal-value"] input');
+                if (lineMetalInp) lineMetalInp.value = sumComponentLine.toFixed(2);
+            });
+        });
+    }
+    window.updateDiamondTabFcAmountAndLineMetalValue = updateDiamondTabFcAmountAndLineMetalValue;
+
+    /**
+     * Diamond tab composite: Jewellery Net Amt = sum(Diamonds + GemStones line totals) + Jewellery row metal/making/stone/other;
+     * component rows keep their own net amounts.
+     */
+    function updateJewelleryNetAmountAndFinal() {
+        ['productListBody', 'productListBodyPage'].forEach(function(tbodyId) {
+            var tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            var rows = tbody.querySelectorAll('.product-row');
+            var jewelleryRows = [];
+            var componentRows = [];
+            var sumComponentNet = 0;
+            var hasCompositeGrid = false;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var catVal = modalRowCategoryValue(r);
+                if (!isAnyDiamondTabCategory(catVal)) continue;
+                hasCompositeGrid = true;
+                if (isDiamondOrGemStoneLineCategory(catVal)) {
+                    componentRows.push(r);
+                    sumComponentNet += modalRowDiamondComponentLineAmount(r);
+                } else if (isJewelleryDiamondCategory(catVal)) {
+                    jewelleryRows.push(r);
+                }
+            }
+            if (!hasCompositeGrid) return;
+
+            if (componentRows.length && jewelleryRows.length) {
+                jewelleryRows.forEach(function(jr) {
+                    var metalVal = modalRowCellNumber(jr, 'metal-value');
+                    var making = modalRowCellNumber(jr, 'making-amount');
+                    var stone = modalRowCellNumber(jr, 'stone-amount');
+                    var other = modalRowCellNumber(jr, 'other-amount');
+                    var discount = modalRowCellNumber(jr, 'discount');
+                    var jewelleryExtras = metalVal + making + stone + other - discount;
+                    if (jewelleryExtras < 0) jewelleryExtras = 0;
+                    var netAmt = sumComponentNet + jewelleryExtras;
+                    if (netAmt < 0) netAmt = 0;
+                    var tax = modalRowCellNumber(jr, 'tax');
+                    var finalAmount = netAmt + tax;
+                    var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
+                    var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
+                    if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
+                    if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
+                    var purchaseInp = jr.querySelector('[data-column="purchase-amount"] input');
+                    if (purchaseInp) purchaseInp.value = netAmt.toFixed(2);
+                });
+                updateDiamondTabFcAmountAndLineMetalValue();
+                return;
+            }
+
+            for (var j = 0; j < rows.length; j++) {
+                var row = rows[j];
+                var cat = modalRowCategoryValue(row);
+                if (!isAnyDiamondTabCategory(cat)) continue;
+                var metalVal = modalRowCellNumber(row, 'metal-value');
+                var making = modalRowCellNumber(row, 'making-amount');
+                var stone = modalRowCellNumber(row, 'stone-amount');
+                var diamond = modalRowCellNumber(row, 'diamond-amount');
+                var other = modalRowCellNumber(row, 'other-amount');
+                var discount = modalRowCellNumber(row, 'discount');
+                var tax = modalRowCellNumber(row, 'tax');
+                var netAmt = metalVal + making + stone + diamond + other - discount;
+                if (netAmt < 0) netAmt = 0;
+                var finalAmount = netAmt + tax;
+                var netAmtInp = row.querySelector('[data-column="net-amt"] input');
+                var netAmtTaxInp = row.querySelector('[data-column="net-amt-tax"] input');
+                if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
+                if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
+            }
+            updateDiamondTabFcAmountAndLineMetalValue();
+        });
+    }
+    window.updateJewelleryNetAmountAndFinal = updateJewelleryNetAmountAndFinal;
 
     /**
      * Diamond & Stones tab: one barcode for the whole composite (Jewellery + Diamonds + GemStones lines).
@@ -3002,6 +3386,32 @@
      * @param {HTMLElement} row
      * @param {function} done always called (after async or immediately)
      */
+    function auragoldSyncPurityFromCaratSelect(row) {
+        if (!row || !row.querySelector) {
+            return;
+        }
+        var sel = row.querySelector('[data-column="carat"] select') || row.querySelector('.carat-select');
+        if (!sel || !sel.value) {
+            return;
+        }
+        var opt = sel.options[sel.selectedIndex];
+        if (!opt) {
+            return;
+        }
+        var p = opt.getAttribute('data-purity');
+        if (p === null || String(p).trim() === '') {
+            return;
+        }
+        var n = parseFloat(p);
+        var display = !isNaN(n) ? (n > 1 ? n.toFixed(2) : String(n)) : String(p);
+        var purityInput = row.querySelector('[data-column="purity"] input') || row.querySelector('[data-field="purity"]');
+        if (purityInput) {
+            purityInput.value = display;
+        }
+        row.setAttribute('data-purity', !isNaN(n) ? n : p);
+    }
+    window.auragoldSyncPurityFromCaratSelect = auragoldSyncPurityFromCaratSelect;
+
     function applyDashboardMetalRateFromCaratSelect(row, done) {
         var finish = typeof done === 'function' ? done : function() {};
         try {
@@ -3328,4 +3738,232 @@
         }
         return null;
     };
+
+    function auragoldFillSpecSelectElement(sel, list, placeholder) {
+        if (!sel || !list || !list.length) return;
+        var prev = sel.value;
+        sel.innerHTML = '';
+        var opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = placeholder || 'Select';
+        sel.appendChild(opt0);
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i];
+            if (!item) continue;
+            var opt = document.createElement('option');
+            var idVal = item.id != null && item.id !== '' ? String(item.id) : '';
+            var nameVal = item.name != null && String(item.name).trim() !== '' ? String(item.name).trim() : idVal;
+            opt.value = idVal !== '' ? idVal : nameVal;
+            opt.textContent = nameVal || opt.value;
+            sel.appendChild(opt);
+        }
+        if (prev) {
+            sel.value = prev;
+            if (sel.value !== prev) {
+                for (var j = 0; j < sel.options.length; j++) {
+                    if (sel.options[j].textContent === prev || sel.options[j].value === prev) {
+                        sel.value = sel.options[j].value;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /** Populate Cut / Color / Shape / Clarity / Seive / Size from window.AURAGOLD_MASTERS_* (common-modal-product-selection.php). */
+    function auragoldPopulateModalSpecSelectsForRow(row) {
+        if (!row || !row.querySelector) return;
+        var map = [
+            { attr: 'cut', list: window.AURAGOLD_MASTERS_CUTS || [], ph: 'Select Cut' },
+            { attr: 'color', list: window.AURAGOLD_MASTERS_COLORS || [], ph: 'Select Color' },
+            { attr: 'shape', list: window.AURAGOLD_MASTERS_SHAPES || [], ph: 'Select Shape' },
+            { attr: 'clarity', list: window.AURAGOLD_MASTERS_CLARITIES || [], ph: 'Select Clarity' },
+            { attr: 'seive', list: window.AURAGOLD_MASTERS_SIEVE_SIZES || [], ph: 'Select Seive' },
+            { attr: 'size', list: window.AURAGOLD_MASTERS_SIZES || [], ph: 'Select Size' }
+        ];
+        for (var i = 0; i < map.length; i++) {
+            var m = map[i];
+            var sel = row.querySelector('select.auragold-spec-select[data-auragold-spec="' + m.attr + '"]');
+            if (!sel || !m.list || !m.list.length) continue;
+            if (sel.options.length > 1 && sel.getAttribute('data-auragold-spec-filled') === '1') continue;
+            if (typeof window.populateSelect === 'function') {
+                window.populateSelect(sel, m.list, 'id', 'name', m.ph);
+            } else {
+                auragoldFillSpecSelectElement(sel, m.list, m.ph);
+            }
+            sel.setAttribute('data-auragold-spec-filled', '1');
+        }
+    }
+    window.auragoldPopulateModalSpecSelectsForRow = auragoldPopulateModalSpecSelectsForRow;
+
+    function auragoldPopulateModalSpecSelectsAllRows() {
+        ['productListBody', 'productListBodyPage'].forEach(function(tbodyId) {
+            var tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.querySelectorAll('.product-row').forEach(function(r) {
+                auragoldPopulateModalSpecSelectsForRow(r);
+            });
+        });
+    }
+    window.auragoldPopulateModalSpecSelectsAllRows = auragoldPopulateModalSpecSelectsAllRows;
+
+    if (typeof document !== 'undefined') {
+        document.addEventListener('DOMContentLoaded', function() {
+            var modal = document.getElementById('productSelectionModal');
+            if (!modal) return;
+            modal.addEventListener('click', function(e) {
+                var btn = e.target.closest('.category-tab-btn');
+                if (!btn || !modal.contains(btn)) return;
+                setTimeout(function() {
+                    syncModalDiamondCategoryFilterForActiveTab();
+                    var tbody = document.getElementById('productListBody');
+                    if (!tbody || typeof populateCategorySelectForModal !== 'function') return;
+                    var diamondTab = typeof isDiamondTabActive === 'function' && isDiamondTabActive();
+                    tbody.querySelectorAll('[data-column="category"] select').forEach(function(sel) {
+                        var v = (sel.value || '').trim();
+                        var tr = sel.closest('tr.product-row');
+                        var dataDc = tr && tr.getAttribute('data-diamond-category') ? tr.getAttribute('data-diamond-category').trim() : '';
+                        var force = sel.classList.contains('diamond-category-select')
+                            || isKnownDiamondCategoryValue(v)
+                            || isKnownDiamondCategoryValue(dataDc);
+                        if (diamondTab || force) {
+                            populateCategorySelectForModal(sel, true);
+                        }
+                    });
+                }, 0);
+            });
+            syncModalDiamondCategoryFilterForActiveTab();
+        });
+    }
+
+    /** Write a value into a product-selection modal row cell (input/select/text). */
+    function setModalCellValue(row, column, value, isNumber) {
+        if (!row || !column) return;
+        var cell = row.querySelector('td[data-column="' + column + '"]') || row.querySelector('[data-column="' + column + '"]');
+        if (!cell) return;
+        var str = (value == null || value === '') ? '' : String(value);
+        if (isNumber && str !== '' && !isNaN(parseFloat(str))) {
+            str = String(parseFloat(str));
+        }
+        var input = cell.querySelector('input');
+        var select = cell.querySelector('select');
+        if (input) {
+            input.value = str;
+            return;
+        }
+        if (select) {
+            if (typeof window.setModalSelectIfOptionExists === 'function') {
+                window.setModalSelectIfOptionExists(row, column, str);
+            } else {
+                select.value = str;
+            }
+            return;
+        }
+        cell.textContent = str;
+    }
+
+    /**
+     * Populate a product-selection modal row from saved modal row data (e.g. jewellery catalogue BOM).
+     */
+    function applyModalRowDataToSelectionRow(row, md) {
+        if (!row || !md || typeof md !== 'object') return;
+
+        var productId = md.product_id != null ? String(md.product_id) : '';
+        var charId = md.characteristic_id != null ? String(md.characteristic_id) : '';
+        var metalId = md.metal_id != null ? String(md.metal_id) : '';
+        row.setAttribute('data-product-id', productId);
+        row.setAttribute('data-characteristic-id', charId);
+        if (metalId) row.setAttribute('data-metal-id', metalId);
+        if (md.barcode) row.setAttribute('data-barcode', String(md.barcode));
+        if (md.stock_journal_id) row.setAttribute('data-stock-journal-id', String(md.stock_journal_id));
+        if (md.gst_local_percent != null && md.gst_local_percent !== '') {
+            row.setAttribute('data-gst-local-pct', String(md.gst_local_percent));
+        }
+        if (md.gst_interstate_percent != null && md.gst_interstate_percent !== '') {
+            row.setAttribute('data-gst-interstate-pct', String(md.gst_interstate_percent));
+        }
+        if (md.gst_invoice_slab_percent != null && md.gst_invoice_slab_percent !== '') {
+            row.setAttribute('data-gst-invoice-slab-pct', String(md.gst_invoice_slab_percent));
+        }
+        if (md.gst_line_taxes != null && md.gst_line_taxes !== '') {
+            row.setAttribute('data-gst-line-taxes', String(md.gst_line_taxes));
+        }
+        if (md.product_taxes != null && md.product_taxes !== '') {
+            row.setAttribute('data-product-taxes', String(md.product_taxes));
+        }
+
+        var cb = row.querySelector('.product-checkbox');
+        if (cb) {
+            cb.setAttribute('data-product-id', productId);
+            cb.setAttribute('data-characteristic-id', charId);
+        }
+        var idCell = row.querySelector('[data-column="id"]');
+        if (idCell && productId) idCell.textContent = productId;
+
+        setModalCellValue(row, 'product', md.product_name || '', false);
+        setModalCellValue(row, 'barcode', md.barcode || '', false);
+        setModalCellValue(row, 'design-no', md.design_no || '', false);
+        setModalCellValue(row, 'item-code', md.item_code || md.short_code || '', false);
+        setModalCellValue(row, 'rfid', md.rfid || '', false);
+        setModalCellValue(row, 'huid', md.huid || '', false);
+        setModalCellValue(row, 'quantity', md.quantity != null ? md.quantity : 1, true);
+        setModalCellValue(row, 'gross-wt', md.gross_wt, true);
+        setModalCellValue(row, 'less-wt', md.less_wt, true);
+        setModalCellValue(row, 'purity', md.purity, true);
+        setModalCellValue(row, 'final-wt', md.final_wt, true);
+        setModalCellValue(row, 'net-wt', md.net_wt, true);
+        setModalCellValue(row, 'purity-wt', md.pure_wt, true);
+        setModalCellValue(row, 'pkt-wt', md.pkt_wt, true);
+        setModalCellValue(row, 'pkt-less-wt', md.pkt_less_wt, true);
+        setModalCellValue(row, 'stone-weight', md.stone_weight, true);
+        setModalCellValue(row, 'rate', md.rate, true);
+        setModalCellValue(row, 'metal-rate', md.metal_rate != null ? md.metal_rate : md.rate, true);
+        setModalCellValue(row, 'metal-value', md.metal_value, true);
+        setModalCellValue(row, 'metal-qty', md.metal_qty != null ? md.metal_qty : 1, true);
+        setModalCellValue(row, 'metal-weight', md.metal_weight, true);
+        setModalCellValue(row, 'amount', md.amount, true);
+        setModalCellValue(row, 'making-amount', md.making_amount, true);
+        setModalCellValue(row, 'stone-amount', md.stone_amount, true);
+        setModalCellValue(row, 'other-amount', md.other_amount, true);
+        setModalCellValue(row, 'diamond-amount', md.diamond_amount, true);
+        setModalCellValue(row, 'tax', md.tax, true);
+        setModalCellValue(row, 'net-amt', md.net_amt, true);
+        setModalCellValue(row, 'net-amt-tax', md.net_amt_tax, true);
+        setModalCellValue(row, 'purchase-amount', md.purchase_amount, true);
+        setModalCellValue(row, 'sale-amount', md.sale_amount, true);
+        setModalCellValue(row, 'sale-amount-with', md.sale_amount_with, true);
+        setModalCellValue(row, 'reverse', md.reverse, true);
+
+        if (md.category) {
+            var catSel = row.querySelector('[data-column="category"] select');
+            if (catSel && typeof window.populateCategorySelectForModal === 'function') {
+                window.populateCategorySelectForModal(catSel, true);
+            }
+            setModalCellValue(row, 'category', md.category, false);
+        }
+        if (md.location) setModalCellValue(row, 'location', md.location, false);
+        if (md.product_category_id) setModalCellValue(row, 'product-category', md.product_category_id, false);
+        if (md.calculation_type) setModalCellValue(row, 'calculation', md.calculation_type, false);
+
+        var caratSel = row.querySelector('.carat-select');
+        if (caratSel && typeof window.populateCaratSelectForModalRow === 'function') {
+            window.populateCaratSelectForModalRow(caratSel, row);
+        }
+        if (md.carat) setModalCellValue(row, 'carat', md.carat, false);
+
+        if (typeof window.auragoldPopulateModalSpecSelectsForRow === 'function') {
+            window.auragoldPopulateModalSpecSelectsForRow(row);
+        }
+        if (typeof window.addModalRowCalculationListeners === 'function') {
+            window.addModalRowCalculationListeners(row);
+        }
+        if (typeof window.calculateModalRowNetWeight === 'function') {
+            window.calculateModalRowNetWeight(row);
+        }
+        if (typeof window.reorderModalRowCellsToMatchHeader === 'function') {
+            window.reorderModalRowCellsToMatchHeader(row);
+        }
+    }
+    window.applyModalRowDataToSelectionRow = applyModalRowDataToSelectionRow;
+    window.setModalCellValue = setModalCellValue;
 })(typeof window !== 'undefined' ? window : this);

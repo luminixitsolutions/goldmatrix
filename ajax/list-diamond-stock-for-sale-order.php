@@ -16,6 +16,8 @@ if (is_file(__DIR__ . '/../includes/auragold_branch_data_scope.php')) {
     require_once __DIR__ . '/../includes/auragold_branch_data_scope.php';
 }
 
+// Add Diamond modal: loose Diamonds + GemStones only (not Jewellery-category stock).
+$gas_diamond_stock_pc_scope = 'diamond_stone_only';
 require_once __DIR__ . '/../includes/diamond_stock_list_sql_include.php';
 require_once __DIR__ . '/../includes/auragold_sale_order_diamond_list_journal.php';
 

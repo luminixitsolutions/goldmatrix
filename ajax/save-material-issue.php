@@ -43,6 +43,14 @@ if (is_string($payments_json_mi) && $payments_json_mi !== '') {
 if (!is_array($me_mi_payments)) {
     $me_mi_payments = [];
 }
+if ($sale_order_id > 0) {
+    require_once __DIR__ . '/../includes/auragold_material_issue_rows_for_sale_order.php';
+    if (function_exists('auragold_material_issue_should_hide_payment_row')) {
+        $me_mi_payments = array_values(array_filter($me_mi_payments, static function ($pay) use ($conn) {
+            return is_array($pay) && !auragold_material_issue_should_hide_payment_row($conn, $pay);
+        }));
+    }
+}
 $metal_exchange_barcodes_out = [];
 
 $standalone_mi = ($sale_order_id < 1);
@@ -99,10 +107,6 @@ if ($map_chk_req) {
 if ($has_department_user_map) {
     if (!$department_user_id_provided || $department_user_id === null || (int)$department_user_id < 1) {
         echo json_encode(['status' => 'error', 'message' => 'Name is required']);
-        exit;
-    }
-    if ($department_id === null || (int)$department_id < 1) {
-        echo json_encode(['status' => 'error', 'message' => 'Department is required']);
         exit;
     }
 }
@@ -758,47 +762,79 @@ if ($jwo_id > 0) {
         auragold_sync_sale_order_department($conn, $sale_order_id, $department_id);
         auragold_sync_sale_order_sales_person($conn, $sale_order_id, $sales_person_post);
     }
-    if (!empty($me_mi_payments)) {
-        foreach ($me_mi_payments as $__pmi) {
-            if (!is_array($__pmi)) {
-                continue;
+    require_once __DIR__ . '/../includes/auragold_material_issue_rows_for_sale_order.php';
+    $me_mi_stock_payments = function_exists('auragold_material_issue_payments_for_mi_stock_save')
+        ? auragold_material_issue_payments_for_mi_stock_save($conn, $me_mi_payments)
+        : $me_mi_payments;
+    if ((int) $jwo_id > 0 && function_exists('auragold_material_issue_delete_client_added_me_stock')) {
+        auragold_material_issue_delete_client_added_me_stock($conn, (int) $jwo_id);
+    }
+    if (!empty($me_mi_stock_payments)) {
+        try {
+            foreach ($me_mi_stock_payments as $__pmi) {
+                if (!is_array($__pmi)) {
+                    continue;
+                }
+                $__mmi = auragold_payment_merge_stored_details($__pmi);
+                if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi)) {
+                    continue;
+                }
+                auragold_validate_metal_exchange_for_stock($conn, $__mmi);
             }
-            $__mmi = auragold_payment_merge_stored_details($__pmi);
-            if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi)) {
-                continue;
-            }
-            auragold_validate_metal_exchange_for_stock($conn, $__mmi);
-        }
-        $rmi_h_me = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
-        $__mi_no_me = trim((string) ($rmi_h_me['material_issue_no'] ?? ''));
-        $__mi_dt_me = substr(trim((string) ($rmi_h_me['order_date'] ?? '')), 0, 10);
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_me)) {
-            $__mi_dt_me = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+            $rmi_h_me = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $jwo_id . ' LIMIT 1');
+            $__mi_no_me = trim((string) ($rmi_h_me['material_issue_no'] ?? ''));
+            $__mi_dt_me = substr(trim((string) ($rmi_h_me['order_date'] ?? '')), 0, 10);
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_me)) {
-                $__mi_dt_me = date('Y-m-d');
+                $__mi_dt_me = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_me)) {
+                    $__mi_dt_me = date('Y-m-d');
+                }
             }
-        }
-        $___mi_doc_me_ref = auragold_metal_exchange_document_init($conn, true, (int) $jwo_id, 'material_issue_metal_exchange');
-        foreach ($me_mi_payments as $pay_seq => $payment) {
-            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
-                continue;
-            }
-            $___pm_mi = auragold_payment_merge_stored_details($payment);
-            auragold_post_metal_exchange_payment_to_stock(
-                $conn,
-                'material_issue_metal_exchange',
-                (int) $jwo_id,
-                $__mi_no_me,
-                $__mi_dt_me,
-                $___pm_mi,
-                auragold_metal_exchange_default_branch_id(),
-                is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
-                $___mi_doc_me_ref,
-                'Material Issue — Metal Exchange',
-                'mi_me',
-                'MI-ME-',
-                $metal_exchange_barcodes_out
+            $___mi_doc_me_ref = auragold_metal_exchange_document_init($conn, false, (int) $jwo_id, 'material_issue_metal_exchange');
+            $seq_row = getRecord(
+                "SELECT COUNT(*) AS c FROM tbl_stock WHERE status = 1"
+                . " AND reference_type = 'material_issue_metal_exchange' AND reference_id = " . (int) $jwo_id
             );
+            $pay_seq = (int) ($seq_row['c'] ?? 0);
+            $me_reserved_bc = [];
+            $me_reserved_stock_ids = [];
+            foreach ($me_mi_stock_payments as $payment) {
+                if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                    continue;
+                }
+                $___pm_mi = auragold_payment_merge_stored_details($payment);
+                auragold_post_metal_exchange_payment_to_stock(
+                    $conn,
+                    'material_issue_metal_exchange',
+                    (int) $jwo_id,
+                    $__mi_no_me,
+                    $__mi_dt_me,
+                    $___pm_mi,
+                    auragold_metal_exchange_default_branch_id(),
+                    $pay_seq,
+                    $___mi_doc_me_ref,
+                    'Material Issue — Metal Exchange',
+                    'mi_me',
+                    'MI-ME-',
+                    $metal_exchange_barcodes_out,
+                    $me_reserved_bc,
+                    $me_reserved_stock_ids
+                );
+                foreach ($metal_exchange_barcodes_out as $__me_bc_row) {
+                    $__me_bc = trim((string) ($__me_bc_row['barcode'] ?? ''));
+                    if ($__me_bc !== '' && !in_array($__me_bc, $me_reserved_bc, true)) {
+                        $me_reserved_bc[] = $__me_bc;
+                    }
+                    $__me_sid = (int) ($__me_bc_row['stock_id'] ?? 0);
+                    if ($__me_sid > 0 && !in_array($__me_sid, $me_reserved_stock_ids, true)) {
+                        $me_reserved_stock_ids[] = $__me_sid;
+                    }
+                }
+                $pay_seq++;
+            }
+        } catch (Throwable $e) {
+            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+            exit;
         }
     }
     require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
@@ -967,47 +1003,72 @@ if (!$standalone_mi && $sale_order_id > 0) {
     mysqli_query($conn, "UPDATE tbl_sale_orders SET status = 'processing' WHERE id = $sale_order_id");
 }
 
-if (!empty($me_mi_payments)) {
-    foreach ($me_mi_payments as $__pmi_ins) {
-        if (!is_array($__pmi_ins)) {
-            continue;
+require_once __DIR__ . '/../includes/auragold_material_issue_rows_for_sale_order.php';
+$me_mi_stock_payments_ins = function_exists('auragold_material_issue_payments_for_mi_stock_save')
+    ? auragold_material_issue_payments_for_mi_stock_save($conn, $me_mi_payments)
+    : $me_mi_payments;
+if (!empty($me_mi_stock_payments_ins)) {
+    try {
+        foreach ($me_mi_stock_payments_ins as $__pmi_ins) {
+            if (!is_array($__pmi_ins)) {
+                continue;
+            }
+            $__mmi_ins = auragold_payment_merge_stored_details($__pmi_ins);
+            if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi_ins)) {
+                continue;
+            }
+            auragold_validate_metal_exchange_for_stock($conn, $__mmi_ins);
         }
-        $__mmi_ins = auragold_payment_merge_stored_details($__pmi_ins);
-        if (!auragold_payment_is_metal_exchange_inward($conn, $__mmi_ins)) {
-            continue;
-        }
-        auragold_validate_metal_exchange_for_stock($conn, $__mmi_ins);
-    }
-    $rmi_ins_hdr = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
-    $__mi_no_ins = trim((string) ($rmi_ins_hdr['material_issue_no'] ?? $material_issue_no));
-    $__mi_dt_ins = substr(trim((string) ($rmi_ins_hdr['order_date'] ?? '')), 0, 10);
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_ins)) {
-        $__mi_dt_ins = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+        $rmi_ins_hdr = @getRecord('SELECT material_issue_no, order_date FROM tbl_material_issues WHERE id = ' . (int) $new_jwo_id . ' LIMIT 1');
+        $__mi_no_ins = trim((string) ($rmi_ins_hdr['material_issue_no'] ?? $material_issue_no));
+        $__mi_dt_ins = substr(trim((string) ($rmi_ins_hdr['order_date'] ?? '')), 0, 10);
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_ins)) {
-            $__mi_dt_ins = date('Y-m-d');
+            $__mi_dt_ins = $standalone_mi ? ($header_order_date !== '' ? substr($header_order_date, 0, 10) : date('Y-m-d')) : (!empty($sale_order['order_date']) ? substr(trim((string) $sale_order['order_date']), 0, 10) : date('Y-m-d'));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mi_dt_ins)) {
+                $__mi_dt_ins = date('Y-m-d');
+            }
         }
-    }
-    $___mi_ins_me_ref = auragold_metal_exchange_document_init($conn, false, (int) $new_jwo_id, 'material_issue_metal_exchange');
-    foreach ($me_mi_payments as $pay_seq => $payment) {
-        if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
-            continue;
+        $___mi_ins_me_ref = auragold_metal_exchange_document_init($conn, false, (int) $new_jwo_id, 'material_issue_metal_exchange');
+        $pay_seq_ins = 0;
+        $me_reserved_bc_ins = [];
+        $me_reserved_stock_ids_ins = [];
+        foreach ($me_mi_stock_payments_ins as $payment) {
+            if (!auragold_should_persist_payment_row_with_metal_exchange($conn, $payment)) {
+                continue;
+            }
+            $___pm_mi_ins = auragold_payment_merge_stored_details($payment);
+            auragold_post_metal_exchange_payment_to_stock(
+                $conn,
+                'material_issue_metal_exchange',
+                (int) $new_jwo_id,
+                $__mi_no_ins,
+                $__mi_dt_ins,
+                $___pm_mi_ins,
+                auragold_metal_exchange_default_branch_id(),
+                $pay_seq_ins,
+                $___mi_ins_me_ref,
+                'Material Issue — Metal Exchange',
+                'mi_me',
+                'MI-ME-',
+                $metal_exchange_barcodes_out,
+                $me_reserved_bc_ins,
+                $me_reserved_stock_ids_ins
+            );
+            foreach ($metal_exchange_barcodes_out as $__me_bc_row_ins) {
+                $__me_bc_ins = trim((string) ($__me_bc_row_ins['barcode'] ?? ''));
+                if ($__me_bc_ins !== '' && !in_array($__me_bc_ins, $me_reserved_bc_ins, true)) {
+                    $me_reserved_bc_ins[] = $__me_bc_ins;
+                }
+                $__me_sid_ins = (int) ($__me_bc_row_ins['stock_id'] ?? 0);
+                if ($__me_sid_ins > 0 && !in_array($__me_sid_ins, $me_reserved_stock_ids_ins, true)) {
+                    $me_reserved_stock_ids_ins[] = $__me_sid_ins;
+                }
+            }
+            $pay_seq_ins++;
         }
-        $___pm_mi_ins = auragold_payment_merge_stored_details($payment);
-        auragold_post_metal_exchange_payment_to_stock(
-            $conn,
-            'material_issue_metal_exchange',
-            (int) $new_jwo_id,
-            $__mi_no_ins,
-            $__mi_dt_ins,
-            $___pm_mi_ins,
-            auragold_metal_exchange_default_branch_id(),
-            is_int($pay_seq) ? $pay_seq : (int) $pay_seq,
-            $___mi_ins_me_ref,
-            'Material Issue — Metal Exchange',
-            'mi_me',
-            'MI-ME-',
-            $metal_exchange_barcodes_out
-        );
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        exit;
     }
 }
 

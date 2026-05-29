@@ -65,9 +65,11 @@ if (!function_exists('auragold_resolve_product_barcode_prefix_digits')) {
 
 if (!function_exists('auragold_next_barcode_for_prefix')) {
     /**
-     * Max numeric suffix among barcodes matching /^PREFIX\d+$/ in tbl_stock and tbl_old_jewelry_stock, then +1.
+     * Next unique barcode for prefix+digits (sale order items, stock, invoices, in-request reserved list).
+     *
+     * @param array<int, string> $used_barcodes
      */
-    function auragold_next_barcode_for_prefix($conn, $prefix, $digits)
+    function auragold_next_barcode_for_prefix($conn, $prefix, $digits, array $used_barcodes = [])
     {
         $prefix = trim((string) $prefix);
         $digits = (int) $digits;
@@ -76,6 +78,10 @@ if (!function_exists('auragold_next_barcode_for_prefix')) {
         }
         if ($digits < 1 || $digits > 12) {
             $digits = 5;
+        }
+
+        if (function_exists('generateBarcode')) {
+            return generateBarcode($conn, $prefix, $digits, $used_barcodes);
         }
 
         $pat = '/^' . preg_quote($prefix, '/') . '([0-9]+)$/';
@@ -110,6 +116,15 @@ if (!function_exists('auragold_next_barcode_for_prefix')) {
             }
         }
 
+        if (!empty($used_barcodes)) {
+            foreach ($used_barcodes as $ub) {
+                $ub = trim((string) $ub);
+                if ($ub !== '' && preg_match($pat, $ub, $m)) {
+                    $max = max($max, (int) $m[1]);
+                }
+            }
+        }
+
         $next = $max + 1;
         $numStr = (string) $next;
 
@@ -118,10 +133,13 @@ if (!function_exists('auragold_next_barcode_for_prefix')) {
 }
 
 if (!function_exists('auragold_next_product_stock_barcode')) {
-    function auragold_next_product_stock_barcode($conn, $product_id, $characteristic_id, $metal_id, $branch_id)
+    /**
+     * @param array<int, string> $used_barcodes Barcodes already assigned in this request (product lines, prior ME rows, etc.)
+     */
+    function auragold_next_product_stock_barcode($conn, $product_id, $characteristic_id, $metal_id, $branch_id, array $used_barcodes = [])
     {
         list($prefix, $digits) = auragold_resolve_product_barcode_prefix_digits($conn, $product_id, $characteristic_id, $metal_id, $branch_id);
-        $barcode = auragold_next_barcode_for_prefix($conn, $prefix, $digits);
+        $barcode = auragold_next_barcode_for_prefix($conn, $prefix, $digits, $used_barcodes);
 
         return [
             'barcode' => $barcode,

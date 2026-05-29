@@ -38,7 +38,9 @@ if (!function_exists('auragold_metal_exchange_resolve')) {
         $payment = auragold_payment_merge_stored_details($payment);
         $dep = strtolower(trim((string) ($payment['deposit_into'] ?? '')));
         $pt = strtolower(trim((string) ($payment['payment_type'] ?? '')));
+        $ui_type = strtolower(trim((string) ($payment['type'] ?? '')));
         $is_me = ($dep === 'metal exchange')
+            || ($ui_type === 'metal-exchange' || $ui_type === 'metal_exchange')
             || (strpos($pt, 'm. exch') !== false)
             || (strpos($pt, 'metal') !== false && strpos($pt, 'exch') !== false)
             || ($pt === 'metal_exchange')
@@ -166,6 +168,71 @@ if (!function_exists('auragold_metal_exchange_reference_types_sql_list_safe')) {
     }
 }
 
+if (!function_exists('auragold_metal_exchange_resolve_characteristic_id')) {
+    /**
+     * Resolve tbl_product_characteristics.id for a metal-exchange payment line.
+     * Accepts characteristic id in metal_exchange_product_id / metal_exchange_characteristic_id,
+     * or product_id + metal_id when only catalog product id was stored.
+     */
+    function auragold_metal_exchange_resolve_characteristic_id(mysqli $conn, array $payment): int
+    {
+        $p = auragold_payment_merge_stored_details($payment);
+        $mid = (int) ($p['metal_exchange_metal_id'] ?? $p['metal_id'] ?? 0);
+        $candidates = [];
+        foreach (
+            [
+                'metal_exchange_characteristic_id',
+                'metal_exchange_product_id',
+                'product_characteristic_id',
+                'characteristic_id',
+                'product_id',
+            ] as $key
+        ) {
+            $v = (int) ($p[$key] ?? 0);
+            if ($v > 0) {
+                $candidates[] = $v;
+            }
+        }
+        $candidates = array_values(array_unique($candidates));
+        if ($candidates === []) {
+            return 0;
+        }
+        foreach ($candidates as $cid) {
+            $row = getRecord(
+                'SELECT id, metal_id FROM tbl_product_characteristics WHERE id = ' . (int) $cid
+                . ' AND status = 1 LIMIT 1'
+            );
+            if ($row && !empty($row['id'])) {
+                if ($mid > 0 && (int) ($row['metal_id'] ?? 0) !== $mid) {
+                    continue;
+                }
+
+                return (int) $row['id'];
+            }
+        }
+        foreach ($candidates as $pidGuess) {
+            if ($mid > 0) {
+                $row = getRecord(
+                    'SELECT id FROM tbl_product_characteristics WHERE product_id = ' . (int) $pidGuess
+                    . ' AND metal_id = ' . $mid . ' AND status = 1 ORDER BY id DESC LIMIT 1'
+                );
+                if ($row && !empty($row['id'])) {
+                    return (int) $row['id'];
+                }
+            }
+            $row = getRecord(
+                'SELECT id FROM tbl_product_characteristics WHERE product_id = ' . (int) $pidGuess
+                . ' AND status = 1 ORDER BY id DESC LIMIT 1'
+            );
+            if ($row && !empty($row['id'])) {
+                return (int) $row['id'];
+            }
+        }
+
+        return 0;
+    }
+}
+
 if (!function_exists('auragold_payment_is_metal_exchange_inward')) {
     function auragold_payment_is_metal_exchange_inward($conn, array $payment): bool
     {
@@ -174,7 +241,7 @@ if (!function_exists('auragold_payment_is_metal_exchange_inward')) {
         if (!$r['is_me'] || $r['gross'] <= 1e-8) {
             return false;
         }
-        $pcid = (int) ($p['metal_exchange_product_id'] ?? $p['product_id'] ?? 0);
+        $pcid = auragold_metal_exchange_resolve_characteristic_id($conn, $p);
         $mid = (int) ($p['metal_exchange_metal_id'] ?? $p['metal_id'] ?? 0);
 
         return $pcid > 0 && $mid > 0;
@@ -205,15 +272,132 @@ if (!function_exists('auragold_should_persist_payment_row_with_metal_exchange'))
     }
 }
 
+if (!function_exists('auragold_metal_exchange_so_source_stock_available')) {
+    /** Remaining issue weight on sale_order_metal_exchange stock (min of current vs opening minus prior MI issues). */
+    function auragold_metal_exchange_so_source_stock_available(mysqli $conn, int $source_stock_id): float
+    {
+        if ($source_stock_id < 1 || !function_exists('getRecord')) {
+            return 0.0;
+        }
+        $issued = getRecord(
+            "SELECT id, opening_weight, current_weight, reference_type FROM tbl_stock WHERE id = "
+            . (int) $source_stock_id
+            . " AND reference_type = 'sale_order_metal_exchange' AND status = 1 LIMIT 1"
+        );
+        if (!$issued || !is_array($issued)) {
+            return 0.0;
+        }
+        $cur = (float) ($issued['current_weight'] ?? 0);
+        $open = (float) ($issued['opening_weight'] ?? 0);
+        $issued_out = 0.0;
+        if (is_file(__DIR__ . '/auragold_material_issue_rows_for_sale_order.php')) {
+            require_once __DIR__ . '/auragold_material_issue_rows_for_sale_order.php';
+            if (function_exists('auragold_metal_exchange_issued_sum_for_source_stock')) {
+                $issued_out = auragold_metal_exchange_issued_sum_for_source_stock($conn, $source_stock_id);
+            }
+        }
+        if ($cur > 1e-8) {
+            $from_open = $open > 1e-8 ? max(0.0, $open - $issued_out) : $cur;
+
+            return max(0.0, min($cur, $from_open));
+        }
+
+        return max(0.0, $open - $issued_out);
+    }
+}
+
+if (!function_exists('auragold_metal_exchange_payment_strip_stored_weight_overrides')) {
+    /** Prevent payment_details JSON from overriding explicit issue weights on merge. */
+    function auragold_metal_exchange_payment_strip_stored_weight_overrides(array $payment): array
+    {
+        unset($payment['payment_details']);
+        foreach (
+            [
+                'gross_weight',
+                'gross_wt',
+                'net_weight',
+                'weight',
+                'pure_wt',
+                'purity_weight',
+            ] as $key
+        ) {
+            unset($payment[$key]);
+        }
+
+        return $payment;
+    }
+}
+
+if (!function_exists('auragold_jwo_metal_exchange_strip_receive_source_ids')) {
+    /**
+     * Job work order metal exchange = new inward stock (product + weight), not receive-from-issued-line.
+     *
+     * @param array<string, mixed> $payment
+     * @return array<string, mixed>
+     */
+    function auragold_jwo_metal_exchange_strip_receive_source_ids(array $payment): array
+    {
+        $p = function_exists('auragold_payment_merge_stored_details')
+            ? auragold_payment_merge_stored_details($payment)
+            : $payment;
+        unset(
+            $p['metal_exchange_source_stock_id'],
+            $p['source_issue_stock_id'],
+            $p['source_stock_id']
+        );
+        unset($p['payment_details']);
+
+        return $p;
+    }
+}
+
+if (!function_exists('auragold_metal_exchange_enrich_payment_from_issue_stock')) {
+    /**
+     * Fill metal / product ids from issued stock when Material Receive queues ME by barcode only.
+     */
+    function auragold_metal_exchange_enrich_payment_from_issue_stock(mysqli $conn, array $payment): array
+    {
+        $p = auragold_payment_merge_stored_details($payment);
+        $mid = (int) ($p['metal_exchange_metal_id'] ?? $p['metal_id'] ?? 0);
+        $pcid = (int) ($p['metal_exchange_product_id'] ?? $p['product_characteristic_id'] ?? 0);
+        $src_stock_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+        if ($src_stock_id < 1) {
+            return $p;
+        }
+        if ($mid >= 1 && $pcid >= 1) {
+            return $p;
+        }
+        $st = getRecord(
+            'SELECT metal_id, product_characteristic_id, product_id FROM tbl_stock WHERE id = '
+            . $src_stock_id
+            . ' AND status = 1 LIMIT 1'
+        );
+        if (!is_array($st)) {
+            return $p;
+        }
+        if ($mid < 1 && (int) ($st['metal_id'] ?? 0) > 0) {
+            $p['metal_exchange_metal_id'] = (int) $st['metal_id'];
+        }
+        if ($pcid < 1 && (int) ($st['product_characteristic_id'] ?? 0) > 0) {
+            $p['metal_exchange_product_id'] = (int) $st['product_characteristic_id'];
+        }
+
+        return $p;
+    }
+}
+
 if (!function_exists('auragold_validate_metal_exchange_for_stock')) {
     function auragold_validate_metal_exchange_for_stock($conn, array $payment): void
     {
         if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
             return;
         }
-        $p = auragold_payment_merge_stored_details($payment);
+        $p = auragold_metal_exchange_enrich_payment_from_issue_stock($conn, $payment);
         $mid = (int) ($p['metal_exchange_metal_id'] ?? $p['metal_id'] ?? 0);
-        $pcid = (int) ($p['metal_exchange_product_id'] ?? $p['product_id'] ?? 0);
+        $pcid = auragold_metal_exchange_resolve_characteristic_id($conn, $p);
+        if ($pcid < 1 || $mid < 1) {
+            throw new Exception('Metal exchange: select metal, product from the list, and enter gross weight.');
+        }
         $row = getRecord(
             'SELECT pc.id FROM tbl_product_characteristics pc '
             . 'INNER JOIN tbl_products p ON p.id = pc.product_id '
@@ -221,6 +405,55 @@ if (!function_exists('auragold_validate_metal_exchange_for_stock')) {
         );
         if (!$row) {
             throw new Exception('Metal exchange: choose a valid product for the selected metal (from the search list).');
+        }
+        $src_stock_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+        if ($src_stock_id > 0 && is_file(__DIR__ . '/auragold_material_issue_rows_for_sale_order.php')) {
+            require_once __DIR__ . '/auragold_material_issue_rows_for_sale_order.php';
+            $issued = getRecord(
+                "SELECT id, opening_weight, current_weight, reference_type FROM tbl_stock WHERE id = $src_stock_id"
+                . " AND reference_type IN ('material_issue_metal_exchange', 'sale_order_metal_exchange', 'jobwork_order_metal_exchange')"
+                . ' AND status = 1 LIMIT 1'
+            );
+            if (!$issued) {
+                throw new Exception('Metal exchange receive: issued metal line not found.');
+            }
+            $src_ref = trim((string) ($issued['reference_type'] ?? ''));
+            if ($src_ref === 'jobwork_order_metal_exchange') {
+                $wt_gross = (float) auragold_metal_exchange_resolve($conn, $p)['gross'];
+                $avail_jwo = (float) ($issued['current_weight'] ?? 0);
+                if ($avail_jwo <= 1e-8) {
+                    $avail_jwo = (float) ($issued['opening_weight'] ?? 0);
+                }
+                if ($wt_gross > $avail_jwo + 0.0001) {
+                    throw new Exception(
+                        'Metal exchange issue weight (' . round($wt_gross, 3) . ') exceeds job work metal stock ('
+                        . round(max(0, $avail_jwo), 3) . ').'
+                    );
+                }
+
+                return;
+            }
+            $wt_gross = (float) auragold_metal_exchange_resolve($conn, $p)['gross'];
+
+            if ($src_ref === 'sale_order_metal_exchange') {
+                $avail = auragold_metal_exchange_so_source_stock_available($conn, $src_stock_id);
+                if ($wt_gross > $avail + 0.0001) {
+                    throw new Exception(
+                        'Metal exchange issue weight (' . round($wt_gross, 3) . ') exceeds available stock ('
+                        . round(max(0, $avail), 3) . ').'
+                    );
+                }
+
+                return;
+            }
+
+            $already = auragold_material_issue_me_received_sum_for_source_stock($conn, $src_stock_id);
+            $balance = (float) ($issued['opening_weight'] ?? 0) - $already;
+            if ($wt_gross > $balance + 0.0001) {
+                throw new Exception(
+                    'Metal exchange receive weight (' . round($wt_gross, 3) . ') exceeds balance (' . round(max(0, $balance), 3) . ').'
+                );
+            }
         }
     }
 }
@@ -326,6 +559,182 @@ if (!function_exists('auragold_metal_exchange_default_branch_id')) {
     }
 }
 
+if (!function_exists('auragold_metal_exchange_stock_matches_payment_product')) {
+    function auragold_metal_exchange_stock_matches_payment_product(array $stock_row, int $pcid, int $mid): bool
+    {
+        $st_pcid = (int) ($stock_row['product_characteristic_id'] ?? 0);
+        $st_mid = (int) ($stock_row['metal_id'] ?? 0);
+
+        return $st_pcid === $pcid && ($st_mid < 1 || $mid < 1 || $st_mid === $mid);
+    }
+}
+
+if (!function_exists('auragold_metal_exchange_barcode_plan_from_payment')) {
+    /**
+     * @return array{barcode: string, reuse_stock_id: int}
+     */
+    function auragold_metal_exchange_barcode_plan_from_payment(
+        mysqli $conn,
+        array $p,
+        string $reference_type,
+        int $reference_id,
+        int $pid,
+        int $pcid,
+        int $mid,
+        int $branch_id,
+        array $reserved_barcodes = [],
+        array $reserved_stock_ids = []
+    ): array {
+        $empty = ['barcode' => '', 'reuse_stock_id' => 0];
+        $payment_stock_id = (int) ($p['mi_stock_id'] ?? $p['metal_exchange_stock_id'] ?? 0);
+        $reserved_stock_ids = is_array($reserved_stock_ids) ? $reserved_stock_ids : [];
+        $user_bc = trim((string) ($p['metal_exchange_item_code'] ?? $p['item_code'] ?? ''));
+        $src_stock_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+        $is_mr_receive = ($reference_type === 'material_receive_metal_exchange');
+        if ($user_bc !== '') {
+            $b_esc = mysqli_real_escape_string($conn, $user_bc);
+            $st = function_exists('getRecord')
+                ? getRecord(
+                    'SELECT id, reference_type, reference_id, status, metal_id, product_characteristic_id'
+                    . ' FROM tbl_stock'
+                    . " WHERE barcode = '$b_esc' ORDER BY id DESC LIMIT 1"
+                )
+                : null;
+            if (!$st || !is_array($st)) {
+                return ['barcode' => $user_bc, 'reuse_stock_id' => 0];
+            }
+            $st_id = (int) ($st['id'] ?? 0);
+            $st_ref = trim((string) ($st['reference_type'] ?? ''));
+            if (
+                $is_mr_receive
+                && $st_ref === 'material_issue_metal_exchange'
+                && ($src_stock_id < 1 || $src_stock_id === $st_id)
+            ) {
+                if (!auragold_metal_exchange_stock_matches_payment_product($st, $pcid, $mid)) {
+                    throw new Exception(
+                        'Metal exchange: barcode "' . $user_bc . '" is already used on another product or metal.'
+                    );
+                }
+
+                return ['barcode' => $user_bc, 'reuse_stock_id' => 0];
+            }
+            if ($payment_stock_id > 0 && $st_id > 0 && $payment_stock_id === $st_id) {
+                if ($is_mr_receive) {
+                    return ['barcode' => $user_bc, 'reuse_stock_id' => 0];
+                }
+
+                return ['barcode' => $user_bc, 'reuse_stock_id' => $st_id];
+            }
+            if ((int) ($st['status'] ?? 0) !== 1) {
+                return ['barcode' => $user_bc, 'reuse_stock_id' => $is_mr_receive ? 0 : $st_id];
+            }
+            $same_doc = $st_ref === $reference_type
+                && (int) ($st['reference_id'] ?? 0) === $reference_id;
+            if ($same_doc && $st_id > 0 && in_array($st_id, $reserved_stock_ids, true)) {
+                // Same item code reused on another line in this save — allocate a new barcode below.
+            } elseif ($same_doc) {
+                return ['barcode' => $user_bc, 'reuse_stock_id' => $st_id];
+            } elseif ($st_ref === 'jobwork_order_metal_exchange') {
+                throw new Exception(
+                    'Metal exchange: barcode "' . $user_bc . '" is already used on job work order metal exchange stock.'
+                );
+            } elseif ($st_ref === 'sale_order_metal_exchange') {
+                $src_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+                if (
+                    in_array($reference_type, ['material_issue_metal_exchange', 'material_receive_metal_exchange'], true)
+                    && $src_id > 0
+                    && $src_id === $st_id
+                ) {
+                    return ['barcode' => $user_bc, 'reuse_stock_id' => 0];
+                }
+                throw new Exception(
+                    'Metal exchange: barcode "' . $user_bc . '" is already used on sale order metal exchange stock.'
+                );
+            } elseif ($st_ref === 'material_issue_metal_exchange' && (int) ($st['reference_id'] ?? 0) !== $reference_id) {
+                if (
+                    $is_mr_receive
+                    && ($src_stock_id === $st_id || auragold_metal_exchange_stock_matches_payment_product($st, $pcid, $mid))
+                ) {
+                    return ['barcode' => $user_bc, 'reuse_stock_id' => 0];
+                }
+                throw new Exception(
+                    'Metal exchange: barcode "' . $user_bc . '" is already used on another material issue.'
+                );
+            } elseif (auragold_metal_exchange_stock_matches_payment_product($st, $pcid, $mid)) {
+                return ['barcode' => $user_bc, 'reuse_stock_id' => $is_mr_receive ? 0 : $st_id];
+            } else {
+                throw new Exception(
+                    'Metal exchange: barcode "' . $user_bc . '" is already used on another product or metal.'
+                );
+            }
+        }
+
+        if (!function_exists('auragold_next_product_stock_barcode')) {
+            $nb = __DIR__ . '/next_product_stock_barcode.php';
+            if (is_file($nb)) {
+                require_once $nb;
+            }
+        }
+        if (!function_exists('generateBarcode')) {
+            $cfg = dirname(__DIR__) . '/config.php';
+            if (is_file($cfg)) {
+                require_once $cfg;
+            }
+        }
+        list($prefix, $digits) = auragold_resolve_product_barcode_prefix_digits($conn, $pid, $pcid, $mid, $branch_id);
+        $reserve = is_array($reserved_barcodes) ? $reserved_barcodes : [];
+        if (function_exists('generateBarcode')) {
+            $gen = generateBarcode($conn, $prefix, $digits, $reserve);
+            if ($gen !== '') {
+                return ['barcode' => $gen, 'reuse_stock_id' => 0];
+            }
+        }
+        for ($bc_attempt = 0; $bc_attempt < 12; $bc_attempt++) {
+            $nb = auragold_next_product_stock_barcode($conn, $pid, $pcid, $mid, $branch_id, $reserve);
+            $try_bc = trim((string) ($nb['barcode'] ?? ''));
+            if ($try_bc === '') {
+                break;
+            }
+            if (!function_exists('auragold_barcode_exists_in_system') || !auragold_barcode_exists_in_system($conn, $try_bc)) {
+                return ['barcode' => $try_bc, 'reuse_stock_id' => 0];
+            }
+            $reserve[] = $try_bc;
+        }
+
+        return $empty;
+    }
+}
+
+if (!function_exists('auragold_metal_exchange_barcode_from_payment')) {
+    function auragold_metal_exchange_barcode_from_payment(
+        mysqli $conn,
+        array $p,
+        string $reference_type,
+        int $reference_id,
+        int $pid,
+        int $pcid,
+        int $mid,
+        int $branch_id,
+        array $reserved_barcodes = [],
+        array $reserved_stock_ids = []
+    ): string {
+        $plan = auragold_metal_exchange_barcode_plan_from_payment(
+            $conn,
+            $p,
+            $reference_type,
+            $reference_id,
+            $pid,
+            $pcid,
+            $mid,
+            $branch_id,
+            $reserved_barcodes,
+            $reserved_stock_ids
+        );
+
+        return (string) ($plan['barcode'] ?? '');
+    }
+}
+
 if (!function_exists('auragold_post_metal_exchange_payment_to_stock')) {
     /**
      * New inward tbl_stock row + stock history for one metal-exchange payment line.
@@ -346,41 +755,45 @@ if (!function_exists('auragold_post_metal_exchange_payment_to_stock')) {
         string $history_voucher_label,
         string $audit_src,
         string $sj_invoice_prefix,
-        array &$created_barcodes_out
+        array &$created_barcodes_out,
+        array $reserved_barcodes = [],
+        array $reserved_stock_ids = []
     ): void {
         if (!auragold_payment_is_metal_exchange_inward($conn, $payment)) {
             return;
         }
         $p = auragold_payment_merge_stored_details($payment);
+        if ($reference_type === 'jobwork_order_metal_exchange' && function_exists('auragold_jwo_metal_exchange_strip_receive_source_ids')) {
+            $p = auragold_jwo_metal_exchange_strip_receive_source_ids($p);
+        }
         auragold_validate_metal_exchange_for_stock($conn, $p);
         $r = auragold_metal_exchange_resolve($conn, $p);
-        $pcid = (int) ($p['metal_exchange_product_id'] ?? $p['product_id'] ?? 0);
+        $pcid = auragold_metal_exchange_resolve_characteristic_id($conn, $p);
         $mid = (int) ($p['metal_exchange_metal_id'] ?? $p['metal_id'] ?? 0);
+        if ($pcid < 1 || $mid < 1) {
+            throw new Exception(
+                'Metal exchange: select metal and product from the list, and enter gross weight before saving.'
+            );
+        }
         $pcrow = getRecord("SELECT product_id FROM tbl_product_characteristics WHERE id = $pcid AND status = 1 LIMIT 1");
         $pid = (int) ($pcrow['product_id'] ?? 0);
         if ($pid <= 0) {
             throw new Exception('Metal exchange: invalid product characteristic.');
         }
-        $barcode_plain = '';
-        if (!function_exists('auragold_next_product_stock_barcode')) {
-            $nb = __DIR__ . '/next_product_stock_barcode.php';
-            if (is_file($nb)) {
-                require_once $nb;
-            }
-        }
-        for ($bc_attempt = 0; $bc_attempt < 12; $bc_attempt++) {
-            $nb = auragold_next_product_stock_barcode($conn, $pid, $pcid, $mid, $branch_id);
-            $try_bc = trim((string) ($nb['barcode'] ?? ''));
-            if ($try_bc === '') {
-                break;
-            }
-            $try_esc = mysqli_real_escape_string($conn, $try_bc);
-            $dup = getRecord("SELECT id FROM tbl_stock WHERE barcode = '$try_esc' AND status = 1 LIMIT 1");
-            if (!$dup) {
-                $barcode_plain = $try_bc;
-                break;
-            }
-        }
+        $bc_plan = auragold_metal_exchange_barcode_plan_from_payment(
+            $conn,
+            $p,
+            $reference_type,
+            $reference_id,
+            $pid,
+            $pcid,
+            $mid,
+            $branch_id,
+            $reserved_barcodes,
+            $reserved_stock_ids
+        );
+        $barcode_plain = trim((string) ($bc_plan['barcode'] ?? ''));
+        $reuse_stock_id = (int) ($bc_plan['reuse_stock_id'] ?? 0);
         if ($barcode_plain === '') {
             throw new Exception('Metal exchange: could not allocate a unique barcode.');
         }
@@ -448,11 +861,98 @@ if (!function_exists('auragold_post_metal_exchange_payment_to_stock')) {
         $ref_id = (int) $reference_id;
         $rt_esc = mysqli_real_escape_string($conn, $reference_type);
 
+        if ($reuse_stock_id > 0) {
+            $upd = 'UPDATE tbl_stock SET product_id = ' . (int) $pid
+                . ', product_characteristic_id = ' . (int) $pcid
+                . ', branch_id = ' . (int) $bid
+                . ', metal_id = ' . (int) $mid
+                . ', opening_weight = ' . $gross
+                . ', opening_purity = ' . $opening_purity
+                . ', opening_qty = ' . $qty
+                . ', final_weight = ' . $final_w
+                . ', rate = ' . $rate
+                . ', value = ' . $line_amt
+                . ', current_weight = ' . $gross
+                . ', current_qty = ' . $qty
+                . ", stock_type = 'purchase'"
+                . ", transaction_date = '$txn_esc'"
+                . ", reference_id = $ref_id, reference_type = '$rt_esc', status = 1";
+            if (
+                function_exists('auragold_tbl_has_column')
+                && auragold_tbl_has_column($conn, 'tbl_stock', 'source_stock_id')
+            ) {
+                $src_stock_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+                $upd .= $src_stock_id > 0 ? ', source_stock_id = ' . $src_stock_id : ', source_stock_id = NULL';
+            }
+            if (!mysqli_query($conn, $upd . ' WHERE id = ' . (int) $reuse_stock_id)) {
+                throw new Exception('Metal exchange: could not update stock for barcode ' . $barcode_plain . '.');
+            }
+            require_once __DIR__ . '/stock_history_audit_journal.php';
+            $sj_no_reuse = $sj_invoice_prefix . (int) $reference_id . '-' . (int) $pay_seq;
+            if (strlen($sj_no_reuse) > 48) {
+                $sj_no_reuse = preg_replace('/[^A-Za-z0-9\\-]/', '', substr($sj_invoice_prefix, 0, 4)) . (int) $reference_id . 'x' . (int) $pay_seq;
+            }
+            auragold_stock_history_audit_insert_row($conn, [
+                'sj_invoice_no' => $sj_no_reuse,
+                'item_id' => 0,
+                'invoice_id' => 0,
+                'invoice_no' => $doc_no_plain,
+                'sj_date' => $doc_date_ymd,
+                'barcode' => $barcode_plain,
+                'product_id' => $pid,
+                'product_characteristic_id' => $pcid,
+                'product_name' => $product_name_plain,
+                'metal_id' => $mid,
+                'metal_type' => function_exists('auragold_stock_history_metal_type') ? auragold_stock_history_metal_type($conn, $mid) : '',
+                'quantity' => $qty,
+                'gross_weight' => $gross,
+                'less_weight' => 0,
+                'net_weight' => $gross,
+                'purity' => $opening_purity * 100,
+                'purity_weight' => $pure,
+                'pure_weight' => $pure,
+                'final_weight' => $final_w,
+                'rate' => $rate,
+                'amount' => $line_amt,
+                'making_amount' => 0,
+                'tax_amount' => 0,
+                'net_amount' => $line_amt,
+                'net_amt_with_tax' => $line_amt,
+                'rfid_code' => '',
+                'voucher_type' => $history_voucher_label,
+                'design_no' => '',
+                'category' => '',
+                'comment' => 'auragold_doc|src=' . $audit_src . '|rid=' . (int) $reference_id . '|seq=' . (int) $pay_seq . '|reuse=1|',
+            ]);
+            $created_barcodes_out[] = [
+                'barcode' => $barcode_plain,
+                'product_name' => $product_name_plain,
+                'source' => 'metal_exchange',
+                'stock_id' => $reuse_stock_id,
+            ];
+
+            return;
+        }
+
+        $src_stock_id = (int) ($p['metal_exchange_source_stock_id'] ?? $p['source_issue_stock_id'] ?? 0);
+        if ($src_stock_id > 0 && is_file(__DIR__ . '/auragold_material_issue_rows_for_sale_order.php')) {
+            require_once __DIR__ . '/auragold_material_issue_rows_for_sale_order.php';
+            auragold_ensure_stock_source_stock_id_column($conn);
+        }
+
         $stock_cols = 'product_id, product_characteristic_id, barcode, branch_id, metal_id, opening_weight, opening_purity, opening_qty, final_weight, rate, value, current_weight, current_qty, stock_type, transaction_date';
         $stock_vals = "$pid, $pcid, $bc_sql, $bid, $mid, $gross, $opening_purity, $qty, $final_w, $rate, $line_amt, $gross, $qty, 'purchase', '$txn_esc'";
         if ($tbl_stock_has_reference) {
             $stock_cols .= ', reference_id, reference_type';
             $stock_vals .= ", $ref_id, '$rt_esc'";
+        }
+        if (
+            $src_stock_id > 0
+            && function_exists('auragold_tbl_has_column')
+            && auragold_tbl_has_column($conn, 'tbl_stock', 'source_stock_id')
+        ) {
+            $stock_cols .= ', source_stock_id';
+            $stock_vals .= ', ' . (int) $src_stock_id;
         }
         if ($has_sj) {
             $stock_cols .= ', stock_journal_id';
@@ -471,6 +971,46 @@ if (!function_exists('auragold_post_metal_exchange_payment_to_stock')) {
             $err = mysqli_error($conn);
             error_log('[' . $audit_src . '] STOCK INSERT FAILED ref=' . $reference_type . ':' . $reference_id . ' err=' . $err);
             throw new Exception('Metal exchange: stock insert failed: ' . $err);
+        }
+        $new_stock_id = (int) mysqli_insert_id($conn);
+        $t_inward = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_inward_stock'");
+        if ($t_inward && mysqli_num_rows($t_inward) > 0) {
+            mysqli_free_result($t_inward);
+            $inward_sql = "
+                INSERT INTO tbl_inward_stock (
+                    stock_journal_id, product_id, product_characteristic_id, barcode_no,
+                    branch_id, metal_id, qty, weight, rate, value, stock_type, transaction_date, created_at
+                ) VALUES (
+                    NULL, $pid, $pcid, $bc_sql, $bid, $mid, $qty, $gross, $rate, $line_amt, 'purchase', '$txn_esc', NOW()
+                )";
+            @mysqli_query($conn, $inward_sql);
+        } elseif ($t_inward) {
+            mysqli_free_result($t_inward);
+        }
+
+        $has_qty = false;
+        $has_wt = false;
+        $upd_cols = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_product_characteristics WHERE Field IN ('opening_qty','opening_weight')");
+        if ($upd_cols) {
+            while ($c = mysqli_fetch_assoc($upd_cols)) {
+                if (($c['Field'] ?? '') === 'opening_qty') {
+                    $has_qty = true;
+                }
+                if (($c['Field'] ?? '') === 'opening_weight') {
+                    $has_wt = true;
+                }
+            }
+            mysqli_free_result($upd_cols);
+        }
+        if ($has_qty || $has_wt) {
+            $set_parts = [];
+            if ($has_qty) {
+                $set_parts[] = 'opening_qty = COALESCE(opening_qty, 0) + ' . $qty;
+            }
+            if ($has_wt) {
+                $set_parts[] = 'opening_weight = COALESCE(opening_weight, 0) + ' . $gross;
+            }
+            @mysqli_query($conn, 'UPDATE tbl_product_characteristics SET ' . implode(', ', $set_parts) . " WHERE id = $pcid");
         }
 
         require_once __DIR__ . '/stock_history_audit_journal.php';
@@ -514,6 +1054,304 @@ if (!function_exists('auragold_post_metal_exchange_payment_to_stock')) {
         $created_barcodes_out[] = [
             'barcode' => $barcode_plain,
             'product_name' => $product_name_plain,
+            'source' => 'metal_exchange',
+            'stock_id' => $new_stock_id > 0 ? $new_stock_id : 0,
         ];
+    }
+}
+
+if (!function_exists('auragold_metal_exchange_payment_display_amount')) {
+    /**
+     * INR amount for payment cards / summary (rate × pure wt when amount column is 0).
+     */
+    function auragold_metal_exchange_payment_display_amount(array $payment): float
+    {
+        $p = function_exists('auragold_payment_merge_stored_details')
+            ? auragold_payment_merge_stored_details($payment)
+            : $payment;
+        $amt = (float) ($p['amount'] ?? 0);
+        if ($amt > 0.00001) {
+            return round($amt, 2);
+        }
+        $cur = isset($p['current_order_amount']) ? (float) $p['current_order_amount'] : 0.0;
+        if ($cur > 0.00001) {
+            return round($cur, 2);
+        }
+        $rate = (float) ($p['metal_exchange_rate'] ?? $p['rate'] ?? 0);
+        $pure = (float) ($p['metal_exchange_purity_wt'] ?? $p['purity_weight'] ?? 0);
+        $gross = (float) ($p['metal_exchange_gross_wt'] ?? $p['gross_weight'] ?? $p['gross_wt'] ?? 0);
+        if ($rate > 0.00001 && $pure > 0.00001) {
+            return round($rate * $pure, 2);
+        }
+        if ($rate > 0.00001 && $gross > 0.00001) {
+            return round($rate * $gross, 2);
+        }
+        $qty = (float) ($p['quantity'] ?? 0);
+        if ($qty > 0.00001 && $rate > 0.00001) {
+            return round($rate * $qty, 2);
+        }
+
+        return 0.0;
+    }
+}
+
+if (!function_exists('auragold_jobwork_payment_row_is_jwo_metal_exchange')) {
+    /**
+     * True when payment_details tags this row as metal exchange for a specific job work order.
+     */
+    function auragold_jobwork_payment_row_is_jwo_metal_exchange(array $row, int $jwo_id = 0): bool
+    {
+        if (empty($row['payment_details'])) {
+            return false;
+        }
+        $jd = json_decode((string) $row['payment_details'], true);
+        if (!is_array($jd) || empty($jd['jobwork_order_metal_exchange'])) {
+            return false;
+        }
+        if ($jwo_id > 0) {
+            return (int) ($jd['jobwork_order_id'] ?? 0) === $jwo_id;
+        }
+
+        return (int) ($jd['jobwork_order_id'] ?? 0) > 0;
+    }
+}
+
+if (!function_exists('auragold_jobwork_embed_should_hide_payment_row')) {
+    /**
+     * On JWO screens: show only metal exchange added on this job work order; hide SO-screen ME and plumbing rows.
+     */
+    function auragold_jobwork_embed_should_hide_payment_row(mysqli $conn, array $row, int $keep_jwo_id = 0): bool
+    {
+        if (auragold_jobwork_payment_row_is_jwo_metal_exchange($row, $keep_jwo_id)) {
+            return false;
+        }
+        if (auragold_jobwork_payment_row_is_jwo_metal_exchange($row, 0)) {
+            return true;
+        }
+        $merged = function_exists('auragold_payment_merge_stored_details')
+            ? auragold_payment_merge_stored_details($row)
+            : $row;
+        if (auragold_payment_is_metal_exchange_inward($conn, $merged)) {
+            return true;
+        }
+        if (function_exists('auragold_sale_order_payment_row_is_internal_only')
+            && auragold_sale_order_payment_row_is_internal_only($row)) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('auragold_jobwork_embed_strip_sale_order_metal_exchange_payments')) {
+    /**
+     * Remove inherited sale-order metal exchange rows from JWO payment embed.
+     *
+     * @param array<int, array<string, mixed>> $edit_payments
+     */
+    function auragold_jobwork_embed_strip_sale_order_metal_exchange_payments(mysqli $conn, array &$edit_payments, int $keep_jwo_id = 0): void
+    {
+        if (!is_array($edit_payments) || empty($edit_payments)) {
+            return;
+        }
+        $edit_payments = array_values(array_filter($edit_payments, function ($ep) use ($conn, $keep_jwo_id) {
+            if (!is_array($ep)) {
+                return false;
+            }
+
+            return !auragold_jobwork_embed_should_hide_payment_row($conn, $ep, $keep_jwo_id);
+        }));
+    }
+}
+
+if (!function_exists('auragold_sale_order_payment_row_is_internal_only')) {
+    /**
+     * Rows stored on tbl_sale_order_payments for job work / issue plumbing — not entered on the sale order screen.
+     */
+    function auragold_sale_order_payment_row_is_internal_only(array $row): bool
+    {
+        if (!is_array($row)) {
+            return true;
+        }
+        if (function_exists('auragold_jobwork_payment_row_is_jwo_metal_exchange')
+            && auragold_jobwork_payment_row_is_jwo_metal_exchange($row, 0)) {
+            return true;
+        }
+        $merged = function_exists('auragold_payment_merge_stored_details')
+            ? auragold_payment_merge_stored_details($row)
+            : $row;
+        if (!empty($merged['jobwork_order_metal_exchange'])) {
+            return true;
+        }
+        if (!empty($merged['auto_material_issue_metal_exchange'])) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('auragold_sale_order_get_metal_exchange_stocks')) {
+    /** @return list<array<string, mixed>> */
+    function auragold_sale_order_get_metal_exchange_stocks(mysqli $conn, int $sale_order_id, string $reference_type): array
+    {
+        if ($sale_order_id < 1 || !function_exists('getList')) {
+            return [];
+        }
+        if ($reference_type === 'sale_order_metal_exchange') {
+            $rows = getList(
+                'SELECT * FROM tbl_stock WHERE status = 1'
+                . " AND reference_type = 'sale_order_metal_exchange'"
+                . ' AND reference_id = ' . (int) $sale_order_id
+                . ' ORDER BY id ASC'
+            );
+
+            return is_array($rows) ? $rows : [];
+        }
+        if ($reference_type === 'jobwork_order_metal_exchange') {
+            $rows = getList(
+                'SELECT s.* FROM tbl_stock s'
+                . ' INNER JOIN tbl_jobwork_orders j ON j.id = s.reference_id'
+                . " WHERE s.status = 1 AND s.reference_type = 'jobwork_order_metal_exchange'"
+                . ' AND j.sale_order_id = ' . (int) $sale_order_id
+                . ' ORDER BY s.id ASC'
+            );
+
+            return is_array($rows) ? $rows : [];
+        }
+
+        return [];
+    }
+}
+
+if (!function_exists('auragold_sale_order_me_payment_row_matches_stock')) {
+    function auragold_sale_order_me_payment_row_matches_stock(mysqli $conn, array $payment, array $stock_row): bool
+    {
+        $m = auragold_payment_merge_stored_details($payment);
+        if (!auragold_payment_is_metal_exchange_inward($conn, $m)) {
+            return false;
+        }
+        $resolved = auragold_metal_exchange_resolve($conn, $m);
+        if (empty($resolved['is_me'])) {
+            return false;
+        }
+        $gross = (float) ($resolved['gross'] ?? 0);
+        $pcid = auragold_metal_exchange_resolve_characteristic_id($conn, $m);
+        $stock_pcid = (int) ($stock_row['product_characteristic_id'] ?? 0);
+        $stock_w = (float) ($stock_row['opening_weight'] ?? 0);
+        if ($stock_w <= 1e-8) {
+            $stock_w = (float) ($stock_row['current_weight'] ?? 0);
+        }
+        $bc_pay = trim((string) ($m['metal_exchange_item_code'] ?? $m['item_code'] ?? ''));
+        $bc_st = trim((string) ($stock_row['barcode'] ?? ''));
+        if ($pcid > 0 && $stock_pcid > 0 && $pcid !== $stock_pcid) {
+            return false;
+        }
+        if ($bc_pay !== '' && $bc_st !== '' && strcasecmp($bc_pay, $bc_st) !== 0) {
+            return false;
+        }
+
+        return abs($gross - $stock_w) <= 0.0001;
+    }
+}
+
+if (!function_exists('auragold_sale_order_filter_customer_payments')) {
+    /**
+     * Keep only payment lines the user added on the sale order (hide JWO/internal ME copies).
+     *
+     * @param array<int, array<string, mixed>> $payments
+     */
+    function auragold_sale_order_filter_customer_payments(array &$payments): void
+    {
+        if (!is_array($payments) || $payments === []) {
+            return;
+        }
+        $payments = array_values(array_filter($payments, function ($row) {
+            return is_array($row) && !auragold_sale_order_payment_row_is_internal_only($row);
+        }));
+    }
+}
+
+if (!function_exists('auragold_sale_order_filter_display_payments')) {
+    /**
+     * Sale order screen: hide JWO/internal ME copies; keep the first customer ME per product.
+     *
+     * @param array<int, array<string, mixed>> $payments
+     */
+    function auragold_sale_order_filter_display_payments(mysqli $conn, int $order_id, array &$payments): void
+    {
+        auragold_sale_order_filter_customer_payments($payments);
+        if ($order_id < 1 || !is_array($payments) || $payments === []) {
+            return;
+        }
+
+        $non_me = [];
+        $me_rows = [];
+        foreach ($payments as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $merged = auragold_payment_merge_stored_details($row);
+            if (auragold_payment_is_metal_exchange_inward($conn, $merged)) {
+                $me_rows[] = $row;
+            } else {
+                $non_me[] = $row;
+            }
+        }
+        if ($me_rows === []) {
+            $payments = $non_me;
+
+            return;
+        }
+
+        usort($me_rows, static function ($a, $b) {
+            return (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0);
+        });
+
+        // Earliest row per metal + product is the sale-order entry; later rows are JWO/save duplicates.
+        $seen = [];
+        $deduped = [];
+        foreach ($me_rows as $row) {
+            $merged = auragold_payment_merge_stored_details($row);
+            $pcid = auragold_metal_exchange_resolve_characteristic_id($conn, $merged);
+            $mid = (int) ($merged['metal_exchange_metal_id'] ?? $merged['metal_id'] ?? 0);
+            $key = $mid . ':' . $pcid;
+            if ($pcid < 1 && $mid < 1) {
+                $key = 'me:row:' . count($deduped);
+            }
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $deduped[] = $row;
+        }
+
+        $payments = array_values(array_merge($non_me, $deduped));
+        usort($payments, static function ($a, $b) {
+            return (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0);
+        });
+    }
+}
+
+if (!function_exists('auragold_sale_order_delete_customer_payments')) {
+    /** Delete replaceable sale-order payment rows; keep internal JWO/issue tagged rows. */
+    function auragold_sale_order_delete_customer_payments(mysqli $conn, int $order_id): void
+    {
+        if ($order_id < 1 || !function_exists('getList')) {
+            return;
+        }
+        $rows = getList('SELECT id, payment_details FROM tbl_sale_order_payments WHERE order_id = ' . (int) $order_id);
+        if (!is_array($rows)) {
+            return;
+        }
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (auragold_sale_order_payment_row_is_internal_only($row)) {
+                continue;
+            }
+            mysqli_query($conn, 'DELETE FROM tbl_sale_order_payments WHERE id = ' . (int) ($row['id'] ?? 0));
+        }
     }
 }

@@ -61,6 +61,7 @@ if (!function_exists('auragold_voucher_ensure_stone_issue_table')) {
               KEY `idx_vs_stock` (`stock_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        auragold_voucher_ensure_voucher_gem_issue_source_column($conn, $tbl);
     }
 }
 
@@ -113,6 +114,142 @@ if (!function_exists('auragold_voucher_list_stone_issue_rows_for_kind')) {
     }
 }
 
+if (!function_exists('auragold_voucher_apply_stone_receive_allocations')) {
+    /**
+     * @param array<int, array<string, mixed>> $rows source_issue_id, weight, qty, ...
+     * @return array{saved:int}
+     */
+    function auragold_voucher_apply_stone_receive_allocations(
+        mysqli $conn,
+        int $voucher_id,
+        array $rows,
+        string $document_no,
+        string $document_date_ymd,
+        bool &$tx_ok,
+        string &$tx_err,
+        string $receive_voucher_kind = 'material_receive'
+    ): array {
+        $stats = ['saved' => 0];
+        if (!$tx_ok || $voucher_id < 1 || $rows === []) {
+            return $stats;
+        }
+        $receive_voucher_kind = strtolower(trim($receive_voucher_kind));
+        if ($receive_voucher_kind === '') {
+            $receive_voucher_kind = 'material_receive';
+        }
+        if (!auragold_voucher_diamond_kind_valid($receive_voucher_kind)) {
+            $tx_ok = false;
+            $tx_err = 'Invalid receive voucher type for stone stock.';
+
+            return $stats;
+        }
+        auragold_voucher_ensure_stone_issue_table($conn);
+        $tbl = 'tbl_voucher_stone_stock_issue';
+        [$voucher_label, $sj_prefix, $comment_tag] = auragold_voucher_stone_journal_meta($receive_voucher_kind);
+        $document_no = trim($document_no);
+        $d = trim($document_date_ymd);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+            $d = date('Y-m-d');
+        }
+        require_once __DIR__ . '/stock_history_audit_journal.php';
+        $has_src_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, $tbl, 'source_issue_id');
+
+        foreach ($rows as $r) {
+            if (!is_array($r)) {
+                continue;
+            }
+            $source_issue_id = (int) ($r['source_issue_id'] ?? 0);
+            $recv_wt = isset($r['weight']) ? (float) $r['weight'] : 0.0;
+            $recv_qty = isset($r['qty']) ? (float) $r['qty'] : 0.0;
+            if ($source_issue_id < 1 || $recv_wt <= 0.0000001) {
+                continue;
+            }
+            $src = function_exists('getRecord')
+                ? getRecord(
+                    'SELECT * FROM `' . $tbl . '` WHERE id = ' . $source_issue_id
+                    . " AND voucher_kind = 'material_issue' LIMIT 1"
+                )
+                : null;
+            if (!$src || empty($src['id'])) {
+                $tx_ok = false;
+                $tx_err = 'Issued stone line not found (id ' . $source_issue_id . ').';
+
+                return $stats;
+            }
+            $issued_wt = (float) ($src['weight'] ?? 0);
+            $issued_qty = (float) ($src['qty'] ?? 0);
+            $already = $has_src_col
+                ? auragold_voucher_received_sum_for_source_issue($conn, $tbl, $source_issue_id)
+                : ['weight' => 0.0, 'qty' => 0.0];
+            $bal_wt = max(0.0, round($issued_wt - (float) $already['weight'], 4));
+            if ($recv_wt > $bal_wt + 0.0001) {
+                $tx_ok = false;
+                $tx_err = 'Receive weight exceeds balance for barcode ' . trim((string) ($src['barcode'] ?? ''))
+                    . ' (balance ' . $bal_wt . ').';
+
+                return $stats;
+            }
+            if ($recv_qty <= 0.0000001 && $issued_qty > 0.0000001 && $issued_wt > 0.0000001) {
+                $recv_qty = round($issued_qty * ($recv_wt / $issued_wt), 4);
+            }
+            $sid = (int) ($src['stock_id'] ?? 0);
+            $bc = trim((string) ($src['barcode'] ?? ($r['barcode'] ?? '')));
+            if ($sid < 1) {
+                $tx_ok = false;
+                $tx_err = 'Issued line has no stock reference for barcode ' . ($bc !== '' ? $bc : '?') . '.';
+
+                return $stats;
+            }
+            auragold_voucher_receive_stock_inward_partial($conn, $sid, $recv_wt, $recv_qty, $bc, $tx_ok, $tx_err);
+            if (!$tx_ok) {
+                return $stats;
+            }
+
+            $pn_esc = mysqli_real_escape_string($conn, trim((string) ($r['product_name'] ?? $src['product_name'] ?? '')));
+            $cat_esc = mysqli_real_escape_string($conn, trim((string) ($r['stone_category'] ?? $src['stone_category'] ?? 'Stones')));
+            $bc_esc = mysqli_real_escape_string($conn, $bc);
+            $w_log = round($recv_wt, 4);
+            $q_log = round(max(0.0, $recv_qty), 4);
+            $src_sql = $has_src_col ? (string) (int) $source_issue_id : 'NULL';
+            $kind_esc = mysqli_real_escape_string($conn, $receive_voucher_kind);
+            $ins = "INSERT INTO `$tbl` (voucher_kind, voucher_id, source_issue_id, stock_id, barcode, product_name, stone_category, weight, qty, created_at) VALUES ("
+                . "'" . $kind_esc . "', " . (int) $voucher_id . ', ' . $src_sql . ', ' . $sid . ", '" . $bc_esc . "', '" . $pn_esc . "', '" . $cat_esc . "', "
+                . $w_log . ', ' . $q_log . ', NOW())';
+            if (!@mysqli_query($conn, $ins)) {
+                $tx_ok = false;
+                $tx_err = 'Could not log stone stock receive: ' . mysqli_error($conn);
+
+                return $stats;
+            }
+            $alloc_id = (int) mysqli_insert_id($conn);
+            if ($document_no !== '' && $alloc_id > 0) {
+                auragold_stock_history_audit_for_document_barcode_line(
+                    $conn,
+                    $voucher_label,
+                    $document_no,
+                    $d,
+                    $sj_prefix,
+                    $voucher_id,
+                    $alloc_id,
+                    $comment_tag,
+                    [
+                        'barcode' => $bc,
+                        'product_name' => trim((string) ($r['product_name'] ?? $src['product_name'] ?? '')),
+                        'quantity' => $q_log > 0.0000001 ? $q_log : 1,
+                        'gross_weight' => $w_log,
+                        'final_weight' => $w_log,
+                        'net_weight' => $w_log,
+                        'category' => trim((string) ($r['stone_category'] ?? $src['stone_category'] ?? 'Stones')),
+                    ]
+                );
+            }
+            $stats['saved']++;
+        }
+
+        return $stats;
+    }
+}
+
 if (!function_exists('auragold_voucher_apply_stone_allocations')) {
     /**
      * @param array<int, array<string, mixed>> $rows Each: stock_id, barcode (opt), qty, weight, product_name (opt), stone_category (opt)
@@ -131,6 +268,30 @@ if (!function_exists('auragold_voucher_apply_stone_allocations')) {
         $stats = ['saved' => 0];
         $voucher_kind = strtolower(trim($voucher_kind));
         if (!$tx_ok || $voucher_id < 1 || $rows === [] || !auragold_voucher_diamond_kind_valid($voucher_kind)) {
+            return $stats;
+        }
+        if ($voucher_kind === 'material_receive') {
+            $receive_rows = [];
+            foreach ($rows as $r) {
+                if (!is_array($r)) {
+                    continue;
+                }
+                if ((int) ($r['source_issue_id'] ?? 0) > 0) {
+                    $receive_rows[] = $r;
+                }
+            }
+            if ($receive_rows !== []) {
+                return auragold_voucher_apply_stone_receive_allocations(
+                    $conn,
+                    $voucher_id,
+                    $receive_rows,
+                    $document_no,
+                    $document_date_ymd,
+                    $tx_ok,
+                    $tx_err
+                );
+            }
+
             return $stats;
         }
         auragold_voucher_ensure_stone_issue_table($conn);

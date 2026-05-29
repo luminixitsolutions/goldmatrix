@@ -29,14 +29,13 @@ if ($eff_branch > 0 && !empty($conn_master) && function_exists('getRecordMaster'
 
 $metal_search_diamond = '';
 if ($metal_id > 0) {
-    $metal_search_diamond .= auragold_sql_pc_metal_matches_tab_metal($metal_id);
+    $metal_search_diamond .= auragold_sql_pc_metal_for_product_list($metal_id);
 }
 if ($search != '') {
     $metal_search_diamond .= " AND (p.name LIKE '%$search%' OR p.alternate_name LIKE '%$search%' OR p.article LIKE '%$search%' OR pc.sku_code LIKE '%$search%')";
 }
-// Filter by diamond category when provided (Diamonds, GemStones, Jewellery)
-if ($diamond_category !== '' && in_array($diamond_category, ['Diamonds', 'GemStones', 'Jewellery'], true)) {
-    $metal_search_diamond .= " AND pc.diamond_category = '" . $diamond_category . "'";
+if ($diamond_category !== '') {
+    $metal_search_diamond .= auragold_sql_pc_diamond_category_filter($diamond_category);
 }
 
 $sql_from = "

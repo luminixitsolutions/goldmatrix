@@ -4,6 +4,7 @@ require_once 'config.php';
 require_once __DIR__ . '/includes/auragold-gst-page-vars.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
+require_once __DIR__ . '/includes/jwm_list_helpers.php';
 
 $auragold_working_branch_id = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
 if ($auragold_working_branch_id <= 0 && !empty($_SESSION['working_branch_id'])) {
@@ -104,7 +105,8 @@ if ($edit_order_id > 0) {
             'ref_no' => $jwo_row['sale_order_no'] ?? '',
             'department_id' => (isset($jwo_row['department_id']) && $jwo_row['department_id'] !== '' && $jwo_row['department_id'] !== null) ? (int)$jwo_row['department_id'] : null,
             'department_user_id' => (isset($jwo_row['department_user_id']) && $jwo_row['department_user_id'] !== '' && $jwo_row['department_user_id'] !== null) ? (int)$jwo_row['department_user_id'] : null,
-            'priority' => $jwo_row['priority'] ?? 'Medium'
+            'priority' => $jwo_row['priority'] ?? 'Medium',
+            'jwo_status' => isset($jwo_row['status']) ? (string) $jwo_row['status'] : '',
         ];
         $jwo_sp_so = getRecord("SELECT sales_person, against_of, ref_no, currency, customer_id FROM tbl_sale_orders WHERE id = " . (int)$jwo_row['sale_order_id'] . " LIMIT 1");
         if ($jwo_sp_so) {
@@ -638,6 +640,8 @@ $invoice_lang_labels = ['en' => 'English', 'hi' => 'Hindi', 'mr' => 'Marathi', '
         margin: 0;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     border-radius: 10px;
+        position: relative;
+        z-index: 1200 !important;
     }
     
     .top-navbar .nav {
@@ -2778,6 +2782,31 @@ text-transform: uppercase;
     #customerSuggestions {
         font-family: inherit;
     }
+    .jwo-dept-user-select2-wrap .select2-container {
+        width: 100% !important;
+        max-width: 100%;
+    }
+    .jwo-dept-user-select2-wrap .select2-container--default .select2-selection--single {
+        height: calc(1.5em + 0.5rem + 2px);
+        min-height: calc(1.5em + 0.5rem + 2px);
+        border: 1px solid #ced4da;
+        border-radius: 0.2rem;
+        font-size: 0.875rem;
+    }
+    .jwo-dept-user-select2-wrap .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: calc(1.5em + 0.5rem);
+        padding-left: 0.5rem;
+        color: #495057;
+    }
+    .jwo-dept-user-select2-wrap .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: calc(1.5em + 0.5rem + 2px);
+    }
+    .select2-container.jwo-dept-user-select2-container {
+        z-index: 50 !important;
+    }
+    .select2-dropdown.jwo-dept-user-select2-dropdown {
+        z-index: 50 !important;
+    }
     .customer-suggestion-item:hover {
         background: #f8fafc !important;
     }
@@ -3099,10 +3128,13 @@ text-transform: uppercase;
                                                 <div class="form-group">
                                                     <label>Name <span class="text-danger">*</span></label>
                                                     <div style="position: relative; display: flex; align-items: stretch; gap: 4px;">
-                                                        <div style="position: relative; flex: 1; min-width: 0;">
-                                                            <input type="hidden" id="jwoDepartmentUser" name="department_user_id" value="<?php echo ($jwo_has_department_user_tables && $ensure_jwo_dept_user_id > 0) ? (int) $ensure_jwo_dept_user_id : ''; ?>">
-                                                            <input type="text" class="form-control form-control-sm" id="jwoDepartmentUserSearch" autocomplete="off" placeholder="Search name or mobile..." <?php echo $jwo_has_department_user_tables ? '' : 'disabled'; ?> value="<?php echo $jwo_has_department_user_tables ? htmlspecialchars((string) $jwo_department_user_display, ENT_QUOTES, 'UTF-8') : ''; ?>">
-                                                            <div id="jwoDepartmentUserSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
+                                                        <div class="jwo-dept-user-select2-wrap" style="position: relative; flex: 1; min-width: 0;">
+                                                            <select class="form-control form-control-sm" id="jwoDepartmentUser" name="department_user_id" <?php echo $jwo_has_department_user_tables ? '' : 'disabled'; ?>>
+                                                                <option value="">Select name...</option>
+                                                                <?php if ($jwo_has_department_user_tables && $ensure_jwo_dept_user_id > 0 && $jwo_department_user_display !== '') { ?>
+                                                                <option value="<?php echo (int) $ensure_jwo_dept_user_id; ?>" selected><?php echo htmlspecialchars($jwo_department_user_display, ENT_QUOTES, 'UTF-8'); ?></option>
+                                                                <?php } ?>
+                                                            </select>
                                                         </div>
                                                         <button type="button" class="btn btn-sm btn-outline-secondary p-0" id="jwoAddDepartmentUserBtn" title="Add Job Worker (Ledger Details)" style="width: 32px; min-width: 32px; line-height: 1;"><i class="feather icon-plus"></i></button>
                                                     </div>
@@ -3226,20 +3258,14 @@ text-transform: uppercase;
                                         </div>
                                         <?php if ($is_jobwork_from_sale_order): ?>
                                         <?php
-                                        // Only tbl_jobwork_orders.status (stored as edit_order['jwo_status']) drives this dropdown.
-                                        // Do not use tbl_sale_orders.status — it is the SO workflow state and wrongly showed "Processing".
-                                        $__jwo_opts = ['Hold', 'Not Initiate', 'Processing', 'Completed', 'Rejected'];
+                                        // Only tbl_jobwork_orders.status (edit_order['jwo_status']) drives this dropdown — not sale order status.
                                         $__jwo_raw = !empty($edit_order['jwo_status']) ? trim((string) $edit_order['jwo_status']) : '';
-                                        $__jwo_status_val = 'Not Initiate';
-                                        if ($__jwo_raw !== '') {
-                                            $__jwo_status_val = $__jwo_raw;
-                                            foreach ($__jwo_opts as $__opt) {
-                                                if (strcasecmp($__jwo_raw, $__opt) === 0) {
-                                                    $__jwo_status_val = $__opt;
-                                                    break;
-                                                }
-                                            }
+                                        if ($__jwo_raw === '' && !empty($edit_order['status'])) {
+                                            $__jwo_raw = trim((string) $edit_order['status']);
                                         }
+                                        $__jwo_status_val = function_exists('auragold_jwo_status_display_value')
+                                            ? auragold_jwo_status_display_value($__jwo_raw, 'Processing')
+                                            : 'Processing';
                                         $__jwo_priority_val = !empty($edit_order['priority']) ? (string)$edit_order['priority'] : 'Medium';
                                         ?>
                                         <div class="col-md-3">
@@ -3622,6 +3648,10 @@ require __DIR__ . '/includes/voucher_diamond_stone_assets.php';
 
 <?php include 'footer-script.php';?>
 
+<link rel="stylesheet" href="assets/libs/select2/select2.css">
+<script src="assets/libs/select2/select2.js"></script>
+<script src="assets/js/jwo-department-user-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/jwo-department-user-select2.js'); ?>"></script>
+
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
@@ -3767,6 +3797,12 @@ window.PB_PAGE_CONFIG = {
             'discount_percent' => (float)($edit_order['discount_percent'] ?? 0),
             'comment' => $edit_order['comment'] ?? '',
             'payment_comments' => $edit_order['payment_comments'] ?? '[]',
+            'jwo_status' => function_exists('auragold_jwo_status_display_value')
+                ? auragold_jwo_status_display_value($edit_order['jwo_status'] ?? $edit_order['status'] ?? '')
+                : (string) ($edit_order['jwo_status'] ?? $edit_order['status'] ?? 'Processing'),
+            'priority' => !empty($edit_order['priority']) ? (string) $edit_order['priority'] : 'Medium',
+            'department_id' => isset($edit_order['department_id']) ? $edit_order['department_id'] : null,
+            'department_user_id' => isset($edit_order['department_user_id']) ? $edit_order['department_user_id'] : null,
         ];
         if (!empty($is_jobwork_from_sale_order) && $is_jobwork_from_sale_order && isset($next_order_no) && (string)$next_order_no !== '') {
             $embed_order['jobwork_no'] = (string)$next_order_no;
@@ -3804,6 +3840,34 @@ window.PB_PAGE_CONFIG = {
                     auragold_merge_payment_details_into_payments($embed_payments);
                 }
             }
+        }
+        if (!empty($is_jobwork_from_sale_order) && !empty($embed_payments)) {
+            require_once __DIR__ . '/includes/auragold_metal_exchange_stock.php';
+            if (function_exists('auragold_jobwork_embed_strip_sale_order_metal_exchange_payments')) {
+                auragold_jobwork_embed_strip_sale_order_metal_exchange_payments($conn, $embed_payments, (int) $current_jwo_id);
+            }
+        }
+        if (!empty($is_jobwork_from_sale_order) && is_array($embed_order)) {
+            $embed_jwo_metal_amt = 0.0;
+            foreach ($embed_payments as $__jwo_me_pay) {
+                if (!is_array($__jwo_me_pay)) {
+                    continue;
+                }
+                if (function_exists('auragold_jobwork_embed_should_hide_payment_row')
+                    && auragold_jobwork_embed_should_hide_payment_row($conn, $__jwo_me_pay, (int) $current_jwo_id)) {
+                    continue;
+                }
+                $__me_merged = function_exists('auragold_payment_merge_stored_details')
+                    ? auragold_payment_merge_stored_details($__jwo_me_pay)
+                    : $__jwo_me_pay;
+                if (function_exists('auragold_payment_is_metal_exchange_inward')
+                    && auragold_payment_is_metal_exchange_inward($conn, $__me_merged)) {
+                    $embed_jwo_metal_amt += function_exists('auragold_metal_exchange_payment_display_amount')
+                        ? auragold_metal_exchange_payment_display_amount($__me_merged)
+                        : (float) ($__me_merged['amount'] ?? 0);
+                }
+            }
+            $embed_order['metal_amt'] = $embed_jwo_metal_amt;
         }
     }
     $edit_data_obj = $embed_order !== null ? ['order' => $embed_order, 'items' => $embed_items, 'payments' => $embed_payments] : null;
@@ -4297,100 +4361,23 @@ window.PB_PAGE_CONFIG = {
         
         // Hide suggestions when clicking outside
         $(document).on('click', function(e) {
-            if (!$(e.target).closest('#customerName, #customerSuggestions, #addCustomerBtn, #jwoDepartmentUserSearch, #jwoDepartmentUserSuggestions, #jwoAddDepartmentUserBtn').length) {
+            if (!$(e.target).closest('#customerName, #customerSuggestions, #addCustomerBtn, #jwoDepartmentUser, #jwoAddDepartmentUserBtn, .jwo-dept-user-select2-wrap').length) {
                 $('#customerSuggestions').hide();
-                $('#jwoDepartmentUserSuggestions').hide();
             }
         });
 
-        // JWO "Name" (department user / ledger): searchable list like customer name
-        let jwoDeptUserSearchTimeout;
-        $(document).on('input', '#jwoDepartmentUserSearch', function() {
-            if (!window.jwoHasDepartmentUserTables) return;
-            const searchTerm = $(this).val().trim();
-            const suggestionsDiv = $('#jwoDepartmentUserSuggestions');
-            const deptEl = document.getElementById('jwoDepartment');
-            const deptVal = deptEl && deptEl.value ? String(deptEl.value).trim() : '';
-            const allLedgers = !deptVal || parseInt(deptVal, 10) < 1;
-
-            clearTimeout(jwoDeptUserSearchTimeout);
-            if (searchTerm.length < 2) {
-                suggestionsDiv.hide();
-                $('#jwoDepartmentUser').val('');
-                return;
-            }
-
-            jwoDeptUserSearchTimeout = setTimeout(function() {
-                $.ajax({
-                    url: 'ajax/search-jwo-department-users.php',
-                    method: 'GET',
-                    data: {
-                        q: searchTerm,
-                        all_ledgers: allLedgers ? 1 : 0,
-                        department_id: allLedgers ? '' : deptVal
-                    },
-                    dataType: 'json',
-                    success: function(response) {
-                        const $sug = $('#jwoDepartmentUserSuggestions');
-                        $sug.empty();
-                        if (response.status !== 'success' || !response.users || !response.users.length) {
-                            $sug.hide();
-                            return;
-                        }
-                        $sug.append($('<div>').css({
-                            padding: '0.5rem',
-                            fontSize: '0.85rem',
-                            color: '#64748b',
-                            borderBottom: '1px solid #e2e8f0',
-                            fontWeight: '600'
-                        }).text('Select name:'));
-                        response.users.forEach(function(u) {
-                            var $row = $('<div class="jwo-dept-user-suggestion-item">').css({
-                                padding: '0.75rem',
-                                cursor: 'pointer',
-                                borderBottom: '1px solid #f1f5f9'
-                            });
-                            $row.append($('<div>').css({ fontWeight: '600', color: '#1e293b', fontSize: '0.9rem' }).text(u.user_name || ''));
-                            if (u.alternate_name) {
-                                $row.append($('<div>').css({ fontSize: '0.8rem', color: '#64748b', marginTop: '0.25rem' }).text(u.alternate_name));
-                            }
-                            if (u.mobile_no) {
-                                var $ph = $('<div>').css({ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.15rem' });
-                                $ph.append($('<i>').addClass('feather icon-phone').css('fontSize', '0.7rem'));
-                                $ph.append(document.createTextNode(' ' + u.mobile_no));
-                                $row.append($ph);
-                            }
-                            $row.data({ userId: u.id, userName: u.user_name || '' });
-                            $row.on('mouseenter', function() { $(this).css('background', '#f8fafc'); });
-                            $row.on('mouseleave', function() { $(this).css('background', '#fff'); });
-                            $sug.append($row);
-                        });
-                        $sug.show();
-                    },
-                    error: function() {
-                        $('#jwoDepartmentUserSuggestions').hide();
-                    }
-                });
-            }, 300);
-        });
-
-        $(document).on('click', '.jwo-dept-user-suggestion-item', function() {
-            var $t = $(this);
-            $('#jwoDepartmentUser').val(String($t.data('userId') || ''));
-            $('#jwoDepartmentUserSearch').val(String($t.data('userName') || ''));
-            $('#jwoDepartmentUserSuggestions').hide();
-        });
-
-        // NAME * (job worker): Enter opens Ledger Details like (+), prefills ledger name from typed text
-        $(document).on('keydown', '#jwoDepartmentUserSearch', function(e) {
+        // JWO Name: Enter in Select2 search opens ledger modal when no account selected
+        $(document).on('keydown', '.jwo-dept-user-select2-wrap .select2-search__field', function(e) {
             if (!window.jwoHasDepartmentUserTables) return;
             if (e.key !== 'Enter') return;
             var term = String($(this).val() || '').trim();
             if (!term) return;
+            var sel = document.getElementById('jwoDepartmentUser');
+            if (sel && sel.value) return;
             e.preventDefault();
-            $('#jwoDepartmentUserSuggestions').hide();
-            if (typeof openJwoJobWorkerLedgerModalFromUi !== 'function') return;
-            openJwoJobWorkerLedgerModalFromUi();
+            if (typeof openJwoJobWorkerLedgerModalFromUi === 'function') {
+                openJwoJobWorkerLedgerModalFromUi();
+            }
         });
 
         // ================== AGAINST OF: Sale Quotation / Task / Event ==================
@@ -5212,17 +5199,18 @@ window.PB_PAGE_CONFIG = {
      */
     async function openJwoJobWorkerLedgerModalFromUi() {
         jwoSetPendingDepartmentForNewJobWorker();
-        const hid = document.getElementById('jwoDepartmentUser');
-        const searchIn = document.getElementById('jwoDepartmentUserSearch');
-        const uid = hid && hid.value ? parseInt(hid.value, 10) : 0;
-        const term = searchIn ? String(searchIn.value || '').trim() : '';
+        const sel = document.getElementById('jwoDepartmentUser');
+        const uid = sel && sel.value ? parseInt(sel.value, 10) : 0;
+        const term = (typeof window.getJwoDepartmentUserSearchTerm === 'function')
+            ? window.getJwoDepartmentUserSearchTerm()
+            : '';
 
         if (uid > 0) {
             await openCustomerModalForEdit(uid);
             return;
         }
 
-        if (term.length >= 2) {
+        if (term.length >= 1) {
             const deptEl = document.getElementById('jwoDepartment');
             const deptVal = deptEl && deptEl.value ? String(deptEl.value).trim() : '';
             const allLedgers = !deptVal || parseInt(deptVal, 10) < 1;
@@ -5252,11 +5240,10 @@ window.PB_PAGE_CONFIG = {
                     pick = users[0];
                 }
                 if (pick && parseInt(pick.id, 10) > 0) {
-                    if (hid) {
-                        hid.value = String(parseInt(pick.id, 10));
-                    }
-                    if (searchIn && pick.user_name) {
-                        searchIn.value = pick.user_name;
+                    if (typeof window.setJwoDepartmentUserValue === 'function') {
+                        window.setJwoDepartmentUserValue(pick.id, pick.user_name);
+                    } else if (sel) {
+                        sel.value = String(parseInt(pick.id, 10));
                     }
                     await openCustomerModalForEdit(parseInt(pick.id, 10));
                     return;
@@ -5492,16 +5479,18 @@ window.PB_PAGE_CONFIG = {
                 
                 // JWO from sale order: new job-worker ledger fills the "Name" (department user) field only
                 if (window.isJobworkFromSaleOrder && newCid) {
-                    var jwoH = document.getElementById('jwoDepartmentUser');
-                    var jwoS = document.getElementById('jwoDepartmentUserSearch');
                     var nm = (data.customer_name || '').trim();
                     if (!nm) {
                         var ln = document.getElementById('ledgerName');
                         nm = ln && ln.value ? String(ln.value).trim() : '';
                     }
-                    if (jwoH && jwoS) {
-                        jwoH.value = String(newCid);
-                        jwoS.value = nm;
+                    if (typeof window.setJwoDepartmentUserValue === 'function') {
+                        window.setJwoDepartmentUserValue(newCid, nm);
+                    } else {
+                        var jwoH = document.getElementById('jwoDepartmentUser');
+                        if (jwoH) {
+                            jwoH.value = String(newCid);
+                        }
                     }
                 }
                 
@@ -9134,52 +9123,7 @@ window.PB_PAGE_CONFIG = {
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery category: Net Amount = Metal Value + Diamond + Stone + Making + Other - Discount; Final = NetAmt + Tax
-    function updateJewelleryNetAmountAndFinal() {
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        var totalMetalValue = 0;
-        var totalMaking = 0;
-        var totalStone = 0;
-        var totalDiamond = 0;
-        var totalOther = 0;
-        var totalDiscount = 0;
-        var totalTax = 0;
-        var jewelleryRows = [];
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery' || catVal === 'Diamonds' || catVal === 'GemStones') {
-                var mvInp = r.querySelector('[data-column="metal-value"] input');
-                if (mvInp) totalMetalValue += parseFloat(mvInp.value) || 0;
-                var maInp = r.querySelector('[data-column="making-amount"] input');
-                if (maInp) totalMaking += parseFloat(maInp.value) || 0;
-                var saInp = r.querySelector('[data-column="stone-amount"] input');
-                if (saInp) totalStone += parseFloat(saInp.value) || 0;
-                var daInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (daInp) totalDiamond += parseFloat(daInp.value) || 0;
-                var oaInp = r.querySelector('[data-column="other-amount"] input');
-                if (oaInp) totalOther += parseFloat(oaInp.value) || 0;
-                var dcInp = r.querySelector('[data-column="discount"] input');
-                if (dcInp) totalDiscount += parseFloat(dcInp.value) || 0;
-                var taxInp = r.querySelector('[data-column="tax"] input');
-                if (taxInp) totalTax += parseFloat(taxInp.value) || 0;
-                if (catVal === 'Jewellery') jewelleryRows.push(r);
-            }
-        }
-        var netAmt = totalMetalValue + totalMaking + totalStone + totalDiamond + totalOther - totalDiscount;
-        if (netAmt < 0) netAmt = 0;
-        var finalAmount = netAmt + totalTax;
-        for (var j = 0; j < jewelleryRows.length; j++) {
-            var jr = jewelleryRows[j];
-            var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-        }
-    }
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10189,12 +10133,8 @@ window.PB_PAGE_CONFIG = {
     let isSaving = false;
 
     function refreshJwoDepartmentUsers(deptId, selectUserId, callback) {
-        var hid = document.getElementById('jwoDepartmentUser');
-        var searchIn = document.getElementById('jwoDepartmentUserSearch');
-        var sug = document.getElementById('jwoDepartmentUserSuggestions');
+        var sel = document.getElementById('jwoDepartmentUser');
         var btn = document.getElementById('jwoAddDepartmentUserBtn');
-        var d = deptId !== undefined && deptId !== null ? String(deptId).trim() : '';
-        var okDept = d && parseInt(d, 10) > 0;
         if (btn) {
             var tablesOk = !!window.jwoHasDepartmentUserTables;
             btn.disabled = !tablesOk;
@@ -10204,38 +10144,52 @@ window.PB_PAGE_CONFIG = {
             if (callback) callback();
             return;
         }
-        if (!hid || !searchIn) {
-            if (callback) callback();
-            return;
-        }
-        if (sug) {
-            sug.style.display = 'none';
-        }
-        if (typeof $ !== 'undefined' && $('#jwoDepartmentUserSuggestions').length) {
-            $('#jwoDepartmentUserSuggestions').empty().hide();
-        }
-
-        var uid = (selectUserId !== undefined && selectUserId !== null && String(selectUserId).trim() !== '') ? String(parseInt(selectUserId, 10)) : '';
-        if (uid === 'NaN' || uid === '') {
-            hid.value = '';
-            searchIn.value = '';
+        if (!sel || sel.tagName !== 'SELECT') {
             if (callback) callback();
             return;
         }
 
-        hid.value = uid;
+        var uid = (selectUserId !== undefined && selectUserId !== null && String(selectUserId).trim() !== '')
+            ? String(parseInt(selectUserId, 10))
+            : '';
+        if (uid === 'NaN' || uid === '' || uid === '0') {
+            if (typeof window.setJwoDepartmentUserValue === 'function') {
+                window.setJwoDepartmentUserValue('', '');
+            } else {
+                sel.value = '';
+            }
+            if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                window.initJwoDepartmentUserSelect2();
+            }
+            if (callback) callback();
+            return;
+        }
+
         fetch('ajax/get-customer.php?customer_id=' + encodeURIComponent(uid), { credentials: 'same-origin' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data && data.status === 'success' && data.customer) {
-                    searchIn.value = data.customer.name || '';
+                var nm = (data && data.status === 'success' && data.customer)
+                    ? (data.customer.name || '')
+                    : ('User #' + uid);
+                if (typeof window.setJwoDepartmentUserValue === 'function') {
+                    window.setJwoDepartmentUserValue(uid, nm);
                 } else {
-                    searchIn.value = 'User #' + uid;
+                    sel.value = uid;
+                }
+                if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                    window.initJwoDepartmentUserSelect2();
                 }
                 if (callback) callback();
             })
             .catch(function() {
-                searchIn.value = 'User #' + uid;
+                if (typeof window.setJwoDepartmentUserValue === 'function') {
+                    window.setJwoDepartmentUserValue(uid, 'User #' + uid);
+                } else {
+                    sel.value = uid;
+                }
+                if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                    window.initJwoDepartmentUserSelect2();
+                }
                 if (callback) callback();
             });
     }
@@ -10268,6 +10222,9 @@ window.PB_PAGE_CONFIG = {
             var deptEl = document.getElementById('jwoDepartment');
             if (deptEl) {
                 deptEl.addEventListener('change', function() {
+                    if (typeof window.destroyJwoDepartmentUserSelect2 === 'function') {
+                        window.destroyJwoDepartmentUserSelect2();
+                    }
                     refreshJwoDepartmentUsers(deptEl.value, '');
                 });
             }
@@ -10320,13 +10277,17 @@ window.PB_PAGE_CONFIG = {
     }
 
     /** Parse save AJAX body; throws with snippet if server returned HTML/PHP error instead of JSON. */
-    function auragoldJsonFromFetchResponse(text, logLabel) {
+    function auragoldJsonFromFetchResponse(text, logLabel, httpStatus) {
+        var body = (text === null || text === undefined) ? '' : String(text);
         try {
-            return JSON.parse(text);
+            return JSON.parse(body);
         } catch (ignore) {
-            console.error(logLabel || 'save-jobwork-order response', text);
-            var snippet = (text && String(text).replace(/\s+/g, ' ').trim().substring(0, 500)) || '';
-            throw new Error(snippet ? ('Server: ' + snippet) : 'Invalid response (not JSON)');
+            console.error(logLabel || 'save-jobwork-order response', { status: httpStatus || 0, body: body });
+            var snippet = body.replace(/\s+/g, ' ').trim().substring(0, 500);
+            if (!snippet && httpStatus) {
+                throw new Error('Invalid response (HTTP ' + httpStatus + '). Check browser Network tab for ajax/save-jobwork-order.php.');
+            }
+            throw new Error(snippet ? ('Server: ' + snippet) : 'Invalid response (not JSON). Save may have failed on the server — open Network → save-jobwork-order.php for details.');
         }
     }
 
@@ -10475,15 +10436,15 @@ window.PB_PAGE_CONFIG = {
                     fdSplit.append('pending_stone_allocations', pendingStoneJson);
                     if (typeof collectPosPaymentsForSave === 'function') {
                         try {
-                            fdSplit.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                            fdSplit.append('payments', JSON.stringify(jwoCollectPaymentsForSave()));
                         } catch (ePaySplit) { /* ignore */ }
                     }
                 }
                 appendJwoCommonFields(fdSplit);
                 fetch('ajax/save-jobwork-order.php', { method: 'POST', body: fdSplit, credentials: 'same-origin' })
-                    .then(function(r) { return r.text(); })
-                    .then(function(text) {
-                        var data = auragoldJsonFromFetchResponse(text, 'save-jobwork-order split');
+                    .then(function(r) { return r.text().then(function(text) { return { text: text, status: r.status }; }); })
+                    .then(function(res) {
+                        var data = auragoldJsonFromFetchResponse(res.text, 'save-jobwork-order split', res.status);
                         if (data.status === 'success') {
                             if (splitIdx === 0 && typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
                                 window.auragoldVoucherDiamondStoneOnSaveSuccess(data.jwo_id || data.jobwork_id || '');
@@ -10582,13 +10543,20 @@ window.PB_PAGE_CONFIG = {
         }
         if (typeof collectPosPaymentsForSave === 'function') {
             try {
-                fd.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                fd.append('payments', JSON.stringify(jwoCollectPaymentsForSave()));
             } catch (ePayJwo) { /* ignore */ }
         }
         fetch('ajax/save-jobwork-order.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .then(function(r) { return r.text(); })
-            .then(function(text) {
-                var data = auragoldJsonFromFetchResponse(text, 'save-jobwork-order');
+            .then(function(r) { return r.text().then(function(text) { return { text: text, status: r.status }; }); })
+            .then(function(res) {
+                var data = auragoldJsonFromFetchResponse(res.text, 'save-jobwork-order', res.status);
+                if (data && data.session_expired) {
+                    alert(data.message || 'Session expired. Please sign in again.');
+                    if (data.redirect) {
+                        window.location.href = data.redirect;
+                    }
+                    return;
+                }
                 isSaving = false;
                 if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
                 if (data.status === 'success') {
@@ -10622,6 +10590,9 @@ window.PB_PAGE_CONFIG = {
                     }
                     if (newJwoId && document.getElementById('jwoCurrentId')) {
                         document.getElementById('jwoCurrentId').setAttribute('data-jwo-id', String(newJwoId));
+                    }
+                    if (data.jwo_status && document.getElementById('jwoStatus')) {
+                        document.getElementById('jwoStatus').value = String(data.jwo_status);
                     }
                     var dEl = document.getElementById('jwoDepartment');
                     var wEl = document.getElementById('jwoDepartmentUser');
@@ -11099,8 +11070,8 @@ window.PB_PAGE_CONFIG = {
         // Hedging: full sale invoice total is kept; server creates purchase fixing from sum of line metal_cost
 
         // Collect payments
-        orderData.payments = (typeof collectPosPaymentsForSave === 'function')
-            ? collectPosPaymentsForSave()
+        orderData.payments = (typeof jwoCollectPaymentsForSave === 'function')
+            ? jwoCollectPaymentsForSave()
             : [];
 
         
@@ -11879,6 +11850,26 @@ window.PB_PAGE_CONFIG = {
         if (document.getElementById('fixingType')) {
             document.getElementById('fixingType').value = order.fixing_type || 'Standard';
         }
+        if (window.isJobworkFromSaleOrder) {
+            var jwoStatusEl = document.getElementById('jwoStatus');
+            if (jwoStatusEl && order.jwo_status) {
+                var jwoSt = String(order.jwo_status).trim();
+                var hasSt = false;
+                for (var si = 0; si < jwoStatusEl.options.length; si++) {
+                    if (jwoStatusEl.options[si].value === jwoSt) {
+                        hasSt = true;
+                        break;
+                    }
+                }
+                if (hasSt) {
+                    jwoStatusEl.value = jwoSt;
+                }
+            }
+            var jwoPriEl = document.getElementById('jwoPriority');
+            if (jwoPriEl && order.priority) {
+                jwoPriEl.value = String(order.priority);
+            }
+        }
         // Hedging fields: show/hide (toggleHedgingSection may be in another scope, so run inline)
         var fixingTypeEl = document.getElementById('fixingType');
         var showHedging = fixingTypeEl && fixingTypeEl.value === 'Hedging';
@@ -12064,6 +12055,9 @@ window.PB_PAGE_CONFIG = {
         // Add payments to table (and to global payments array via addPaymentToTable)
         if (loadedPayments && loadedPayments.length > 0) {
             loadedPayments.forEach(function(payment) {
+                if (window.isJobworkFromSaleOrder && jwoPaymentRowIsSaleOrderMetalExchange(payment)) {
+                    return;
+                }
                 // Map payment type from database to modal type
                 var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : (payment.type || '');
                 let paymentType = String(rawPayType).toLowerCase();
@@ -12134,8 +12128,23 @@ window.PB_PAGE_CONFIG = {
                     }
                     paymentData.metal_exchange_purity_wt = mePure || '0';
                 }
+                if (paymentType === 'metal-exchange') {
+                    var meDispAmt = jwoMetalExchangeDisplayAmount(Object.assign({}, payment, paymentData));
+                    paymentData.amount = meDispAmt;
+                }
                 addPaymentToTable(paymentData);
             });
+            if (window.isJobworkFromSaleOrder && typeof payments !== 'undefined') {
+                var meSum = 0;
+                payments.forEach(function(p) {
+                    if (p && String(p.type || '') === 'metal-exchange' && !jwoPaymentRowIsSaleOrderMetalExchange(p)) {
+                        meSum += jwoMetalExchangeDisplayAmount(p);
+                    }
+                });
+                if (document.getElementById('summaryMetalAmt')) {
+                    document.getElementById('summaryMetalAmt').textContent = meSum.toFixed(2);
+                }
+            }
         } else {
             // Show empty message
             if (paymentTableBody) {
@@ -12162,7 +12171,7 @@ window.PB_PAGE_CONFIG = {
         if (document.getElementById('summaryBalanceAmt')) {
             document.getElementById('summaryBalanceAmt').textContent = savedBalanceAmt.toFixed(2);
         }
-        if (document.getElementById('summaryMetalAmt')) {
+        if (document.getElementById('summaryMetalAmt') && !window.isJobworkFromSaleOrder) {
             document.getElementById('summaryMetalAmt').textContent = parseFloat(order.metal_amt || 0).toFixed(2);
         }
         const roundOffVal = parseFloat(order.round_off || 0);
@@ -12213,7 +12222,15 @@ window.PB_PAGE_CONFIG = {
         if (document.getElementById('summaryNetTotal')) {
             document.getElementById('summaryNetTotal').textContent = parseFloat(order.net_total || order.subtotal || 0).toFixed(2);
         }
-        if (document.getElementById('summaryMetalAmt')) {
+        if (document.getElementById('summaryMetalAmt') && window.isJobworkFromSaleOrder && typeof payments !== 'undefined') {
+            var meSumRestore = 0;
+            payments.forEach(function(p) {
+                if (p && String(p.type || '') === 'metal-exchange' && !jwoPaymentRowIsSaleOrderMetalExchange(p)) {
+                    meSumRestore += jwoMetalExchangeDisplayAmount(p);
+                }
+            });
+            document.getElementById('summaryMetalAmt').textContent = meSumRestore.toFixed(2);
+        } else if (document.getElementById('summaryMetalAmt')) {
             document.getElementById('summaryMetalAmt').textContent = parseFloat(order.metal_amt || 0).toFixed(2);
         }
         if (roundOffValueInput) roundOffValueInput.value = roundOffVal.toFixed(2);
@@ -12327,6 +12344,51 @@ window.PB_PAGE_CONFIG = {
     <?php endif; ?>
     
     // ================== PAYMENT FUNCTIONALITY ==================
+
+    function jwoMetalExchangeDisplayAmount(pay) {
+        if (!pay || typeof pay !== 'object') return 0;
+        var a = parseFloat(pay.amount);
+        if (!isNaN(a) && a > 0.00001) return a;
+        var cur = parseFloat(pay.current_order_amount);
+        if (!isNaN(cur) && cur > 0.00001) return cur;
+        var rate = parseFloat(pay.metal_exchange_rate || pay.rate || 0);
+        var pure = parseFloat(pay.metal_exchange_purity_wt || pay.purity_weight || 0);
+        var gross = parseFloat(pay.metal_exchange_gross_wt || pay.gross_weight || pay.gross_wt || 0);
+        if (rate > 0.00001 && pure > 0.00001) return rate * pure;
+        if (rate > 0.00001 && gross > 0.00001) return rate * gross;
+        var qty = parseFloat(pay.quantity || 0);
+        if (qty > 0.00001 && rate > 0.00001) return rate * qty;
+        return 0;
+    }
+
+    function jwoPaymentRowIsJwoMetalExchange(payment) {
+        if (!payment || typeof payment !== 'object') return false;
+        var pd = payment.payment_details;
+        if (typeof pd === 'string' && pd.trim() !== '') {
+            try { pd = JSON.parse(pd); } catch (e) { pd = null; }
+        }
+        return !!(pd && pd.jobwork_order_metal_exchange);
+    }
+
+    function jwoPaymentRowIsSaleOrderMetalExchange(payment) {
+        if (!payment || typeof payment !== 'object') return false;
+        if (jwoPaymentRowIsJwoMetalExchange(payment)) return false;
+        if (payment.jwo_client_metal_exchange) return false;
+        var pt = String(payment.payment_type || payment.type || '').toLowerCase();
+        var dep = String(payment.deposit_into || '').toLowerCase();
+        var isMe = dep === 'metal exchange' || pt.indexOf('exch') >= 0 || pt === 'metal-exchange' || payment.type === 'metal-exchange';
+        return isMe;
+    }
+
+    function jwoCollectPaymentsForSave() {
+        var raw = (typeof collectPosPaymentsForSave === 'function') ? collectPosPaymentsForSave() : [];
+        if (!window.isJobworkFromSaleOrder || !Array.isArray(raw)) return raw;
+        return raw.filter(function(p) {
+            return p && !p.readonly_from_sale_order;
+        });
+    }
+    window.jwoMetalExchangeDisplayAmount = jwoMetalExchangeDisplayAmount;
+    window.jwoCollectPaymentsForSave = jwoCollectPaymentsForSave;
     
     let paymentRowIndex = 0;
     // Must be `var` so window.payments exists — collectPosPaymentsForSave() (auragold-payment-cards.js) reads global.payments
@@ -12382,8 +12444,72 @@ window.PB_PAGE_CONFIG = {
         initSalesPersonSelect2();
     }
     
+    function setMetalExchangeModalReadonly(readonly) {
+        var modal = document.getElementById('metalExchangeModal');
+        if (!modal) return;
+        var fields = modal.querySelectorAll('input, select, textarea, button');
+        fields.forEach(function(el) {
+            if (el.closest('.modal-footer')) return;
+            if (readonly) {
+                el.setAttribute('disabled', 'disabled');
+            } else {
+                el.removeAttribute('disabled');
+            }
+        });
+        var pw = document.getElementById('metalExchangePurityWt');
+        if (pw) pw.setAttribute('readonly', 'readonly');
+        var saveBtn = modal.querySelector('.modal-footer button[onclick*="savePayment"]');
+        if (saveBtn) {
+            saveBtn.style.display = readonly ? 'none' : '';
+        }
+        var titleEl = modal.querySelector('.modal-title');
+        if (titleEl) {
+            titleEl.textContent = readonly
+                ? 'Sale order metal exchange (view only)'
+                : 'Metal Exchange';
+        }
+    }
+
+    function fillMetalExchangeModalFromPayment(payment) {
+        if (!payment) return;
+        var mem = document.getElementById('metalExchangeMetal');
+        if (mem && payment.metal_exchange_metal_id) mem.value = String(payment.metal_exchange_metal_id);
+        var mepi = document.getElementById('metalExchangeProductInput');
+        if (mepi && payment.metal_exchange_product_name) mepi.value = payment.metal_exchange_product_name;
+        var mepid = document.getElementById('metalExchangeProductId');
+        if (mepid && payment.metal_exchange_product_id) mepid.value = String(payment.metal_exchange_product_id);
+        var megw = document.getElementById('metalExchangeGrossWt');
+        if (megw) megw.value = payment.metal_exchange_gross_wt != null ? payment.metal_exchange_gross_wt : '0';
+        var mep = document.getElementById('metalExchangePurity');
+        if (mep) mep.value = payment.purity_carat != null && payment.purity_carat !== '' ? payment.purity_carat : '1';
+        var mepw = document.getElementById('metalExchangePurityWt');
+        if (mepw) mepw.value = payment.metal_exchange_purity_wt != null ? payment.metal_exchange_purity_wt : '0';
+        var meq = document.getElementById('metalExchangeQty');
+        if (meq) meq.value = payment.quantity != null ? payment.quantity : '1';
+        var mer = document.getElementById('metalExchangeRate');
+        if (mer) mer.value = payment.metal_exchange_rate != null ? payment.metal_exchange_rate : '0';
+        var mea = document.getElementById('metalExchangeAmount');
+        if (mea) {
+            var meViewAmt = (typeof jwoMetalExchangeDisplayAmount === 'function')
+                ? jwoMetalExchangeDisplayAmount(payment)
+                : (parseFloat(payment.amount) || 0);
+            mea.value = meViewAmt.toFixed(2);
+        }
+        var meic = document.getElementById('metalExchangeItemCode');
+        if (meic && payment.metal_exchange_item_code != null) meic.value = payment.metal_exchange_item_code;
+    }
+
+    function openSaleOrderMetalExchangeView(payment) {
+        openPaymentModal('metal-exchange', { readonlyView: true });
+        fillMetalExchangeModalFromPayment(payment);
+    }
+
     // Open payment modal based on type
-    function openPaymentModal(type) {
+    function openPaymentModal(type, options) {
+        options = options || {};
+        if (type === 'metal-exchange') {
+            setMetalExchangeModalReadonly(!!options.readonlyView);
+        }
         const modalMap = {
             'cash': '#cashPaymentModal',
             'bank': '#bankPaymentModal',
@@ -12426,6 +12552,11 @@ window.PB_PAGE_CONFIG = {
             
             $(modalId).modal('show');
         }
+    }
+    if (typeof $ !== 'undefined') {
+        $(document).on('hidden.bs.modal', '#metalExchangeModal', function() {
+            setMetalExchangeModalReadonly(false);
+        });
     }
     
     // Scrap Payment: single searchable product input – type to see list, select to fill rate/purity
@@ -12704,6 +12835,9 @@ window.PB_PAGE_CONFIG = {
         // Add new payment
         paymentRowIndex++;
         paymentData.id = 'payment-' + paymentRowIndex;
+        if (window.isJobworkFromSaleOrder && type === 'metal-exchange') {
+            paymentData.jwo_client_metal_exchange = true;
+        }
         payments.push(paymentData);
         addPaymentToTable(paymentData);
         
@@ -12738,6 +12872,15 @@ window.PB_PAGE_CONFIG = {
     
     // Delete payment
     function deletePayment(paymentId) {
+        var payDel = typeof payments !== 'undefined' ? payments.find(function(p) { return p.id === paymentId; }) : null;
+        if (payDel && payDel.readonly_from_sale_order) {
+            if (typeof swal === 'function') {
+                swal('Metal Exchange', 'This line is from the sale order. Remove it on the sale order screen.', 'info');
+            } else {
+                alert('This metal exchange is from the sale order.');
+            }
+            return;
+        }
         if (confirm('Are you sure you want to delete this payment?')) {
             const row = document.getElementById(paymentId);
             if (row) row.remove();
@@ -12761,6 +12904,12 @@ window.PB_PAGE_CONFIG = {
     // Edit payment: open modal and populate with row data so user can change amount
     function editPayment(paymentId) {
         let payment = typeof payments !== 'undefined' ? payments.find(function(p) { return p.id === paymentId; }) : null;
+        if (payment && payment.readonly_from_sale_order && String(payment.type || '') === 'metal-exchange') {
+            if (typeof openSaleOrderMetalExchangeView === 'function') {
+                openSaleOrderMetalExchangeView(payment);
+            }
+            return;
+        }
         if (!payment) {
             const row = document.getElementById(paymentId);
             if (row && row.classList && row.classList.contains('pos-payment-card')) {
@@ -12924,6 +13073,18 @@ window.PB_PAGE_CONFIG = {
         var tq = document.getElementById('paymentTotalQuantity');
         if (ta) ta.textContent = totalAmount.toFixed(2);
         if (tq) tq.textContent = totalQuantity.toFixed(2);
+        if (window.isJobworkFromSaleOrder && typeof jwoMetalExchangeDisplayAmount === 'function' && typeof payments !== 'undefined') {
+            var meSumUpd = 0;
+            payments.forEach(function(p) {
+                if (p && String(p.type || '') === 'metal-exchange' && !jwoPaymentRowIsSaleOrderMetalExchange(p)) {
+                    meSumUpd += jwoMetalExchangeDisplayAmount(p);
+                }
+            });
+            var metalEl = document.getElementById('summaryMetalAmt');
+            if (metalEl) {
+                metalEl.textContent = meSumUpd.toFixed(2);
+            }
+        }
     }
     
     // Multiple comments: list with add, edit, delete, date/time

@@ -60,16 +60,10 @@ $auragold_voucher_runtime_client = auragold_voucher_runtime_bootstrap($conn, $me
 $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherSettings() : [];
 
 
-// Load Karat master data (metal_id when column exists — scope "Select Karat" per metal tab in product modal)
+// Load Karat master data (Sales + Common; metal_id when column exists)
+require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
 $si_carat_has_metal_col = isset($conn) && $conn instanceof mysqli && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
-if ($si_carat_has_metal_col) {
-    $carats = getList("SELECT id, name, purity, description, metal_id FROM tbl_carat WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_carat') . " ORDER BY metal_id IS NULL, metal_id ASC, id ASC");
-} else {
-    $carats = getList("SELECT id, name, purity, description FROM tbl_carat WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_carat') . " ORDER BY id ASC");
-}
-if (!is_array($carats)) {
-    $carats = [];
-}
+$carats = auragold_get_carat_list($conn, 'sales');
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_location') . " ORDER BY id ASC");
@@ -84,30 +78,7 @@ $categories = getList("SELECT id, name FROM tbl_categories WHERE status = 1 ORDE
 $branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
 $calculation_modes = getList("SELECT id, name, code FROM tbl_calculation_modes WHERE status = 1 ORDER BY sort_order ASC, name ASC");
 
-$auragold_masters_cuts = getList("SELECT id, name FROM tbl_cut WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_cut') : '') . " ORDER BY name ASC");
-$auragold_masters_colors = getList("SELECT id, name FROM tbl_color WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_color') : '') . " ORDER BY name ASC");
-$auragold_masters_shapes = getList("SELECT id, name FROM tbl_shape WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_shape') : '') . " ORDER BY name ASC");
-$auragold_masters_clarities = getList("SELECT id, name FROM tbl_clarity WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_clarity') : '') . " ORDER BY name ASC");
-$auragold_masters_sieve_sizes = getList("SELECT id, name FROM tbl_sieve_size WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_sieve_size') : '') . " ORDER BY name ASC");
-$auragold_masters_sizes = getList("SELECT id, name FROM tbl_size WHERE status = 1 " . (function_exists('auragold_master_list_sql_suffix') ? auragold_master_list_sql_suffix($conn, 'tbl_size') : '') . " ORDER BY name ASC");
-if (!is_array($auragold_masters_cuts)) {
-    $auragold_masters_cuts = [];
-}
-if (!is_array($auragold_masters_colors)) {
-    $auragold_masters_colors = [];
-}
-if (!is_array($auragold_masters_shapes)) {
-    $auragold_masters_shapes = [];
-}
-if (!is_array($auragold_masters_clarities)) {
-    $auragold_masters_clarities = [];
-}
-if (!is_array($auragold_masters_sieve_sizes)) {
-    $auragold_masters_sieve_sizes = [];
-}
-if (!is_array($auragold_masters_sizes)) {
-    $auragold_masters_sizes = [];
-}
+require_once __DIR__ . '/includes/auragold_product_modal_spec_masters.php';
 
 // Standard ledger groups for dropdown
 $ledger_groups = [
@@ -379,6 +350,8 @@ if (!empty($conn) && function_exists('getList')) {
         margin: 0;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     border-radius: 10px;
+        position: relative;
+        z-index: 1200 !important;
     }
     
     .top-navbar .nav {
@@ -2600,6 +2573,35 @@ text-transform: uppercase;
     #customerSuggestions {
         font-family: inherit;
     }
+    .si-customer-select2-wrap {
+        flex: 1;
+        min-width: 0;
+    }
+    .si-customer-select2-wrap .select2-container {
+        width: 100% !important;
+        max-width: 100%;
+    }
+    .si-customer-select2-wrap .select2-container--default .select2-selection--single {
+        height: calc(1.5em + 0.5rem + 2px);
+        min-height: calc(1.5em + 0.5rem + 2px);
+        border: 1px solid #ced4da;
+        border-radius: 0.2rem;
+        font-size: 0.875rem;
+    }
+    .si-customer-select2-wrap .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: calc(1.5em + 0.5rem);
+        padding-left: 0.5rem;
+        color: #495057;
+    }
+    .si-customer-select2-wrap .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: calc(1.5em + 0.5rem + 2px);
+    }
+    .select2-container.si-customer-select2-container {
+        z-index: 50 !important;
+    }
+    .select2-dropdown.si-customer-select2-dropdown {
+        z-index: 50 !important;
+    }
     .customer-suggestion-item:hover {
         background: #f8fafc !important;
     }
@@ -3131,12 +3133,15 @@ text-transform: uppercase;
                                             <div class="col-md-6">
                                                 <div class="form-group mb-md-0">
                                                     <label>Name *</label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" required style="padding-right: 35px;" autocomplete="off">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="">
-                                                        <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
+                                                    <div style="display: flex; align-items: stretch; gap: 4px;">
+                                                        <div class="si-customer-select2-wrap">
+                                                            <select class="form-control form-control-sm" id="customerId" name="customer_id" required>
+                                                                <option value="">Select customer...</option>
+                                                            </select>
+                                                            <input type="hidden" id="customerName" name="customer_name" value="">
+                                                            <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
+                                                        </div>
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary p-0" id="addCustomerBtn" title="Add / Edit Customer" style="width: 32px; min-width: 32px; line-height: 1; align-self: stretch;"><i class="feather icon-plus"></i></button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -3564,6 +3569,10 @@ text-transform: uppercase;
 <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
+<link rel="stylesheet" href="assets/libs/select2/select2.css">
+<script src="assets/libs/select2/select2.js"></script>
+<script src="assets/js/sale-invoice-customer-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/sale-invoice-customer-select2.js'); ?>"></script>
+<script src="assets/js/product-modal-catalog-design-no.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-catalog-design-no.js'); ?>"></script>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
@@ -3575,12 +3584,7 @@ text-transform: uppercase;
     const locations = <?php echo json_encode(isset($locations) && is_array($locations) ? $locations : []); ?>;
     const categories = <?php echo json_encode(isset($categories) && is_array($categories) ? $categories : []); ?>;
     window.AURAGOLD_CALCULATION_MODES = <?php echo json_encode(isset($calculation_modes) && is_array($calculation_modes) ? $calculation_modes : []); ?>;
-    window.AURAGOLD_MASTERS_CUTS = <?php echo json_encode(isset($auragold_masters_cuts) && is_array($auragold_masters_cuts) ? $auragold_masters_cuts : []); ?>;
-    window.AURAGOLD_MASTERS_COLORS = <?php echo json_encode(isset($auragold_masters_colors) && is_array($auragold_masters_colors) ? $auragold_masters_colors : []); ?>;
-    window.AURAGOLD_MASTERS_SHAPES = <?php echo json_encode(isset($auragold_masters_shapes) && is_array($auragold_masters_shapes) ? $auragold_masters_shapes : []); ?>;
-    window.AURAGOLD_MASTERS_CLARITIES = <?php echo json_encode(isset($auragold_masters_clarities) && is_array($auragold_masters_clarities) ? $auragold_masters_clarities : []); ?>;
-    window.AURAGOLD_MASTERS_SIEVE_SIZES = <?php echo json_encode(isset($auragold_masters_sieve_sizes) && is_array($auragold_masters_sieve_sizes) ? $auragold_masters_sieve_sizes : []); ?>;
-    window.AURAGOLD_MASTERS_SIZES = <?php echo json_encode(isset($auragold_masters_sizes) && is_array($auragold_masters_sizes) ? $auragold_masters_sizes : []); ?>;
+<?php if (function_exists('auragold_echo_product_modal_spec_masters_js')) { auragold_echo_product_modal_spec_masters_js(); } ?>
     const metals = <?php echo json_encode(isset($metals) && is_array($metals) ? $metals : []); ?>;
     window.metals = metals;
     window.voucherSettingsByMetal = <?php echo json_encode(isset($voucher_settings_by_metal) && is_array($voucher_settings_by_metal) ? $voucher_settings_by_metal : []); ?>;
@@ -3910,26 +3914,6 @@ window.PB_PAGE_CONFIG = {
             if (sel) populateCaratSelectForModalRow(sel, row);
         });
     }
-    
-    function auragoldPopulateModalSpecSelectsForRow(row) {
-        if (!row || !row.querySelector) return;
-        var map = [
-            { attr: 'cut', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_CUTS) || [], ph: 'Select Cut' },
-            { attr: 'color', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_COLORS) || [], ph: 'Select Color' },
-            { attr: 'shape', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SHAPES) || [], ph: 'Select Shape' },
-            { attr: 'clarity', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_CLARITIES) || [], ph: 'Select Clarity' },
-            { attr: 'seive', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SIEVE_SIZES) || [], ph: 'Select Seive' },
-            { attr: 'size', list: (typeof window !== 'undefined' && window.AURAGOLD_MASTERS_SIZES) || [], ph: 'Select Size' }
-        ];
-        for (var i = 0; i < map.length; i++) {
-            var m = map[i];
-            var sel = row.querySelector('select.auragold-spec-select[data-auragold-spec=\"' + m.attr + '\"]');
-            if (!sel || !m.list || !m.list.length) continue;
-            if (sel.options.length > 1) continue;
-            populateSelect(sel, m.list, 'id', 'name', m.ph);
-        }
-    }
-    window.auragoldPopulateModalSpecSelectsForRow = auragoldPopulateModalSpecSelectsForRow;
     
     // Global variables
     let currentMetalId = null;
@@ -4452,8 +4436,6 @@ window.PB_PAGE_CONFIG = {
                 openCustomerModalForAdd();
             }
         });
-        
-        // Handle Add Category Icon Click
         $(document).on('click', '.add-category-icon', function(e) {
             e.stopPropagation();
             e.preventDefault();
@@ -4475,73 +4457,13 @@ window.PB_PAGE_CONFIG = {
         $(document).on('change', '#fixingType', toggleHedgingSection);
         $(document).ready(function() { toggleHedgingSection(); });
         
-        // Customer Autocomplete/Suggestions
-        let customerSearchTimeout;
         let selectedCustomerId = null;
-        
-        $(document).on('input', '#customerName', function() {
-            const searchTerm = $(this).val().trim();
-            const suggestionsDiv = $('#customerSuggestions');
-            
-            // Clear previous timeout
-            clearTimeout(customerSearchTimeout);
-            
-            // Hide suggestions if search term is too short
-            if (searchTerm.length < 2) {
-                suggestionsDiv.hide();
-                $('#customerId').val('');
-                selectedCustomerId = null;
-                var cbsClr = document.getElementById('customerBillingState');
-                if (cbsClr) cbsClr.value = '';
-                window.customerState = '';
-                if (typeof window.updateSaleInvoiceAddItemButtonState === 'function') {
-                    window.updateSaleInvoiceAddItemButtonState();
-                }
-                return;
-            }
-            
-            // Debounce search
-            customerSearchTimeout = setTimeout(function() {
-                $.ajax({
-                    url: 'ajax/search-customers.php',
-                    method: 'GET',
-                    data: { q: searchTerm },
-                    dataType: 'json',
-                    success: function(response) {
-                        if (response.status === 'success' && response.customers && response.customers.length > 0) {
-                            let html = '<div style="padding: 0.5rem; font-size: 0.85rem; color: #64748b; border-bottom: 1px solid #e2e8f0; font-weight: 600;">Select Customer:</div>';
-                            
-                            response.customers.forEach(function(customer) {
-                                var bs = (customer.billing_state != null ? String(customer.billing_state) : '').replace(/"/g, '&quot;');
-                                var gs = (customer.gstin != null ? String(customer.gstin) : '').replace(/"/g, '&quot;');
-                                html += `
-                                    <div class="customer-suggestion-item" 
-                                         data-customer-id="${customer.id}" 
-                                         data-customer-name="${customer.name}"
-                                         data-billing-state="${bs}"
-                                         data-gstin="${gs}"
-                                         style="padding: 0.75rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.2s;"
-                                         onmouseover="this.style.background='#f8fafc'" 
-                                         onmouseout="this.style.background='#fff'">
-                                        <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${customer.name}</div>
-                                        ${customer.alternate_name ? '<div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">' + customer.alternate_name + '</div>' : ''}
-                                        ${customer.mobile_no ? '<div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.15rem;"><i class="feather icon-phone" style="font-size: 0.7rem;"></i> ' + customer.mobile_no + '</div>' : ''}
-                                    </div>
-                                `;
-                            });
-                            
-                            suggestionsDiv.html(html).show();
-                        } else {
-                            suggestionsDiv.hide();
-                        }
-                    },
-                    error: function() {
-                        suggestionsDiv.hide();
-                    }
-                });
-            }, 300);
+        window.selectedCustomerId = selectedCustomerId;
+        $(document).on('change', '#customerId', function() {
+            selectedCustomerId = $(this).val() || null;
+            window.selectedCustomerId = selectedCustomerId;
         });
-        
+
         /** After picking a customer, fill Customer GSTIN from tbl_customers via API (reliable vs search list). */
         window.saleInvoiceApplyCustomerGstinFromServer = function (customerId) {
             var cid = parseInt(String(customerId || '').trim(), 10);
@@ -4560,49 +4482,37 @@ window.PB_PAGE_CONFIG = {
                 .catch(function () { /* ignore */ });
         };
 
-        // Handle customer selection from suggestions
-        $(document).on('click', '.customer-suggestion-item', function() {
-            const customerId = $(this).data('customer-id');
-            const customerName = $(this).data('customer-name');
-            const billingState = $(this).attr('data-billing-state') || '';
-            
-            $('#customerName').val(customerName);
-            $('#customerId').val(customerId);
-            selectedCustomerId = customerId;
-            var cbs = document.getElementById('customerBillingState');
-            if (cbs) cbs.value = billingState;
-            window.customerState = billingState || '';
-            if (typeof window.saleInvoiceApplyCustomerGstinFromServer === 'function') {
-                window.saleInvoiceApplyCustomerGstinFromServer(customerId);
-            }
-            $('#customerSuggestions').hide();
-            if (typeof window.updateSaleInvoiceAddItemButtonState === 'function') {
-                window.updateSaleInvoiceAddItemButtonState();
-            }
-            
-            // Load customer balance when customer is selected (with small delay to ensure DOM is updated)
-            setTimeout(function() {
-                if (typeof loadCustomerBalance === 'function') {
-                    loadCustomerBalance();
-                }
-                if (typeof window.auragoldSaleInvoiceRefreshGstForAllRows === 'function') {
-                    window.auragoldSaleInvoiceRefreshGstForAllRows();
-                }
-            }, 100);
-        });
-
-        // Recompute GST % on all lines when billing state hidden field updates (no #customerSelect on this page)
+        // Recompute GST % on all lines when billing state hidden field updates
         $(document).on('input change', '#customerBillingState', function() {
             if (typeof window.auragoldSaleInvoiceRefreshGstForAllRows === 'function') {
                 window.auragoldSaleInvoiceRefreshGstForAllRows();
             }
         });
-        
-        // Hide suggestions when clicking outside
-        $(document).on('click', function(e) {
-            if (!$(e.target).closest('#customerName, #customerSuggestions, #addCustomerBtn').length) {
-                $('#customerSuggestions').hide();
+
+        // Customer Select2: Enter in search opens add-customer modal with typed name
+        $(document).on('keydown', '.si-customer-select2-wrap .select2-search__field', function(e) {
+            if (e.key !== 'Enter') return;
+            var term = (typeof window.getSaleInvoiceCustomerSearchTerm === 'function')
+                ? window.getSaleInvoiceCustomerSearchTerm()
+                : String($(this).val() || '').trim();
+            var cid = parseInt($('#customerId').val() || selectedCustomerId || 0, 10) || 0;
+            if (cid > 0 || !term) return;
+            e.preventDefault();
+            if ($('#customerId').hasClass('select2-hidden-accessible')) {
+                $('#customerId').select2('close');
             }
+            initNewLedgerModalDefaults();
+            $('#customerCreationModal').modal('show');
+            setTimeout(function() {
+                const ledgerNameField = $('#ledgerName');
+                if (ledgerNameField.length) {
+                    ledgerNameField.val(term);
+                    if (typeof handleNameInput === 'function') {
+                        handleNameInput(ledgerNameField[0]);
+                    }
+                    ledgerNameField.focus();
+                }
+            }, 300);
         });
         
         // ================== AGAINST OF: pick source document (customer required) ==================
@@ -4877,75 +4787,6 @@ window.PB_PAGE_CONFIG = {
         $(document).on('click', function(e) {
             if (!$(e.target).closest('#searchSaleInvoice, #saleInvoiceSuggestions').length) {
                 saleInvoiceSuggestions.hide();
-            }
-        });
-        
-        // Handle keyboard navigation in suggestions
-        $(document).on('keydown', '#customerName', function(e) {
-            const suggestionsDiv = $('#customerSuggestions');
-            const visibleItems = suggestionsDiv.find('.customer-suggestion-item:visible');
-            const customerNameValue = $(this).val().trim();
-            
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                if (visibleItems.length === 0) return;
-                
-                const currentFocused = suggestionsDiv.find('.customer-suggestion-item.focused');
-                if (currentFocused.length === 0) {
-                    visibleItems.first().addClass('focused').css('background', '#f8fafc');
-                } else {
-                    const next = currentFocused.next('.customer-suggestion-item:visible');
-                    if (next.length) {
-                        currentFocused.removeClass('focused').css('background', '');
-                        next.addClass('focused').css('background', '#f8fafc');
-                    }
-                }
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                if (visibleItems.length === 0) return;
-                
-                const currentFocused = suggestionsDiv.find('.customer-suggestion-item.focused');
-                if (currentFocused.length > 0) {
-                    const prev = currentFocused.prev('.customer-suggestion-item:visible');
-                    if (prev.length) {
-                        currentFocused.removeClass('focused').css('background', '');
-                        prev.addClass('focused').css('background', '#f8fafc');
-                    } else {
-                        currentFocused.removeClass('focused').css('background', '');
-                    }
-                }
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                const focused = suggestionsDiv.find('.customer-suggestion-item.focused');
-                
-                // If there's a focused suggestion, select it
-                if (focused.length) {
-                    focused.click();
-                } 
-                // If no focused suggestion but there's text in the name field, open customer registration modal
-                else if (customerNameValue.length > 0) {
-                    // Hide suggestions
-                    suggestionsDiv.hide();
-                    
-                    initNewLedgerModalDefaults();
-                    $('#customerCreationModal').modal('show');
-                    
-                    // Pre-fill the name field in the modal
-                    setTimeout(function() {
-                        const ledgerNameField = $('#ledgerName');
-                        if (ledgerNameField.length) {
-                            ledgerNameField.val(customerNameValue);
-                            // Trigger the handleNameInput function if it exists
-                            if (typeof handleNameInput === 'function') {
-                                handleNameInput(ledgerNameField[0]);
-                            }
-                            // Focus on the next field or keep focus on name
-                            ledgerNameField.focus();
-                        }
-                    }, 300);
-                }
-            } else if (e.key === 'Escape') {
-                suggestionsDiv.hide();
             }
         });
         
@@ -5795,15 +5636,21 @@ window.PB_PAGE_CONFIG = {
                 // Close the customer creation modal
                 $('#customerCreationModal').modal('hide');
                 
-                // Update the customer in the main form (keep selected customer id)
-                if (data.customer_name && document.getElementById('customerName')) {
-                    document.getElementById('customerName').value = data.customer_name;
-                }
-                if (data.customer_id && document.getElementById('customerId')) {
-                    document.getElementById('customerId').value = data.customer_id;
+                if (data.customer_id) {
                     selectedCustomerId = data.customer_id;
-                    if (typeof jQuery !== 'undefined') {
-                        jQuery('#customerId').trigger('change');
+                    window.selectedCustomerId = data.customer_id;
+                    if (typeof window.setSaleInvoiceCustomerValue === 'function') {
+                        window.setSaleInvoiceCustomerValue(data.customer_id, data.customer_name || '');
+                    } else {
+                        if (data.customer_name && document.getElementById('customerName')) {
+                            document.getElementById('customerName').value = data.customer_name;
+                        }
+                        if (document.getElementById('customerId')) {
+                            document.getElementById('customerId').value = data.customer_id;
+                        }
+                        if (typeof jQuery !== 'undefined') {
+                            jQuery('#customerId').trigger('change');
+                        }
                     }
                     if (typeof window.updateSaleInvoiceAddItemButtonState === 'function') {
                         window.updateSaleInvoiceAddItemButtonState();
@@ -6042,7 +5889,9 @@ window.PB_PAGE_CONFIG = {
                 }
                 // Show Diamond Category filter only on Diamond & Stones tab
                 var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
-                if (filterRow) {
+                if (typeof window.syncModalDiamondCategoryFilterForActiveTab === 'function') {
+                    window.syncModalDiamondCategoryFilterForActiveTab();
+                } else if (filterRow) {
                     filterRow.style.display = (currentMetalName && currentMetalName.toLowerCase().indexOf('diamond') !== -1) ? '' : 'none';
                 }
                 // Apply tab-wise column visibility (Gold vs Silver etc. each have their own)
@@ -6064,9 +5913,13 @@ window.PB_PAGE_CONFIG = {
         if (firstTab) {
             currentMetalId = firstTab.getAttribute('data-metal-id');
             currentMetalName = firstTab.getAttribute('data-metal-name');
-            var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
-            if (filterRow) {
-                filterRow.style.display = (currentMetalName && currentMetalName.toLowerCase().indexOf('diamond') !== -1) ? '' : 'none';
+            if (typeof window.syncModalDiamondCategoryFilterForActiveTab === 'function') {
+                window.syncModalDiamondCategoryFilterForActiveTab();
+            } else {
+                var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
+                if (filterRow) {
+                    filterRow.style.display = (currentMetalName && currentMetalName.toLowerCase().indexOf('diamond') !== -1) ? '' : 'none';
+                }
             }
             // Apply column visibility for initial tab
             if (typeof applyProductModalColumnVisibilityForTab === 'function' && currentMetalId) {
@@ -6104,8 +5957,12 @@ window.PB_PAGE_CONFIG = {
             } else {
                 modal.classList.add('product-modal-metal-tab');
             }
-            var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
-            if (filterRow) filterRow.style.display = isDiamond ? '' : 'none';
+            if (typeof window.syncModalDiamondCategoryFilterForActiveTab === 'function') {
+                window.syncModalDiamondCategoryFilterForActiveTab();
+            } else {
+                var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
+                if (filterRow) filterRow.style.display = isDiamond ? '' : 'none';
+            }
             if (typeof applyProductModalColumnVisibilityForTab === 'function') applyProductModalColumnVisibilityForTab(currentMetalId || '');
             if (typeof refreshProductModalCaratSelectsForVisibleRows === 'function') refreshProductModalCaratSelectsForVisibleRows();
         }
@@ -6495,6 +6352,8 @@ window.PB_PAGE_CONFIG = {
             }
         }
     }
+    window.addEmptyProductRow = addEmptyProductRow;
+    window.filterProductsByMetal = filterProductsByMetal;
     
     // Open product search modal for selecting a product
     let currentProductRow = null;
@@ -6509,6 +6368,9 @@ window.PB_PAGE_CONFIG = {
             if (row) {
                 var categorySelect = row.querySelector('[data-column="category"] select');
                 diamondCategory = categorySelect ? (categorySelect.value || '').trim() : '';
+            }
+            if (!diamondCategory && typeof window.isLooseDiamondTabActive === 'function' && window.isLooseDiamondTabActive()) {
+                diamondCategory = 'Diamond';
             }
             window.productSearchDiamondCategory = diamondCategory || '';
             // Keep metal = current tab (Diamond & Stones). Products like Gold Bar have Jewellery on their Diamond & Stones characteristic, not on Gold metal.
@@ -6616,7 +6478,7 @@ window.PB_PAGE_CONFIG = {
             url += '&metal_id=' + encodeURIComponent(metalId);
         }
         const diamondCat = (typeof window.productSearchDiamondCategory !== 'undefined') ? (window.productSearchDiamondCategory || '') : '';
-        if (diamondCat && ['Diamonds', 'GemStones', 'Jewellery'].indexOf(diamondCat) !== -1) {
+        if (diamondCat && ['Diamonds', 'GemStones', 'Jewellery', 'Diamond', 'Stone'].indexOf(diamondCat) !== -1) {
             url += '&diamond_category=' + encodeURIComponent(diamondCat);
         }
         if (typeof window.AURAGOLD_WORKING_BRANCH_ID !== 'undefined' && window.AURAGOLD_WORKING_BRANCH_ID > 0) {
@@ -7187,7 +7049,7 @@ window.PB_PAGE_CONFIG = {
         tbody.innerHTML = '<tr><td colspan="103" class="text-center text-muted py-4">Loading products...</td></tr>';
         
         var ajaxData = { metal_id: metalId, search: search };
-        if (diamondCategory && ['Diamonds', 'GemStones', 'Jewellery'].indexOf(diamondCategory) !== -1) {
+        if (diamondCategory && ['Diamonds', 'GemStones', 'Jewellery', 'Diamond', 'Stone'].indexOf(diamondCategory) !== -1) {
             ajaxData.diamond_category = diamondCategory;
         }
         // Use jQuery if available, otherwise use fetch
@@ -7424,7 +7286,7 @@ window.PB_PAGE_CONFIG = {
         } else {
             // Fallback using fetch API
             let url = 'ajax/get-products-by-metal.php?metal_id=' + metalId + (search ? '&search=' + encodeURIComponent(search) : '');
-            if (diamondCategory && ['Diamonds', 'GemStones', 'Jewellery'].indexOf(diamondCategory) !== -1) {
+            if (diamondCategory && ['Diamonds', 'GemStones', 'Jewellery', 'Diamond', 'Stone'].indexOf(diamondCategory) !== -1) {
                 url += '&diamond_category=' + encodeURIComponent(diamondCategory);
             }
             fetch(url)
@@ -8166,8 +8028,8 @@ window.PB_PAGE_CONFIG = {
                 var tr = sel.closest ? sel.closest('tr.product-row') : null;
                 var dataDc = tr && tr.getAttribute ? (tr.getAttribute('data-diamond-category') || '').trim() : '';
                 var forceDiamond = sel.classList.contains('diamond-category-select')
-                    || ['Jewellery', 'Diamonds', 'GemStones'].indexOf(v) !== -1
-                    || (dataDc && ['Jewellery', 'Diamonds', 'GemStones'].indexOf(dataDc) !== -1);
+                    || (typeof window.isKnownDiamondCategoryValue === 'function' && window.isKnownDiamondCategoryValue(v))
+                    || (dataDc && typeof window.isKnownDiamondCategoryValue === 'function' && window.isKnownDiamondCategoryValue(dataDc));
                 populateCategorySelectForModal(sel, isDiamondTab || forceDiamond);
             });
         }
@@ -8178,7 +8040,7 @@ window.PB_PAGE_CONFIG = {
                 if (!sel) return;
                 var catSel = r.querySelector('[data-column="category"] select');
                 var cv = (catSel && catSel.value) ? String(catSel.value).trim() : '';
-                var rowDiamondCat = ['Jewellery', 'Diamonds', 'GemStones'].indexOf(cv) !== -1;
+                var rowDiamondCat = (typeof window.isKnownDiamondCategoryValue === 'function' && window.isKnownDiamondCategoryValue(cv));
                 applyCalculationSelectOptionsForRow(sel, r, isDiamondTab || rowDiamondCat);
             });
         }
@@ -9736,60 +9598,18 @@ window.PB_PAGE_CONFIG = {
     
     // Helper: get current Diamond Category filter for modal (when on Diamond tab)
     function getModalDiamondCategoryFilter() {
+        if (typeof window.auragoldGetModalDiamondCategoryFilter === 'function') {
+            return window.auragoldGetModalDiamondCategoryFilter();
+        }
         var sel = document.getElementById('modalDiamondCategoryFilter');
         if (!sel) return '';
         var v = (sel.value || '').trim();
-        return (v && ['Diamonds', 'GemStones', 'Jewellery'].indexOf(v) !== -1) ? v : '';
+        return (v && ['Diamonds', 'GemStones', 'Jewellery', 'Diamond', 'Stone'].indexOf(v) !== -1) ? v : '';
     }
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery category: Net Amount = Metal Value + Diamond + Stone + Making + Other - Discount; Final = NetAmt + Tax
-    function updateJewelleryNetAmountAndFinal() {
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        var totalMetalValue = 0;
-        var totalMaking = 0;
-        var totalStone = 0;
-        var totalDiamond = 0;
-        var totalOther = 0;
-        var totalDiscount = 0;
-        var totalTax = 0;
-        var jewelleryRows = [];
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery' || catVal === 'Diamonds' || catVal === 'GemStones') {
-                var mvInp = r.querySelector('[data-column="metal-value"] input');
-                if (mvInp) totalMetalValue += parseFloat(mvInp.value) || 0;
-                var maInp = r.querySelector('[data-column="making-amount"] input');
-                if (maInp) totalMaking += parseFloat(maInp.value) || 0;
-                var saInp = r.querySelector('[data-column="stone-amount"] input');
-                if (saInp) totalStone += parseFloat(saInp.value) || 0;
-                var daInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (daInp) totalDiamond += parseFloat(daInp.value) || 0;
-                var oaInp = r.querySelector('[data-column="other-amount"] input');
-                if (oaInp) totalOther += parseFloat(oaInp.value) || 0;
-                var dcInp = r.querySelector('[data-column="discount"] input');
-                if (dcInp) totalDiscount += parseFloat(dcInp.value) || 0;
-                var taxInp = r.querySelector('[data-column="tax"] input');
-                if (taxInp) totalTax += parseFloat(taxInp.value) || 0;
-                if (catVal === 'Jewellery') jewelleryRows.push(r);
-            }
-        }
-        var netAmt = totalMetalValue + totalMaking + totalStone + totalDiamond + totalOther - totalDiscount;
-        if (netAmt < 0) netAmt = 0;
-        var finalAmount = netAmt + totalTax;
-        for (var j = 0; j < jewelleryRows.length; j++) {
-            var jr = jewelleryRows[j];
-            var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-        }
-    }
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10862,26 +10682,35 @@ window.PB_PAGE_CONFIG = {
         }
         
         // Validate required fields
-        const customerName = document.getElementById('customerName')?.value.trim();
-        if (!customerName) {
-            alert('Please enter customer name');
-            document.getElementById('customerName')?.focus();
+        const customerId = document.getElementById('customerId')?.value || '';
+        const customerName = document.getElementById('customerName')?.value.trim()
+            || (function () {
+                var sel = document.getElementById('customerId');
+                if (!sel || sel.tagName !== 'SELECT' || !sel.value) return '';
+                var opt = sel.options[sel.selectedIndex];
+                return opt ? String(opt.text || '').trim() : '';
+            })();
+        if (!customerId || !customerName) {
+            alert('Please select customer');
+            var csel = document.getElementById('customerId');
+            if (csel && typeof jQuery !== 'undefined' && jQuery(csel).hasClass('select2-hidden-accessible')) {
+                jQuery(csel).select2('open');
+            } else if (csel) {
+                csel.focus();
+            }
             return;
         }
-        
+
         // Set saving flag
         isSaving = true;
-        
+
         // Get current order number from display
         const currentOrderNoText = document.getElementById('currentOrderNo')?.textContent || <?php echo json_encode(isset($next_order_no) ? $next_order_no : 'SI-1'); ?>;
-        
+
         // Get order ID from URL or current order
         const urlParams = new URLSearchParams(window.location.search);
         const urlOrderId = urlParams.get('id');
         const currentOrderId = urlOrderId ? parseInt(urlOrderId) : <?php echo (int)($edit_order_id ?? 0); ?>;
-        
-        // Get customer ID
-        const customerId = document.getElementById('customerId')?.value || '';
         
         // Collect billing form data
         const orderData = {
@@ -12028,11 +11857,19 @@ window.PB_PAGE_CONFIG = {
         }
         
         // Populate billing form
-        if (document.getElementById('customerName')) {
-            document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
-        }
-        if (document.getElementById('customerId')) {
-            document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
+        if (typeof window.setSaleInvoiceCustomerValue === 'function') {
+            window.setSaleInvoiceCustomerValue(
+                order.supplier_id || order.customer_id || '',
+                order.supplier_name || order.customer_name || '',
+                { billing_state: order.customer_billing_state || '' }
+            );
+        } else {
+            if (document.getElementById('customerName')) {
+                document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
+            }
+            if (document.getElementById('customerId')) {
+                document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
+            }
         }
         if (document.getElementById('customerBillingState')) {
             document.getElementById('customerBillingState').value = order.customer_billing_state || '';

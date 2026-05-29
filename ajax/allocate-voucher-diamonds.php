@@ -136,19 +136,14 @@ if ($voucher_kind === 'sale_order') {
     $doc_date = trim((string) ($r['issue_date'] ?? ''));
 } elseif ($voucher_kind === 'material_receive') {
     $r = function_exists('getRecord')
-        ? getRecord('SELECT id, receive_no, receive_date FROM tbl_material_receives WHERE id = ' . $voucher_id . ' LIMIT 1')
+        ? getRecord('SELECT id, material_receive_no, order_date FROM tbl_material_receives WHERE id = ' . $voucher_id . ' LIMIT 1')
         : null;
-    if (!$r || empty($r['id'])) {
-        $r = function_exists('getRecord')
-            ? getRecord('SELECT id, voucher_no, voucher_date FROM tbl_material_receive WHERE id = ' . $voucher_id . ' LIMIT 1')
-            : null;
-    }
     if (!$r || empty($r['id'])) {
         echo json_encode(['ok' => false, 'message' => 'Material receive not found.']);
         exit;
     }
-    $doc_no = trim((string) ($r['receive_no'] ?? $r['voucher_no'] ?? ''));
-    $doc_date = trim((string) ($r['receive_date'] ?? $r['voucher_date'] ?? ''));
+    $doc_no = trim((string) ($r['material_receive_no'] ?? ''));
+    $doc_date = substr(trim((string) ($r['order_date'] ?? '')), 0, 10);
 } elseif ($voucher_kind === 'jobwork_order') {
     $r = function_exists('getRecord')
         ? getRecord('SELECT id, jobwork_no, order_date FROM tbl_jobwork_orders WHERE id = ' . $voucher_id . ' LIMIT 1')

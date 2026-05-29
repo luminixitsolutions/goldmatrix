@@ -596,7 +596,9 @@ if (empty($jwq_diamond_scope_metal_ids)) {
                 div.textContent = (p.name || '') + (p.metal_name ? ' (' + p.metal_name + ')' : '');
                 div.addEventListener('click', function () {
                     inputEl.value = (p.name || '') + (p.metal_name ? ' (' + p.metal_name + ')' : '');
-                    idEl.value = (p.characteristic_id || p.id) || '';
+                    var pcid = (p.characteristic_id || p.id) || '';
+                    idEl.value = pcid;
+                    idEl.setAttribute('data-catalog-product-id', (p.id && p.characteristic_id) ? String(p.id) : '');
                     if (rateEl && p.rate != null && p.rate !== '') rateEl.value = p.rate;
                     if (purEl && p.opening_purity != null && p.opening_purity !== '') purEl.value = p.opening_purity;
                     var sku = (p.sku_code || p.barcode || '');

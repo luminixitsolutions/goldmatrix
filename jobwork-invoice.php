@@ -3357,9 +3357,11 @@ text-transform: uppercase;
                                                 <div class="payment-icon payment-card" title="Card">
                                             <img src="icons/card.jpeg" alt="Card" style="width: 45px; height: 45px;">
                                         </div>
+                                                <?php if (empty($is_jobwork_invoice_page)): ?>
                                                 <div class="payment-icon payment-exchange" title="Metal Exchange">
                                                     <img src="icons/metal.jpeg" alt="Metal Exchange" style="width: 45px; height: 45px;">
                                         </div>
+                                                <?php endif; ?>
                                                 <div class="payment-icon payment-jewelry" title="Scrap Payment">
                                                     <img src="icons/scrap.jpeg" alt="Scrap Payment" style="width: 45px; height: 45px;">
                                         </div>
@@ -3803,6 +3805,43 @@ window.PB_PAGE_CONFIG = {
             }
         }
         unset($emb_it);
+        if (is_array($embed_payments) && $embed_payments !== []) {
+            $pd_merge_path = __DIR__ . '/includes/auragold_payment_details_merge.php';
+            if (is_file($pd_merge_path)) {
+                require_once $pd_merge_path;
+                if (function_exists('auragold_merge_payment_details_into_payments')) {
+                    auragold_merge_payment_details_into_payments($embed_payments);
+                }
+            }
+        }
+        if (!empty($is_jobwork_from_sale_order) && is_array($embed_payments) && $embed_payments !== []) {
+            require_once __DIR__ . '/includes/auragold_metal_exchange_stock.php';
+            if (function_exists('auragold_jobwork_embed_strip_sale_order_metal_exchange_payments')) {
+                auragold_jobwork_embed_strip_sale_order_metal_exchange_payments($conn, $embed_payments, (int) $current_jwo_id);
+            }
+        }
+        // Jobwork invoice: metal exchange belongs on sale order / job work order — not on this screen.
+        if (!empty($is_jobwork_invoice_page) && is_array($embed_payments) && $embed_payments !== []) {
+            if (!function_exists('auragold_payment_is_metal_exchange_inward')) {
+                require_once __DIR__ . '/includes/auragold_metal_exchange_stock.php';
+            }
+            $embed_payments = array_values(array_filter($embed_payments, function ($ep) use ($conn) {
+                if (!is_array($ep)) {
+                    return false;
+                }
+                $merged = function_exists('auragold_payment_merge_stored_details')
+                    ? auragold_payment_merge_stored_details($ep)
+                    : $ep;
+                if (function_exists('auragold_payment_is_metal_exchange_inward')
+                    && auragold_payment_is_metal_exchange_inward($conn, $merged)) {
+                    return false;
+                }
+                $pt = strtolower(trim((string) ($merged['payment_type'] ?? $merged['type'] ?? '')));
+                $dep = strtolower(trim((string) ($merged['deposit_into'] ?? '')));
+
+                return !(strpos($pt, 'exch') !== false || strpos($pt, 'metal') !== false || $dep === 'metal exchange');
+            }));
+        }
         // Sale order diamond/stone allocations (tbl_sale_order_*_stock_issue) — show as extra Product List rows on jobwork invoice
         $embed_order['diamond_issues'] = [];
         $embed_order['stone_issues'] = [];
@@ -4090,11 +4129,31 @@ window.PB_PAGE_CONFIG = {
         fetch('ajax/get-product-by-barcode.php?barcode=' + encodeURIComponent(trimmed))
             .then(response => response.json())
             .then(data => {
-                if (data.success && data.product) {
-                    // Add product to Product Selection table (productListBody)
+                if (data.success && data.products && data.products.length) {
+                    var firstPr = data.products[0];
+                    if (firstPr && firstPr.metal_id != null && firstPr.metal_id !== '' && typeof switchToMetalTab === 'function') {
+                        switchToMetalTab(String(firstPr.metal_id));
+                    }
+                    var lastMid = '';
+                    for (var pi = 0; pi < data.products.length; pi++) {
+                        var pr = data.products[pi];
+                        addProductToProductSelectionTable(pr);
+                        if (pr.metal_id != null && pr.metal_id !== '') lastMid = String(pr.metal_id);
+                    }
+                    if (lastMid && typeof switchToMetalTab === 'function') {
+                        switchToMetalTab(lastMid);
+                    }
+                    if (barcodeInput) {
+                        barcodeInput.value = '';
+                        barcodeInput.style.borderColor = '';
+                        barcodeInput.focus();
+                    }
+                } else if (data.success && data.product) {
                     addProductToProductSelectionTable(data.product);
-                    
-                    // Clear barcode input
+                    var mid = data.product.metal_id != null && data.product.metal_id !== '' ? String(data.product.metal_id) : '';
+                    if (mid && typeof switchToMetalTab === 'function') {
+                        switchToMetalTab(mid);
+                    }
                     if (barcodeInput) {
                         barcodeInput.value = '';
                         barcodeInput.style.borderColor = '';
@@ -5635,6 +5694,9 @@ window.PB_PAGE_CONFIG = {
             });
         }
         
+        if (window.preferredProductModalMetalId && typeof switchToMetalTab === 'function') {
+            switchToMetalTab(String(window.preferredProductModalMetalId));
+        }
         const firstTab = modal.querySelector('.category-tab-btn.active');
         if (firstTab) {
             currentMetalId = firstTab.getAttribute('data-metal-id');
@@ -5722,6 +5784,9 @@ window.PB_PAGE_CONFIG = {
                 initCategoryTabs();
             } catch(e) {
                 console.log('Error initializing category tabs:', e);
+            }
+            if (window.preferredProductModalMetalId && typeof switchToMetalTab === 'function') {
+                switchToMetalTab(String(window.preferredProductModalMetalId));
             }
             
             // Clear search input
@@ -7734,6 +7799,16 @@ window.PB_PAGE_CONFIG = {
         row.setAttribute('data-rate', parseFloat(modalRowData.rate || 0));
         row.setAttribute('data-barcode', barcode);
         row.setAttribute('data-calculation-type', modalRowData.calculation_type || 'Rate X Gross Wt');
+        if (modalRowData.metal_id != null && modalRowData.metal_id !== '') {
+            row.setAttribute('data-metal-id', String(modalRowData.metal_id));
+        }
+        if (modalRowData.diamond_category || modalRowData.category) {
+            row.setAttribute('data-diamond-category', String(modalRowData.diamond_category || modalRowData.category).trim());
+        }
+        var savedLineTotal = parseFloat(modalRowData.net_amt_tax || modalRowData.net_amt || modalRowData.amount || 0) || 0;
+        if (savedLineTotal > 0) {
+            row.setAttribute('data-preserve-line-amounts', '1');
+        }
         if (modalRowData.source_against_item_id != null && String(modalRowData.source_against_item_id).trim() !== '') {
             row.setAttribute('data-source-against-item-id', String(modalRowData.source_against_item_id).trim());
         }
@@ -8677,30 +8752,11 @@ window.PB_PAGE_CONFIG = {
                     });
                     currentEditingRowId = rowId;
                     window.currentEditingRowId = rowId;
-                    // Pick metal_id for tab: if any item has diamond_category (Jewellery/Diamonds/GemStones), use Diamond & Stones tab
-                    var bestMetalId = null;
-                    var hasDiamondCategory = groupItems.some(function(d) {
-                        var cat = (d.diamond_category || d.category || '').toString().trim();
-                        return cat === 'Jewellery' || cat === 'Diamonds' || cat === 'GemStones';
-                    });
-                    if (hasDiamondCategory && typeof metals !== 'undefined' && metals.length) {
-                        var diamondMetal = metals.find(function(m) {
-                            var name = (m.display_name || m.name || '').toString();
-                            return name.toLowerCase().indexOf('diamond') !== -1;
-                        });
-                        if (diamondMetal) bestMetalId = String(diamondMetal.id);
-                    }
-                    if (!bestMetalId) {
-                        var metalCounts = {};
-                        groupItems.forEach(function(d) {
-                            var m = (d.metal_id != null && d.metal_id !== '') ? String(d.metal_id) : '_';
-                            if (m !== '_') metalCounts[m] = (metalCounts[m] || 0) + 1;
-                        });
-                        var maxCount = 0;
-                        for (var m in metalCounts) {
-                            if (metalCounts[m] > maxCount) { maxCount = metalCounts[m]; bestMetalId = m; }
-                        }
-                        if (!bestMetalId && groupItems[0]) bestMetalId = (groupItems[0].metal_id != null && groupItems[0].metal_id !== '') ? String(groupItems[0].metal_id) : null;
+                    var bestMetalId = (typeof resolveBestMetalTabIdFromItems === 'function')
+                        ? resolveBestMetalTabIdFromItems(groupItems, typeof metals !== 'undefined' ? metals : [])
+                        : null;
+                    if (bestMetalId && typeof applyPreferredProductModalMetalTab === 'function') {
+                        applyPreferredProductModalMetalTab(bestMetalId);
                     }
                     openProductModal();
                     setTimeout(function() {
@@ -8771,6 +8827,16 @@ window.PB_PAGE_CONFIG = {
                     
                     // Wait for modal to be fully shown, then add row with data
                     setTimeout(function() {
+                        var editMid = row.getAttribute('data-metal-id') || data.product.metal_id || '';
+                        var editCat = row.getAttribute('data-diamond-category') || '';
+                        if (typeof resolveBestMetalTabIdFromItems === 'function') {
+                            var probe = [{ metal_id: editMid, diamond_category: editCat, category: editCat }];
+                            var resolvedMid = resolveBestMetalTabIdFromItems(probe, typeof metals !== 'undefined' ? metals : []);
+                            if (resolvedMid) editMid = resolvedMid;
+                        }
+                        if (editMid && typeof switchToMetalTab === 'function') {
+                            switchToMetalTab(String(editMid));
+                        }
                         // Clear the product list body
                         const productListBody = document.getElementById('productListBody');
                         if (productListBody) {
@@ -8781,6 +8847,9 @@ window.PB_PAGE_CONFIG = {
                         const item = {
                             product_id: rowData.product_id,
                             product_characteristic_id: rowData.characteristic_id,
+                            metal_id: editMid || data.product.metal_id || '',
+                            diamond_category: editCat,
+                            category: editCat,
                             product_name: rowData.product_name || data.product.name,
                             quantity: rowData.quantity,
                             gross_weight: rowData.gross_wt,
@@ -9010,52 +9079,7 @@ window.PB_PAGE_CONFIG = {
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery category: Net Amount = Metal Value + Diamond + Stone + Making + Other - Discount; Final = NetAmt + Tax
-    function updateJewelleryNetAmountAndFinal() {
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        var totalMetalValue = 0;
-        var totalMaking = 0;
-        var totalStone = 0;
-        var totalDiamond = 0;
-        var totalOther = 0;
-        var totalDiscount = 0;
-        var totalTax = 0;
-        var jewelleryRows = [];
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery' || catVal === 'Diamonds' || catVal === 'GemStones') {
-                var mvInp = r.querySelector('[data-column="metal-value"] input');
-                if (mvInp) totalMetalValue += parseFloat(mvInp.value) || 0;
-                var maInp = r.querySelector('[data-column="making-amount"] input');
-                if (maInp) totalMaking += parseFloat(maInp.value) || 0;
-                var saInp = r.querySelector('[data-column="stone-amount"] input');
-                if (saInp) totalStone += parseFloat(saInp.value) || 0;
-                var daInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (daInp) totalDiamond += parseFloat(daInp.value) || 0;
-                var oaInp = r.querySelector('[data-column="other-amount"] input');
-                if (oaInp) totalOther += parseFloat(oaInp.value) || 0;
-                var dcInp = r.querySelector('[data-column="discount"] input');
-                if (dcInp) totalDiscount += parseFloat(dcInp.value) || 0;
-                var taxInp = r.querySelector('[data-column="tax"] input');
-                if (taxInp) totalTax += parseFloat(taxInp.value) || 0;
-                if (catVal === 'Jewellery') jewelleryRows.push(r);
-            }
-        }
-        var netAmt = totalMetalValue + totalMaking + totalStone + totalDiamond + totalOther - totalDiscount;
-        if (netAmt < 0) netAmt = 0;
-        var finalAmount = netAmt + totalTax;
-        for (var j = 0; j < jewelleryRows.length; j++) {
-            var jr = jewelleryRows[j];
-            var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-        }
-    }
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10597,9 +10621,9 @@ window.PB_PAGE_CONFIG = {
                 var pendingStoneJsonR = JSON.stringify(Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines.slice() : []);
                 jwiFd.append('pending_diamond_allocations', pendingDiamondJsonR);
                 jwiFd.append('pending_stone_allocations', pendingStoneJsonR);
-                if (typeof collectPosPaymentsForSave === 'function') {
+                if (typeof jwiCollectPaymentsForSave === 'function') {
                     try {
-                        jwiFd.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                        jwiFd.append('payments', JSON.stringify(jwiCollectPaymentsForSave()));
                     } catch (ePayJwiR) { /* ignore */ }
                 }
                 return fetch('ajax/save-jobwork-invoice.php', { method: 'POST', body: jwiFd, credentials: 'same-origin' })
@@ -10763,6 +10787,7 @@ window.PB_PAGE_CONFIG = {
         if (spElJwo && spElJwo.value !== undefined) {
             fd.append('sales_person', String(spElJwo.value || '').trim());
         }
+        fd.append('skip_metal_exchange_auto_issue', '1');
         fetch('ajax/save-jobwork-order.php', { method: 'POST', body: fd, credentials: 'same-origin' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -10791,9 +10816,9 @@ window.PB_PAGE_CONFIG = {
                 var pendingStoneJson = JSON.stringify(Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines.slice() : []);
                 jwiFd.append('pending_diamond_allocations', pendingDiamondJson);
                 jwiFd.append('pending_stone_allocations', pendingStoneJson);
-                if (typeof collectPosPaymentsForSave === 'function') {
+                if (typeof jwiCollectPaymentsForSave === 'function') {
                     try {
-                        jwiFd.append('payments', JSON.stringify(collectPosPaymentsForSave()));
+                        jwiFd.append('payments', JSON.stringify(jwiCollectPaymentsForSave()));
                     } catch (ePayJwi) { /* ignore */ }
                 }
                 return fetch('ajax/save-jobwork-invoice.php', { method: 'POST', body: jwiFd, credentials: 'same-origin' })
@@ -10860,17 +10885,30 @@ window.PB_PAGE_CONFIG = {
             savedSaleOrderId = null;
             return;
         }
-        var mpQs = [];
-        if (window._jwoRedirectMpDeptId) {
-            mpQs.push('department_id=' + encodeURIComponent(window._jwoRedirectMpDeptId));
-        }
-        if (window._jwoRedirectMpUserId) {
-            mpQs.push('user_id=' + encodeURIComponent(window._jwoRedirectMpUserId));
-        }
+        var mpDeptId = window._jwoRedirectMpDeptId || '';
+        var mpUserId = window._jwoRedirectMpUserId || '';
         window._jwoRedirectMpDeptId = null;
         window._jwoRedirectMpUserId = null;
-        window.location.href = 'manufacturing-process.php' + (mpQs.length ? '?' + mpQs.join('&') : '');
+        var soId = savedSaleOrderId ? parseInt(savedSaleOrderId, 10) : 0;
         savedSaleOrderId = null;
+        if (window.isJobworkInvoicePage && soId > 0) {
+            window.location.href = typeof window.jobworkOrderScreenUrl === 'function'
+                ? window.jobworkOrderScreenUrl(soId)
+                : ('jobwork-invoice.php?sale_order_id=' + encodeURIComponent(soId));
+            return;
+        }
+        if (window.isJobworkInvoicePage) {
+            window.location.href = 'jobwork-invoice.php';
+            return;
+        }
+        var mpQs = [];
+        if (mpDeptId) {
+            mpQs.push('department_id=' + encodeURIComponent(mpDeptId));
+        }
+        if (mpUserId) {
+            mpQs.push('user_id=' + encodeURIComponent(mpUserId));
+        }
+        window.location.href = 'manufacturing-process.php' + (mpQs.length ? '?' + mpQs.join('&') : '');
     }
     function confirmPrintJWO() {
         if (savedJwoId) {
@@ -11638,7 +11676,7 @@ window.PB_PAGE_CONFIG = {
         row.className = 'product-row';
         row.setAttribute('data-product-id', item.product_id || '');
         row.setAttribute('data-characteristic-id', item.product_characteristic_id || '');
-        row.setAttribute('data-metal-id', currentMetalId || item.metal_id || '');
+        row.setAttribute('data-metal-id', (item.metal_id != null && item.metal_id !== '') ? String(item.metal_id) : (currentMetalId || ''));
         
         // Generate the row HTML with all columns (populated with saved values)
         row.innerHTML = `
@@ -11764,9 +11802,10 @@ window.PB_PAGE_CONFIG = {
         var useDiamondOptions = false;
         var categorySelectEl = row.querySelector('[data-column="category"] select');
         if (categorySelectEl) {
-            // If item has diamond category (Jewellery/Diamonds/GemStones), use Diamond options regardless of active tab
-            var isDiamondCat = (item.category || '').toString().trim();
-            useDiamondOptions = (isDiamondCat === 'Jewellery' || isDiamondCat === 'Diamonds' || isDiamondCat === 'GemStones');
+            var isDiamondCat = (item.diamond_category || item.category || '').toString().trim();
+            useDiamondOptions = (typeof isKnownDiamondCategoryValue === 'function' && isKnownDiamondCategoryValue(isDiamondCat))
+                || isDiamondCat === 'Jewellery' || isDiamondCat === 'Diamonds' || isDiamondCat === 'GemStones'
+                || isDiamondCat === 'Diamond' || isDiamondCat === 'Stone';
             var isDiamondTab = useDiamondOptions || (typeof isDiamondTabActive === 'function' && isDiamondTabActive());
             if (typeof populateCategorySelectForModal === 'function') {
                 populateCategorySelectForModal(categorySelectEl, isDiamondTab);
@@ -11893,6 +11932,12 @@ window.PB_PAGE_CONFIG = {
         }
         if (typeof syncDiamondTabSharedBarcodes === 'function') {
             syncDiamondTabSharedBarcodes();
+        }
+        var savedModalNetTax = parseFloat(item.net_amount_tax || item.net_amt_tax || item.net_amt_with_tax || 0) || 0;
+        if (savedModalNetTax <= 0 && typeof calculateModalRowNetWeight === 'function') {
+            calculateModalRowNetWeight(row);
+        } else if (typeof updateJewelleryNetAmountAndFinal === 'function') {
+            updateJewelleryNetAmountAndFinal();
         }
         
         function updateRowSelection(row, isSelected) {
@@ -12317,6 +12362,33 @@ window.PB_PAGE_CONFIG = {
                 if (window.isJobworkInvoicePage && typeof appendJobworkInvoiceSaleOrderStockIssueRows === 'function') {
                     appendJobworkInvoiceSaleOrderStockIssueRows(order);
                 }
+                var tabProbeItems = itemList.slice();
+                if (order && order.diamond_issues && order.diamond_issues.length) {
+                    order.diamond_issues.forEach(function(iss) {
+                        if (!iss) return;
+                        tabProbeItems.push({
+                            metal_id: iss.metal_id || '',
+                            diamond_category: iss.diamond_category || 'Diamonds',
+                            category: iss.diamond_category || 'Diamonds'
+                        });
+                    });
+                }
+                if (order && order.stone_issues && order.stone_issues.length) {
+                    order.stone_issues.forEach(function(iss) {
+                        if (!iss) return;
+                        tabProbeItems.push({
+                            metal_id: iss.metal_id || '',
+                            diamond_category: iss.stone_category || 'GemStones',
+                            category: iss.stone_category || 'GemStones'
+                        });
+                    });
+                }
+                var preferredTabId = (typeof resolveBestMetalTabIdFromItems === 'function')
+                    ? resolveBestMetalTabIdFromItems(tabProbeItems, typeof metals !== 'undefined' ? metals : [])
+                    : null;
+                if (preferredTabId && typeof applyPreferredProductModalMetalTab === 'function') {
+                    applyPreferredProductModalMetalTab(preferredTabId);
+                }
             } catch (e) {
                 console.error('Error loading invoice items into form:', e);
                 if (productTableBody) {
@@ -12334,6 +12406,33 @@ window.PB_PAGE_CONFIG = {
             if (window.isJobworkInvoicePage && typeof appendJobworkInvoiceSaleOrderStockIssueRows === 'function') {
                 appendJobworkInvoiceSaleOrderStockIssueRows(order);
             }
+            var tabProbeEmpty = [];
+            if (order && order.diamond_issues && order.diamond_issues.length) {
+                order.diamond_issues.forEach(function(iss) {
+                    if (!iss) return;
+                    tabProbeEmpty.push({
+                        metal_id: iss.metal_id || '',
+                        diamond_category: iss.diamond_category || 'Diamonds',
+                        category: iss.diamond_category || 'Diamonds'
+                    });
+                });
+            }
+            if (order && order.stone_issues && order.stone_issues.length) {
+                order.stone_issues.forEach(function(iss) {
+                    if (!iss) return;
+                    tabProbeEmpty.push({
+                        metal_id: iss.metal_id || '',
+                        diamond_category: iss.stone_category || 'GemStones',
+                        category: iss.stone_category || 'GemStones'
+                    });
+                });
+            }
+            var preferredTabIdEmpty = (typeof resolveBestMetalTabIdFromItems === 'function')
+                ? resolveBestMetalTabIdFromItems(tabProbeEmpty, typeof metals !== 'undefined' ? metals : [])
+                : null;
+            if (preferredTabIdEmpty && typeof applyPreferredProductModalMetalTab === 'function') {
+                applyPreferredProductModalMetalTab(preferredTabIdEmpty);
+            }
         }
         
         // Clear existing payments and global payments array so Edit finds correct list
@@ -12348,6 +12447,14 @@ window.PB_PAGE_CONFIG = {
         // Add payments to table (and to global payments array via addPaymentToTable)
         if (loadedPayments && loadedPayments.length > 0) {
             loadedPayments.forEach(function(payment) {
+                if (payment.payment_details && typeof payment.payment_details === 'string' && payment.payment_details.trim() !== '') {
+                    try {
+                        var pdMerged = JSON.parse(payment.payment_details);
+                        if (pdMerged && typeof pdMerged === 'object') {
+                            payment = Object.assign({}, payment, pdMerged);
+                        }
+                    } catch (ePd) { /* ignore */ }
+                }
                 // Map payment type from database to modal type
                 var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : (payment.type || '');
                 let paymentType = String(rawPayType).toLowerCase();
@@ -12359,6 +12466,10 @@ window.PB_PAGE_CONFIG = {
                 else if (paymentType.includes('metal') || paymentType.includes('exch')) paymentType = 'metal-exchange';
                 else if (paymentType.includes('scrap')) paymentType = 'scrap';
                 else paymentType = 'other';
+
+                if (window.isJobworkInvoicePage && paymentType === 'metal-exchange') {
+                    return;
+                }
                 
                 var _prevBalLoad = parseFloat(payment.previous_balance_amount || 0) || 0;
                 var _dbTotalLoad = parseFloat(payment.amount || 0) || 0;
@@ -12417,6 +12528,12 @@ window.PB_PAGE_CONFIG = {
                         }
                     }
                     paymentData.metal_exchange_purity_wt = mePure || '0';
+                    if (window.isJobworkFromSaleOrder && (payment.readonly_from_sale_order || payment.sale_order_metal_exchange)) {
+                        paymentData.readonly_from_sale_order = true;
+                    }
+                    if (payment.mi_stock_id != null && payment.mi_stock_id !== '') {
+                        paymentData.mi_stock_id = String(payment.mi_stock_id);
+                    }
                 }
                 addPaymentToTable(paymentData);
             });
@@ -12427,6 +12544,9 @@ window.PB_PAGE_CONFIG = {
             }
             var _pfEmptyPayments = document.getElementById('paymentTableFooter');
             if (_pfEmptyPayments) _pfEmptyPayments.style.display = 'none';
+        }
+        if (typeof jwiPurgeMetalExchangePaymentsFromUi === 'function') {
+            jwiPurgeMetalExchangePaymentsFromUi();
         }
         
         // Update summary panel with saved values from database (so edit mode shows exact saved totals and balance)
@@ -12553,6 +12673,9 @@ window.PB_PAGE_CONFIG = {
             if (typeof populateOrderForm !== 'function') return false;
             try {
                 populateOrderForm(window.EDIT_ORDER_DATA.order, window.EDIT_ORDER_DATA.items || [], window.EDIT_ORDER_DATA.payments || []);
+                if (typeof jwiPurgeMetalExchangePaymentsFromUi === 'function') {
+                    jwiPurgeMetalExchangePaymentsFromUi();
+                }
                 if (window.history && window.history.replaceState) {
                     var jwoPath = (typeof jobworkOrderCanonicalPath === 'function') ? jobworkOrderCanonicalPath(editId) : null;
                     if (window.isJobworkFromRepairJwo && rjwoLoadId > 0) {
@@ -12602,6 +12725,55 @@ window.PB_PAGE_CONFIG = {
     <?php endif; ?>
     
     // ================== PAYMENT FUNCTIONALITY ==================
+
+    function jwoMetalExchangeDisplayAmount(pay) {
+        if (!pay || typeof pay !== 'object') return 0;
+        var a = parseFloat(pay.amount);
+        if (!isNaN(a) && a > 0.00001) return a;
+        var cur = parseFloat(pay.current_order_amount);
+        if (!isNaN(cur) && cur > 0.00001) return cur;
+        var rate = parseFloat(pay.metal_exchange_rate || pay.rate || 0);
+        var pure = parseFloat(pay.metal_exchange_purity_wt || pay.purity_weight || 0);
+        var gross = parseFloat(pay.metal_exchange_gross_wt || pay.gross_weight || pay.gross_wt || 0);
+        if (rate > 0.00001 && pure > 0.00001) return rate * pure;
+        if (rate > 0.00001 && gross > 0.00001) return rate * gross;
+        var qty = parseFloat(pay.quantity || 0);
+        if (qty > 0.00001 && rate > 0.00001) return rate * qty;
+        return 0;
+    }
+    window.jwoMetalExchangeDisplayAmount = jwoMetalExchangeDisplayAmount;
+
+    /** Jobwork invoice: do not re-post sale-order metal exchange (already in stock). */
+    function jwiCollectPaymentsForSave() {
+        var raw = (typeof collectPosPaymentsForSave === 'function') ? collectPosPaymentsForSave() : [];
+        if (!window.isJobworkFromSaleOrder || !Array.isArray(raw)) return raw;
+        return raw.filter(function (p) {
+            if (!p) return false;
+            if (p.readonly_from_sale_order) return false;
+            if ((p.type || '') === 'metal-exchange') return false;
+            return true;
+        });
+    }
+    window.jwiCollectPaymentsForSave = jwiCollectPaymentsForSave;
+
+    /** Remove metal exchange cards — not used on jobwork invoice (handled on sale order / JWO). */
+    function jwiPurgeMetalExchangePaymentsFromUi() {
+        if (!window.isJobworkInvoicePage) return;
+        if (typeof payments !== 'undefined' && Array.isArray(payments)) {
+            payments = payments.filter(function (p) { return (p.type || '') !== 'metal-exchange'; });
+        }
+        var tbody = document.getElementById('paymentTableBody');
+        if (!tbody) return;
+        tbody.querySelectorAll('.pos-payment-card[data-payment-type="metal-exchange"]').forEach(function (el) { el.remove(); });
+        var rows = tbody.querySelectorAll('.pos-payment-card');
+        if (rows.length === 0 && !tbody.querySelector('.no-payment-row')) {
+            tbody.innerHTML = '<div class="no-payment-row pos-payment-empty w-100 text-center text-muted py-3">No payment entries</div>';
+            var footer = document.getElementById('paymentTableFooter');
+            if (footer) footer.style.display = 'none';
+        }
+        if (typeof updatePaymentTotals === 'function') updatePaymentTotals();
+    }
+    window.jwiPurgeMetalExchangePaymentsFromUi = jwiPurgeMetalExchangePaymentsFromUi;
     
     let paymentRowIndex = 0;
     // Must be `var` so window.payments exists — collectPosPaymentsForSave() (auragold-payment-cards.js) reads global.payments
@@ -12614,6 +12786,9 @@ window.PB_PAGE_CONFIG = {
             icon._paymentHandlerBound = true;
             icon.addEventListener('click', function() {
                 window._editingPaymentId = null;
+                if (window.isJobworkInvoicePage && this.classList.contains('payment-exchange')) {
+                    return;
+                }
                 const paymentType = this.classList.contains('payment-cash') ? 'cash' :
                                    this.classList.contains('payment-bank') ? 'bank' :
                                    this.classList.contains('payment-cheque') ? 'cheque' :
@@ -13001,6 +13176,11 @@ window.PB_PAGE_CONFIG = {
     
     // Delete payment
     function deletePayment(paymentId) {
+        var payDel = typeof payments !== 'undefined' ? payments.find(function (p) { return p.id === paymentId; }) : null;
+        if (payDel && payDel.readonly_from_sale_order) {
+            alert('This metal exchange is from the sale order. Change it on the sale order screen.');
+            return;
+        }
         if (confirm('Are you sure you want to delete this payment?')) {
             const row = document.getElementById(paymentId);
             if (row) row.remove();
@@ -13024,6 +13204,10 @@ window.PB_PAGE_CONFIG = {
     // Edit payment: open modal and populate with row data so user can change amount
     function editPayment(paymentId) {
         let payment = typeof payments !== 'undefined' ? payments.find(function(p) { return p.id === paymentId; }) : null;
+        if (payment && payment.readonly_from_sale_order && String(payment.type || '') === 'metal-exchange') {
+            alert('Metal exchange from sale order: ' + (payment.metal_exchange_product_name || payment.metal_exchange_item_code || 'view on sale order'));
+            return;
+        }
         if (!payment) {
             const row = document.getElementById(paymentId);
             if (row && row.classList && row.classList.contains('pos-payment-card')) {

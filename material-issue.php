@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 require_once __DIR__ . '/includes/auragold-gst-page-vars.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
@@ -15,6 +16,8 @@ if ($auragold_working_branch_id <= 0 && !empty($_SESSION['working_branch_id'])) 
 // Load Metals for category tabs (branch-scoped when logged into a branch; same as Masters)
 $metals = getList("SELECT id, display_name, system_name FROM tbl_metal WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_metal') . " ORDER BY id ASC");
 require_once __DIR__ . '/includes/auragold_voucher_runtime_settings.php';
+require_once __DIR__ . '/includes/auragold_material_apply_jobwork_assignee.php';
+require_once __DIR__ . '/includes/auragold_voucher_line_images.php';
 $auragold_voucher_runtime_client = auragold_voucher_runtime_bootstrap($conn, $metals, 'Material Issue');
 // Voucher settings (metal-wise): used for reverse calculation result column
 $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherSettings() : [];
@@ -86,6 +89,8 @@ $edit_order = null;
 $edit_items = [];
 $edit_payments = [];
 $current_jwo_id = 0;
+/** @see includes/voucher_diamond_stone_panels.php — must be set before payment-area markup. */
+$auragold_voucher_ds_kind = 'material_issue';
 
 if ($edit_order_id > 0) {
     // First check if this id is a Job Work Order (edit JWO mode)
@@ -143,6 +148,18 @@ if ($edit_order_id > 0) {
         $next_order_no = $jwo_row['material_issue_no'];
         $is_jobwork_from_sale_order = true;
         $jwo_sale_order_id_param = (int)$jwo_row['sale_order_id'];
+        if ($jwo_sale_order_id_param > 0) {
+            $edit_payments = getList('SELECT * FROM tbl_sale_order_payments WHERE order_id = ' . (int) $jwo_sale_order_id_param);
+            require_once __DIR__ . '/includes/auragold_material_issue_rows_for_sale_order.php';
+            if (function_exists('auragold_material_issue_embed_payments_for_sale_order')) {
+                $edit_payments = auragold_material_issue_embed_payments_for_sale_order(
+                    $conn,
+                    is_array($edit_payments) ? $edit_payments : [],
+                    $jwo_sale_order_id_param,
+                    (int) $current_jwo_id
+                );
+            }
+        }
     } elseif ($mi_access_denied === '') {
         $edit_order = getRecord("SELECT * FROM tbl_sale_orders WHERE id = $edit_order_id");
         if ($edit_order) {
@@ -159,6 +176,29 @@ $is_jobwork_from_repair_order = false;
 $jwo_current_rjwo_id = 0;
 $jwo_from_repair_param = isset($_GET['from_repair']) && (string)$_GET['from_repair'] === '1';
 $jwo_sale_order_id_param = isset($jwo_sale_order_id_param) ? $jwo_sale_order_id_param : (isset($_GET['sale_order_id']) ? (int)$_GET['sale_order_id'] : 0);
+$jwm_source_jobwork_order_id = isset($_GET['jobwork_order_id']) ? (int) $_GET['jobwork_order_id'] : 0;
+$jwm_source_repair_jwo_id = isset($_GET['repair_jobwork_order_id']) ? (int) $_GET['repair_jobwork_order_id'] : 0;
+if ($current_jwo_id === 0 && $jwo_sale_order_id_param === 0) {
+    if ($jwm_source_jobwork_order_id > 0) {
+        $jw_src = getRecord('SELECT id, sale_order_id FROM tbl_jobwork_orders WHERE id = ' . (int) $jwm_source_jobwork_order_id . ' LIMIT 1');
+        if ($jw_src && (int) ($jw_src['sale_order_id'] ?? 0) > 0) {
+            $jwo_sale_order_id_param = (int) $jw_src['sale_order_id'];
+        }
+    } elseif ($jwm_source_repair_jwo_id > 0) {
+        $rj_tbl = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_repair_jobwork_orders'");
+        $ok_rj = ($rj_tbl && mysqli_num_rows($rj_tbl) > 0);
+        if ($rj_tbl) {
+            mysqli_free_result($rj_tbl);
+        }
+        if ($ok_rj) {
+            $rj_src = getRecord('SELECT id, repair_order_id FROM tbl_repair_jobwork_orders WHERE id = ' . (int) $jwm_source_repair_jwo_id . ' LIMIT 1');
+            if ($rj_src && (int) ($rj_src['repair_order_id'] ?? 0) > 0) {
+                $jwo_sale_order_id_param = (int) $rj_src['repair_order_id'];
+                $jwo_from_repair_param = true;
+            }
+        }
+    }
+}
 $selected_item_ids_param = isset($_GET['selected_item_ids']) ? trim((string)$_GET['selected_item_ids']) : '';
 $selected_order_ids_param = isset($_GET['selected_order_ids']) ? trim((string)$_GET['selected_order_ids']) : '';
 $jwo_queue_total_param = isset($_GET['jwo_queue_total']) ? max(0, (int)$_GET['jwo_queue_total']) : 0;
@@ -232,6 +272,15 @@ if ($jwo_sale_order_id_param > 0 && $current_jwo_id === 0) {
         $edit_order = $jwo_so;
         $edit_items = getList("SELECT * FROM tbl_sale_order_items WHERE order_id = $jwo_sale_order_id_param");
         $edit_payments = getList("SELECT * FROM tbl_sale_order_payments WHERE order_id = $jwo_sale_order_id_param");
+        require_once __DIR__ . '/includes/auragold_material_issue_rows_for_sale_order.php';
+        if (function_exists('auragold_material_issue_embed_payments_for_sale_order')) {
+            $edit_payments = auragold_material_issue_embed_payments_for_sale_order(
+                $conn,
+                is_array($edit_payments) ? $edit_payments : [],
+                (int) $jwo_sale_order_id_param,
+                (int) $current_jwo_id
+            );
+        }
         // Preview number: Bill Series (voucher Jobwork Order) when no JWO row yet; existing row keeps saved jobwork_no
         $next_order_no = function_exists('getNextMaterialIssueNo') ? getNextMaterialIssueNo($conn) : 'MI-1';
         // From sale-order-process (?selected_item_ids=): always create new JWO row(s), do not open existing JWO for this sale order.
@@ -287,6 +336,14 @@ if ($jwo_sale_order_id_param > 0 && $current_jwo_id === 0) {
             foreach ($jwo_items_existing as $it) {
                 $it['order_id'] = $it['material_issue_id'];
                 $edit_items[] = $it;
+            }
+            if (function_exists('auragold_material_issue_embed_payments_for_sale_order')) {
+                $edit_payments = auragold_material_issue_embed_payments_for_sale_order(
+                    $conn,
+                    [],
+                    (int) $jwo_sale_order_id_param,
+                    (int) $current_jwo_id
+                );
             }
         } else {
             if (isset($edit_order['department_id']) && $edit_order['department_id'] !== '' && $edit_order['department_id'] !== null) {
@@ -356,6 +413,17 @@ if ($selected_item_ids_param !== '') {
             }
         }
     }
+}
+
+if (!empty($edit_order) && is_array($edit_order) && function_exists('auragold_material_apply_jobwork_assignee')) {
+    auragold_material_apply_jobwork_assignee(
+        $conn,
+        $edit_order,
+        !empty($jwo_from_repair_param),
+        (int) $jwm_source_jobwork_order_id,
+        (int) $jwm_source_repair_jwo_id,
+        (int) $jwo_sale_order_id_param
+    );
 }
 
 // Departments for JWO: active departments first; must also include the saved department_id or <select> cannot display DB value (e.g. inactive dept or id missing from status=1 list)
@@ -3234,7 +3302,7 @@ text-transform: uppercase;
                                         <div class="row auragold-mq-billing-grid">
                                             <div class="col-md-4">
                                                 <div class="form-group">
-                                                    <label>Department<?php echo !empty($jwo_has_department_user_tables) ? ' <span class="text-danger">*</span>' : ''; ?></label>
+                                                    <label>Department</label>
                                                     <select class="form-control form-control-sm" id="jwoDepartment">
                                                         <option value="">--Select--</option>
                                                         <?php foreach ($jwo_departments as $d): ?>
@@ -3247,10 +3315,13 @@ text-transform: uppercase;
                                                 <div class="form-group">
                                                     <label>Name <span class="text-danger">*</span></label>
                                                     <div style="position: relative; display: flex; align-items: stretch; gap: 4px;">
-                                                        <div style="position: relative; flex: 1; min-width: 0;">
-                                                            <input type="hidden" id="jwoDepartmentUser" name="department_user_id" value="<?php echo ($jwo_has_department_user_tables && $ensure_jwo_dept_user_id > 0) ? (int) $ensure_jwo_dept_user_id : ''; ?>">
-                                                            <input type="text" class="form-control form-control-sm" id="jwoDepartmentUserSearch" autocomplete="off" placeholder="Search name or mobile..." <?php echo $jwo_has_department_user_tables ? '' : 'disabled'; ?> value="<?php echo $jwo_has_department_user_tables ? htmlspecialchars((string) $jwo_department_user_display, ENT_QUOTES, 'UTF-8') : ''; ?>">
-                                                            <div id="jwoDepartmentUserSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
+                                                        <div class="jwo-dept-user-select2-wrap" style="position: relative; flex: 1; min-width: 0;">
+                                                            <select class="form-control form-control-sm" id="jwoDepartmentUser" name="department_user_id" <?php echo $jwo_has_department_user_tables ? '' : 'disabled'; ?>>
+                                                                <option value="">Select name...</option>
+                                                                <?php if ($jwo_has_department_user_tables && $ensure_jwo_dept_user_id > 0 && $jwo_department_user_display !== '') { ?>
+                                                                <option value="<?php echo (int) $ensure_jwo_dept_user_id; ?>" selected><?php echo htmlspecialchars($jwo_department_user_display, ENT_QUOTES, 'UTF-8'); ?></option>
+                                                                <?php } ?>
+                                                            </select>
                                                         </div>
                                                         <button type="button" class="btn btn-sm btn-outline-secondary p-0" id="jwoAddDepartmentUserBtn" title="Add Job Worker (Ledger Details)" style="width: 32px; min-width: 32px; line-height: 1;<?php echo ($ensure_jwo_dept_id <= 0) ? ' opacity: 0.5;' : ''; ?>" <?php echo ($ensure_jwo_dept_id <= 0) ? 'disabled' : ''; ?>><i class="feather icon-plus"></i></button>
                                                     </div>
@@ -3488,7 +3559,8 @@ text-transform: uppercase;
                                     </div>
 
 <?php require __DIR__ . '/includes/payment-cards-markup.php'; ?>
-                                    
+<?php require __DIR__ . '/includes/voucher_diamond_stone_panels.php'; ?>
+
                                     <!-- Comments: add multiple with date/time, edit, delete -->
                                     <div class="mt-3">
                                         <label class="mb-2" style="font-size: 0.85rem; color: #475569;">Comments</label>
@@ -3698,6 +3770,10 @@ text-transform: uppercase;
 </div>
 
 <?php include 'includes/common-modal.php'; ?>
+<?php
+$auragold_voucher_ds_db_id = (int) ($current_jwo_id ?? 0);
+require __DIR__ . '/includes/voucher_diamond_stone_assets.php';
+?>
 
 <!-- Print Job Work Order Confirmation Modal (same style as Sale Order print popup) -->
 <div id="printJWOModal" class="print-invoice-modal" style="display: none;">
@@ -3749,6 +3825,19 @@ text-transform: uppercase;
 </style>
 
 <?php include 'footer-script.php';?>
+<?php auragold_echo_party_select2_styles(); ?>
+<link rel="stylesheet" href="assets/libs/select2/select2.css">
+<script src="assets/libs/select2/select2.js"></script>
+<script src="assets/js/jwo-department-user-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/jwo-department-user-select2.js'); ?>"></script>
+<style>
+.jwo-dept-user-select2-wrap .select2-container { width: 100% !important; max-width: 100%; }
+.jwo-dept-user-select2-wrap .select2-container--default .select2-selection--single {
+    height: calc(1.5em + 0.5rem + 2px); min-height: calc(1.5em + 0.5rem + 2px);
+    border: 1px solid #ced4da; border-radius: 0.2rem; font-size: 0.875rem;
+}
+.select2-container.jwo-dept-user-select2-container { z-index: 50 !important; }
+.select2-dropdown.jwo-dept-user-select2-dropdown { z-index: 50 !important; }
+</style>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <script>window.AURAGOLD_ADD_ITEM_ALWAYS_ENABLED = true;</script>
@@ -3785,6 +3874,7 @@ text-transform: uppercase;
     window.jwoFromProcessSelection = <?php echo !empty($jwo_from_process_selection) ? 'true' : 'false'; ?>;
     window.jwoQueueTotal = <?php echo (int)($jwo_queue_total_param ?? 0); ?>;
     window.jwoHasDepartmentUserTables = <?php echo !empty($jwo_has_department_user_tables) ? 'true' : 'false'; ?>;
+    window.jwmReturnToManufacturingList = <?php echo (isset($_GET['return']) && (string) $_GET['return'] === 'jwm') ? 'true' : 'false'; ?>;
     window.siSaveBlockedByPurchaseFixing = <?php echo !empty($si_save_blocked_by_purchase_fixing) ? 'true' : 'false'; ?>;
     window.siSaveBlockedByPurchaseFixingTip = <?php echo json_encode($si_pfd_save_blocked_tip, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 </script>
@@ -3874,20 +3964,30 @@ window.PB_PAGE_CONFIG = {
         }
         $embed_items = is_array($edit_items) ? $edit_items : [];
         $embed_payments = is_array($edit_payments) ? $edit_payments : [];
-        // Convert saved image paths (images column) to full URLs for group_image so UI can display them
-        $base_url = (isset($SiteUrl) ? rtrim((string) $SiteUrl, '/') . '/' : '');
-        foreach ($embed_items as &$emb_it) {
-            if (!empty($emb_it['images'])) {
-                $dec = @json_decode($emb_it['images'], true);
-                if ($dec && !empty($dec['images']) && is_array($dec['images'])) {
-                    $urls = array_map(function ($p) use ($base_url) { return $base_url . auragold_uploads_public_rel(ltrim((string) $p, '/')); }, $dec['images']);
-                    $primary = isset($dec['primary']) ? $dec['primary'] : $dec['images'][0];
-                    $primary_url = $base_url . auragold_uploads_public_rel(ltrim((string) $primary, '/'));
-                    $emb_it['group_image'] = json_encode(['primary' => $primary_url, 'images' => $urls]);
-                }
+        if ($jwo_sale_order_id_param > 0) {
+            require_once __DIR__ . '/includes/auragold_material_issue_rows_for_sale_order.php';
+            if (function_exists('auragold_material_issue_embed_payments_for_sale_order')) {
+                $embed_payments = auragold_material_issue_embed_payments_for_sale_order(
+                    $conn,
+                    $embed_payments,
+                    (int) $jwo_sale_order_id_param,
+                    (int) $current_jwo_id
+                );
             }
         }
-        unset($emb_it);
+        // Line photos: sale order JSON → group_image; material issue lines pull from linked SO/RO.
+        $base_url = (isset($SiteUrl) ? rtrim((string) $SiteUrl, '/') . '/' : '');
+        $img_linked_order_id = (int) ($jwo_sale_order_id_param ?? 0);
+        if ($img_linked_order_id <= 0 && !empty($embed_order['sale_order_id'])) {
+            $img_linked_order_id = (int) $embed_order['sale_order_id'];
+        }
+        auragold_voucher_embed_items_apply_images(
+            $conn,
+            $embed_items,
+            $base_url,
+            $img_linked_order_id,
+            !empty($jwo_from_repair_param)
+        );
     }
     $edit_data_obj = $embed_order !== null ? ['order' => $embed_order, 'items' => $embed_items, 'payments' => $embed_payments] : null;
     $json_flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
@@ -4475,9 +4575,8 @@ window.PB_PAGE_CONFIG = {
         
         // Hide suggestions when clicking outside
         $(document).on('click', function(e) {
-            if (!$(e.target).closest('#customerName, #customerSuggestions, #addCustomerBtn, #jwoDepartmentUserSearch, #jwoDepartmentUserSuggestions, #jwoAddDepartmentUserBtn').length) {
+            if (!$(e.target).closest('#customerName, #customerSuggestions, #addCustomerBtn, #jwoDepartmentUser, #jwoAddDepartmentUserBtn, .jwo-dept-user-select2-wrap').length) {
                 $('#customerSuggestions').hide();
-                $('#jwoDepartmentUserSuggestions').hide();
             }
         });
 
@@ -9114,52 +9213,7 @@ window.PB_PAGE_CONFIG = {
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery category: Net Amount = Metal Value + Diamond + Stone + Making + Other - Discount; Final = NetAmt + Tax
-    function updateJewelleryNetAmountAndFinal() {
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        var totalMetalValue = 0;
-        var totalMaking = 0;
-        var totalStone = 0;
-        var totalDiamond = 0;
-        var totalOther = 0;
-        var totalDiscount = 0;
-        var totalTax = 0;
-        var jewelleryRows = [];
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery' || catVal === 'Diamonds' || catVal === 'GemStones') {
-                var mvInp = r.querySelector('[data-column="metal-value"] input');
-                if (mvInp) totalMetalValue += parseFloat(mvInp.value) || 0;
-                var maInp = r.querySelector('[data-column="making-amount"] input');
-                if (maInp) totalMaking += parseFloat(maInp.value) || 0;
-                var saInp = r.querySelector('[data-column="stone-amount"] input');
-                if (saInp) totalStone += parseFloat(saInp.value) || 0;
-                var daInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (daInp) totalDiamond += parseFloat(daInp.value) || 0;
-                var oaInp = r.querySelector('[data-column="other-amount"] input');
-                if (oaInp) totalOther += parseFloat(oaInp.value) || 0;
-                var dcInp = r.querySelector('[data-column="discount"] input');
-                if (dcInp) totalDiscount += parseFloat(dcInp.value) || 0;
-                var taxInp = r.querySelector('[data-column="tax"] input');
-                if (taxInp) totalTax += parseFloat(taxInp.value) || 0;
-                if (catVal === 'Jewellery') jewelleryRows.push(r);
-            }
-        }
-        var netAmt = totalMetalValue + totalMaking + totalStone + totalDiamond + totalOther - totalDiscount;
-        if (netAmt < 0) netAmt = 0;
-        var finalAmount = netAmt + totalTax;
-        for (var j = 0; j < jewelleryRows.length; j++) {
-            var jr = jewelleryRows[j];
-            var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-        }
-    }
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10138,52 +10192,63 @@ window.PB_PAGE_CONFIG = {
     let isSaving = false;
 
     function refreshJwoDepartmentUsers(deptId, selectUserId, callback) {
-        var hid = document.getElementById('jwoDepartmentUser');
-        var searchIn = document.getElementById('jwoDepartmentUserSearch');
-        var sug = document.getElementById('jwoDepartmentUserSuggestions');
+        var sel = document.getElementById('jwoDepartmentUser');
         var btn = document.getElementById('jwoAddDepartmentUserBtn');
-        var d = deptId !== undefined && deptId !== null ? String(deptId).trim() : '';
-        var okDept = d && parseInt(d, 10) > 0;
         if (btn) {
-            btn.disabled = !okDept;
-            btn.style.opacity = okDept ? '1' : '0.5';
+            var tablesOk = !!window.jwoHasDepartmentUserTables;
+            btn.disabled = !tablesOk;
+            btn.style.opacity = tablesOk ? '1' : '0.5';
         }
         if (!window.jwoHasDepartmentUserTables) {
             if (callback) callback();
             return;
         }
-        if (!hid || !searchIn) {
-            if (callback) callback();
-            return;
-        }
-        if (sug) {
-            sug.style.display = 'none';
-        }
-        if (typeof $ !== 'undefined' && $('#jwoDepartmentUserSuggestions').length) {
-            $('#jwoDepartmentUserSuggestions').empty().hide();
-        }
-
-        var uid = (selectUserId !== undefined && selectUserId !== null && String(selectUserId).trim() !== '') ? String(parseInt(selectUserId, 10)) : '';
-        if (uid === 'NaN' || uid === '') {
-            hid.value = '';
-            searchIn.value = '';
+        if (!sel || sel.tagName !== 'SELECT') {
             if (callback) callback();
             return;
         }
 
-        hid.value = uid;
+        var uid = (selectUserId !== undefined && selectUserId !== null && String(selectUserId).trim() !== '')
+            ? String(parseInt(selectUserId, 10))
+            : '';
+        if (uid === 'NaN' || uid === '' || uid === '0') {
+            if (typeof window.setJwoDepartmentUserValue === 'function') {
+                window.setJwoDepartmentUserValue('', '');
+            } else {
+                sel.value = '';
+            }
+            if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                window.initJwoDepartmentUserSelect2();
+            }
+            if (callback) callback();
+            return;
+        }
+
         fetch('ajax/get-customer.php?customer_id=' + encodeURIComponent(uid), { credentials: 'same-origin' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data && data.status === 'success' && data.customer) {
-                    searchIn.value = data.customer.name || '';
+                var nm = (data && data.status === 'success' && data.customer)
+                    ? (data.customer.name || '')
+                    : ('User #' + uid);
+                if (typeof window.setJwoDepartmentUserValue === 'function') {
+                    window.setJwoDepartmentUserValue(uid, nm);
                 } else {
-                    searchIn.value = 'User #' + uid;
+                    sel.value = uid;
+                }
+                if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                    window.initJwoDepartmentUserSelect2();
                 }
                 if (callback) callback();
             })
             .catch(function() {
-                searchIn.value = 'User #' + uid;
+                if (typeof window.setJwoDepartmentUserValue === 'function') {
+                    window.setJwoDepartmentUserValue(uid, 'User #' + uid);
+                } else {
+                    sel.value = uid;
+                }
+                if (typeof window.initJwoDepartmentUserSelect2 === 'function') {
+                    window.initJwoDepartmentUserSelect2();
+                }
                 if (callback) callback();
             });
     }
@@ -10269,10 +10334,6 @@ window.PB_PAGE_CONFIG = {
         var deptEl = document.getElementById('jwoDepartment');
         var userEl = document.getElementById('jwoDepartmentUser');
         if (document.body.classList.contains('material-issue-page') && window.jwoHasDepartmentUserTables) {
-            if (deptEl && (!deptEl.value || deptEl.value.trim() === '')) {
-                alert('Please select Department.');
-                return;
-            }
             if (userEl && (!userEl.value || userEl.value.trim() === '')) {
                 alert('Please select Name.');
                 return;
@@ -10377,6 +10438,8 @@ window.PB_PAGE_CONFIG = {
         });
         var jwoIdEl = document.getElementById('jwoCurrentId');
         var currentJwoId = jwoIdEl ? parseInt(jwoIdEl.getAttribute('data-jwo-id') || 0, 10) : 0;
+        var pendingDiamondJson = JSON.stringify(Array.isArray(window.__pendingSaleOrderDiamondLines) ? window.__pendingSaleOrderDiamondLines.slice() : []);
+        var pendingStoneJson = JSON.stringify(Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines.slice() : []);
         // Creating new JWO from sale order with multiple lines: one tbl_material_issues row per line (sequential save).
         var splitMultiJwo = window.isJobworkFromSaleOrder && !window.jwoFromRepair && currentJwoId < 1 && items.length > 1;
         if (splitMultiJwo) {
@@ -10422,12 +10485,23 @@ window.PB_PAGE_CONFIG = {
                 fdSplit.append('sale_order_id', saleOrderId);
                 fdSplit.append('items', JSON.stringify([items[splitIdx]]));
                 fdSplit.append('force_new_jwo', '1');
+                fdSplit.append('pending_diamond_allocations', pendingDiamondJson);
+                fdSplit.append('pending_stone_allocations', pendingStoneJson);
+                var payMiSplit = typeof miCollectPaymentsForSave === 'function'
+                    ? miCollectPaymentsForSave()
+                    : (typeof collectPosPaymentsForSave === 'function'
+                        ? collectPosPaymentsForSave()
+                        : (typeof payments !== 'undefined' && Array.isArray(payments) ? payments.slice() : []));
+                fdSplit.append('payments', JSON.stringify(payMiSplit));
                 appendJwoCommonFields(fdSplit);
                 fetch('ajax/save-material-issue.php', { method: 'POST', body: fdSplit, credentials: 'same-origin' })
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.status === 'success') {
                             lastJwoId = data.jwo_id || data.jobwork_id || '';
+                            if (splitIdx === 0 && typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                                window.auragoldVoucherDiamondStoneOnSaveSuccess(lastJwoId);
+                            }
                             splitIdx++;
                             saveSplitNext();
                         } else {
@@ -10483,6 +10557,14 @@ window.PB_PAGE_CONFIG = {
         var fd = new FormData();
         fd.append('sale_order_id', saleOrderId);
         fd.append('items', JSON.stringify(items));
+        fd.append('pending_diamond_allocations', pendingDiamondJson);
+        fd.append('pending_stone_allocations', pendingStoneJson);
+        var payMi = typeof miCollectPaymentsForSave === 'function'
+            ? miCollectPaymentsForSave()
+            : (typeof collectPosPaymentsForSave === 'function'
+                ? collectPosPaymentsForSave()
+                : (typeof payments !== 'undefined' && Array.isArray(payments) ? payments.slice() : []));
+        fd.append('payments', JSON.stringify(payMi));
         if (currentJwoId > 0) fd.append('jwo_id', currentJwoId);
         // One JWO per sale order line from sale-order-process: never reuse existing JWO row for same sale order on insert.
         if (window.jwoFromProcessSelection && currentJwoId < 1) {
@@ -10510,12 +10592,25 @@ window.PB_PAGE_CONFIG = {
         var cnH = document.getElementById('customerName');
         if (cnH) fd.append('header_customer_name', String(cnH.value || '').trim());
         fetch('ajax/save-material-issue.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                return r.text().then(function(txt) {
+                    try {
+                        return JSON.parse(txt);
+                    } catch (e) {
+                        var err = new Error('Save failed (invalid server response).');
+                        err.raw = txt;
+                        throw err;
+                    }
+                });
+            })
             .then(function(data) {
                 isSaving = false;
                 if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
                 if (data.status === 'success') {
                     var newJwoId = data.jwo_id || data.jobwork_id || '';
+                    if (typeof window.auragoldVoucherDiamondStoneOnSaveSuccess === 'function') {
+                        window.auragoldVoucherDiamondStoneOnSaveSuccess(newJwoId);
+                    }
                     var rem = (window.jwoBulkRemainingItemIds && window.jwoBulkRemainingItemIds.length) ? window.jwoBulkRemainingItemIds : [];
                     if (rem.length > 0) {
                         var nextQs = 'sale_order_id=' + encodeURIComponent(saleOrderId)
@@ -10565,16 +10660,35 @@ window.PB_PAGE_CONFIG = {
                     }
                 }
             })
-            .catch(function() {
+            .catch(function(err) {
                 isSaving = false;
                 if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-                alert('Network error');
+                alert((err && err.message) ? err.message : 'Network error');
             });
     }
     
     // Print JWO modal (same popup as main print flow)
     var savedJwoId = null;
     var savedSaleOrderId = null;
+
+    function materialIssueRedirectAfterSave(miId, saleOrderId) {
+        if (window.jwmReturnToManufacturingList === true) {
+            window.location.href = 'job-work-order-manufacturing.php';
+            return;
+        }
+        var mid = parseInt(String(miId || '0'), 10) || 0;
+        var soid = parseInt(String(saleOrderId || '0'), 10) || 0;
+        if (mid > 0) {
+            window.location.href = 'material-issue.php?id=' + encodeURIComponent(String(mid));
+            return;
+        }
+        if (soid > 0) {
+            window.location.href = 'material-issue.php?sale_order_id=' + encodeURIComponent(String(soid));
+            return;
+        }
+        window.location.href = 'material-issue.php';
+    }
+
     function showPrintJWOModal(jwoId, saleOrderId) {
         savedJwoId = jwoId;
         savedSaleOrderId = saleOrderId || '';
@@ -10588,18 +10702,13 @@ window.PB_PAGE_CONFIG = {
     function closePrintJWOModal() {
         var modal = document.getElementById('printJWOModal');
         if (modal) modal.style.display = 'none';
+        var miId = savedJwoId;
+        var soId = savedSaleOrderId;
         savedJwoId = null;
-        var mpQs = [];
-        if (window._jwoRedirectMpDeptId) {
-            mpQs.push('department_id=' + encodeURIComponent(window._jwoRedirectMpDeptId));
-        }
-        if (window._jwoRedirectMpUserId) {
-            mpQs.push('user_id=' + encodeURIComponent(window._jwoRedirectMpUserId));
-        }
+        savedSaleOrderId = null;
         window._jwoRedirectMpDeptId = null;
         window._jwoRedirectMpUserId = null;
-        window.location.href = 'manufacturing-process.php' + (mpQs.length ? '?' + mpQs.join('&') : '');
-        savedSaleOrderId = null;
+        materialIssueRedirectAfterSave(miId, soId);
     }
     function confirmPrintJWO() {
         if (savedJwoId) {
@@ -11922,6 +12031,11 @@ window.PB_PAGE_CONFIG = {
         // Add payments to table (and to global payments array via addPaymentToTable)
         if (loadedPayments && loadedPayments.length > 0) {
             loadedPayments.forEach(function(payment) {
+                if (window.isJobworkFromSaleOrder && document.body.classList.contains('material-issue-page')
+                    && typeof miPaymentRowIsSaleOrderMetalExchange === 'function'
+                    && miPaymentRowIsSaleOrderMetalExchange(payment)) {
+                    return;
+                }
                 // Map payment type from database to modal type
                 var rawPayType = payment.payment_type != null && String(payment.payment_type) !== '' ? payment.payment_type : (payment.type || '');
                 let paymentType = String(rawPayType).toLowerCase();
@@ -11938,8 +12052,13 @@ window.PB_PAGE_CONFIG = {
                 var _dbTotalLoad = parseFloat(payment.amount || 0) || 0;
                 var _dbCurLoad = payment.current_order_amount != null && payment.current_order_amount !== '' ? parseFloat(payment.current_order_amount) : NaN;
                 var _curOrderLoad = !isNaN(_dbCurLoad) ? _dbCurLoad : Math.max(0, _dbTotalLoad - _prevBalLoad);
+                var payDomId = payment.mi_stock_id
+                    ? ('payment-mi-stock-' + payment.mi_stock_id)
+                    : (payment.id !== undefined && payment.id !== null && String(payment.id) !== ''
+                        ? ('payment-' + payment.id)
+                        : ('payment-' + (++paymentRowIndex)));
                 const paymentData = {
-                    id: 'payment-' + payment.id,
+                    id: payDomId,
                     type: paymentType,
                     deposit_into: payment.deposit_into || '',
                     transaction_no: payment.transaction_no || '',
@@ -11974,7 +12093,8 @@ window.PB_PAGE_CONFIG = {
                         }
                     }
                     paymentData.metal_exchange_gross_wt = meGross || '0';
-                    paymentData.metal_exchange_item_code = payment.metal_exchange_item_code || payment.item_code || '';
+                    // Prefer stock barcode from server enrich; do not fall back to unrelated item_code.
+                    paymentData.metal_exchange_item_code = payment.metal_exchange_item_code || '';
                     paymentData.metal_exchange_rate = payment.metal_exchange_rate != null && payment.metal_exchange_rate !== '' ? String(payment.metal_exchange_rate) : (payment.rate != null && payment.rate !== '' ? String(payment.rate) : '0');
                     var mePure = payment.metal_exchange_purity_wt != null && payment.metal_exchange_purity_wt !== '' ? String(payment.metal_exchange_purity_wt) : (payment.purity_weight != null && payment.purity_weight !== '' ? String(payment.purity_weight) : '');
                     if (!mePure || mePure === '0') {
@@ -11991,6 +12111,9 @@ window.PB_PAGE_CONFIG = {
                         }
                     }
                     paymentData.metal_exchange_purity_wt = mePure || '0';
+                    paymentData.mi_stock_id = payment.mi_stock_id ? String(payment.mi_stock_id) : '';
+                    paymentData.mi_client_metal_exchange = !!payment.mi_client_metal_exchange;
+                    paymentData.mi_metal_exchange = !!payment.mi_metal_exchange;
                 }
                 addPaymentToTable(paymentData);
             });
@@ -12169,6 +12292,35 @@ window.PB_PAGE_CONFIG = {
     <?php endif; ?>
     
     // ================== PAYMENT FUNCTIONALITY ==================
+
+    function miPaymentRowIsJwoMetalExchange(payment) {
+        if (!payment || typeof payment !== 'object') return false;
+        var pd = payment.payment_details;
+        if (typeof pd === 'string' && pd.trim() !== '') {
+            try { pd = JSON.parse(pd); } catch (e) { pd = null; }
+        }
+        return !!(pd && pd.jobwork_order_metal_exchange);
+    }
+
+    function miPaymentRowIsSaleOrderMetalExchange(payment) {
+        if (!payment || typeof payment !== 'object') return false;
+        if (miPaymentRowIsJwoMetalExchange(payment)) return false;
+        if (payment.mi_metal_exchange || payment.mi_client_metal_exchange) return false;
+        var pt = String(payment.payment_type || payment.type || '').toLowerCase();
+        var dep = String(payment.deposit_into || '').toLowerCase();
+        return dep === 'metal exchange' || pt.indexOf('exch') >= 0 || pt === 'metal-exchange' || payment.type === 'metal-exchange';
+    }
+
+    function miCollectPaymentsForSave() {
+        var raw = (typeof collectPosPaymentsForSave === 'function') ? collectPosPaymentsForSave() : [];
+        if (!window.isJobworkFromSaleOrder || !document.body.classList.contains('material-issue-page') || !Array.isArray(raw)) {
+            return raw;
+        }
+        return raw.filter(function(p) {
+            return p && !miPaymentRowIsSaleOrderMetalExchange(p);
+        });
+    }
+    window.miCollectPaymentsForSave = miCollectPaymentsForSave;
     
     let paymentRowIndex = 0;
     // Must be `var` so window.payments exists — collectPosPaymentsForSave() (auragold-payment-cards.js) reads global.payments
@@ -12181,6 +12333,18 @@ window.PB_PAGE_CONFIG = {
             icon._paymentHandlerBound = true;
             icon.addEventListener('click', function() {
                 window._editingPaymentId = null;
+                if (this.classList.contains('payment-diamond')) {
+                    if (typeof openSaleOrderDiamondStockModal === 'function') {
+                        openSaleOrderDiamondStockModal();
+                    }
+                    return;
+                }
+                if (this.classList.contains('payment-stone')) {
+                    if (typeof openSaleOrderStoneStockModal === 'function') {
+                        openSaleOrderStoneStockModal();
+                    }
+                    return;
+                }
                 const paymentType = this.classList.contains('payment-cash') ? 'cash' :
                                    this.classList.contains('payment-bank') ? 'bank' :
                                    this.classList.contains('payment-cheque') ? 'cheque' :
@@ -12226,6 +12390,10 @@ window.PB_PAGE_CONFIG = {
         
         const modalId = modalMap[type];
         if (modalId) {
+            // New payment line: reset modal fields (edit flow clears then refill from card).
+            if (!window._editingPaymentId && typeof clearPaymentModal === 'function') {
+                clearPaymentModal(type);
+            }
             // Use Balance Amt from summary (already accounts for "Use previous balance" amount)
             const summaryBalanceAmtEl = document.getElementById('summaryBalanceAmt');
             const balanceAmt = summaryBalanceAmtEl ? parseFloat(summaryBalanceAmtEl.textContent.replace(/,/g, '')) || 0 : 0;
@@ -12247,8 +12415,7 @@ window.PB_PAGE_CONFIG = {
                 const cardAmountEl = document.getElementById('cardAmount');
                 if (cardAmountEl) cardAmountEl.value = amountToShow;
             } else if (type === 'metal-exchange') {
-                const metalExchangeAmountEl = document.getElementById('metalExchangeAmount');
-                if (metalExchangeAmountEl) metalExchangeAmountEl.value = amountToShow;
+                /* Fresh metal exchange: weights/rate from user; amount stays 0 until calculated — not balance amt. */
             } else if (type === 'scrap') {
                 const scrapAmountEl = document.getElementById('scrapAmount');
                 if (scrapAmountEl) scrapAmountEl.value = amountToShow;
@@ -12256,6 +12423,16 @@ window.PB_PAGE_CONFIG = {
             
             $(modalId).modal('show');
         }
+    }
+    window.openPaymentModal = openPaymentModal;
+
+    if (typeof $ !== 'undefined') {
+        $(document).on('hidden.bs.modal', '#metalExchangeModal', function() {
+            window._editingPaymentId = null;
+            if (typeof clearPaymentModal === 'function') {
+                clearPaymentModal('metal-exchange');
+            }
+        });
     }
     
     // Scrap Payment: single searchable product input – type to see list, select to fill rate/purity
@@ -12499,17 +12676,9 @@ window.PB_PAGE_CONFIG = {
                     existingPayment.metal_exchange_item_code = paymentData.metal_exchange_item_code;
                     existingPayment.metal_exchange_rate = paymentData.metal_exchange_rate;
                     existingPayment.metal_exchange_purity_wt = paymentData.metal_exchange_purity_wt;
-                }
-                if (type === 'metal-exchange' && paymentData.metal_exchange_metal_id !== undefined) {
-                    existingPayment.purity_carat = paymentData.purity_carat;
-                    existingPayment.quantity = paymentData.quantity;
-                    existingPayment.metal_exchange_metal_id = paymentData.metal_exchange_metal_id;
-                    existingPayment.metal_exchange_product_id = paymentData.metal_exchange_product_id;
-                    existingPayment.metal_exchange_product_name = paymentData.metal_exchange_product_name;
-                    existingPayment.metal_exchange_gross_wt = paymentData.metal_exchange_gross_wt;
-                    existingPayment.metal_exchange_item_code = paymentData.metal_exchange_item_code;
-                    existingPayment.metal_exchange_rate = paymentData.metal_exchange_rate;
-                    existingPayment.metal_exchange_purity_wt = paymentData.metal_exchange_purity_wt;
+                    if (existingPayment.mi_client_metal_exchange) {
+                        existingPayment.mi_client_metal_exchange = true;
+                    }
                 }
                 if (typeof refreshPosPaymentCard === 'function') {
                     refreshPosPaymentCard(existingPayment);
@@ -12534,6 +12703,9 @@ window.PB_PAGE_CONFIG = {
         // Add new payment
         paymentRowIndex++;
         paymentData.id = 'payment-' + paymentRowIndex;
+        if (window.isJobworkFromSaleOrder && document.body.classList.contains('material-issue-page') && type === 'metal-exchange') {
+            paymentData.mi_client_metal_exchange = true;
+        }
         payments.push(paymentData);
         addPaymentToTable(paymentData);
         

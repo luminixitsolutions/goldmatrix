@@ -224,6 +224,9 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             border-color: var(--jcat-gold);
             box-shadow: 0 6px 18px rgba(17, 41, 75, 0.12);
         }
+        .jcat-card.jcat-card-editable { cursor: pointer; }
+        .jcat-table tbody tr.jcat-row-editable { cursor: pointer; }
+        .jcat-table tbody tr.jcat-row-editable:hover td { background: var(--jcat-gold-pale); }
         .jcat-card-img {
             position: relative;
             aspect-ratio: 1;
@@ -274,6 +277,10 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
         .jcat-card-body { padding: 10px 12px; }
         .jcat-card-title { font-weight: 700; font-size: 0.9rem; margin: 0 0 4px; color: var(--jcat-navy); }
         .jcat-card-sub { color: var(--jcat-gold-dark); font-size: 0.8125rem; font-weight: 600; margin: 0; }
+        .jcat-card.jcat-card-highlight,
+        .jcat-row-editable.jcat-card-highlight {
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.45);
+        }
         .jcat-list-wrap {
             border: 1px solid #e2e8f0;
             border-radius: 10px;
@@ -580,7 +587,7 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
                         </button>
                     </div>
                 </div>
-                <a href="product-opening.php" class="jcat-btn-outline btn btn-sm">+ Add</a>
+                <a href="jewelry-catalogue-create.php?return=jewelry-catalogue.php" class="jcat-btn-outline btn btn-sm" id="jcatBtnAdd">+ Add</a>
                 <button type="button" class="jcat-icon-btn active" id="jcatViewGrid" title="Grid view" aria-pressed="true"><i class="feather icon-grid"></i></button>
                 <button type="button" class="jcat-icon-btn" id="jcatViewList" title="List view" aria-pressed="false"><i class="feather icon-list"></i></button>
             </div>
@@ -805,6 +812,26 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
     var $btnGrid = document.getElementById('jcatViewGrid');
     var $btnList = document.getElementById('jcatViewList');
 
+    function sortCatalogueItemsFirst(items) {
+        return (items || []).slice().sort(function (a, b) {
+            var aOnly = a.is_catalogue_only ? 1 : 0;
+            var bOnly = b.is_catalogue_only ? 1 : 0;
+            if (aOnly !== bOnly) return bOnly - aOnly;
+            var aId = parseInt(a.catalogue_id, 10) || 0;
+            var bId = parseInt(b.catalogue_id, 10) || 0;
+            if (aId !== bId) return bId - aId;
+            return (parseInt(b.stock_id, 10) || 0) - (parseInt(a.stock_id, 10) || 0);
+        });
+    }
+
+    function highlightCatalogueId() {
+        try {
+            return parseInt(new URLSearchParams(window.location.search).get('catalogue_id'), 10) || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
     function esc(s) {
         if (s == null) return '';
         return String(s)
@@ -866,12 +893,31 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
         $summary.textContent = 'Showing ' + from + ' to ' + to + ' of ' + total + ' entries';
     }
 
+    function jcatCatalogueEditHref(it) {
+        var cid = parseInt(it.catalogue_id, 10) || 0;
+        if (cid > 0) {
+            return 'jewelry-catalogue-create.php?id=' + cid + '&return=jewelry-catalogue.php';
+        }
+        return '';
+    }
+
+    function bindCatalogueEditClicks(root) {
+        if (!root) return;
+        root.querySelectorAll('.jcat-card-editable, .jcat-row-editable').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                if (e.target.closest('input, a, button, label')) return;
+                var href = el.getAttribute('data-edit-href');
+                if (href) window.location.href = href;
+            });
+        });
+    }
+
     function renderGrid(slice, filtered, start) {
         if (!$grid) return;
         $grid.classList.remove('d-none');
         if ($listWrap) $listWrap.classList.add('d-none');
         if (!slice.length) {
-            $grid.innerHTML = '<div class="jcat-empty">No stock items match your filters.</div>';
+            $grid.innerHTML = '<div class="jcat-empty">No catalogue items match your filters.</div>';
             updateSummary(filtered.length, start, 0);
             return;
         }
@@ -880,7 +926,10 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             var bc = it.barcode || '';
             var checked = selectedBarcodes[bc] ? ' checked' : '';
             var thumb = (it.thumb_url && String(it.thumb_url).trim()) ? it.thumb_url : '';
-            html += '<article class="jcat-card" data-barcode="' + esc(bc) + '">'
+            var editHref = jcatCatalogueEditHref(it);
+            var cardCls = editHref ? ' jcat-card-editable' : '';
+            var editAttr = editHref ? ' data-edit-href="' + esc(editHref) + '"' : '';
+            html += '<article class="jcat-card' + cardCls + '" data-barcode="' + esc(bc) + '" data-catalogue-id="' + (parseInt(it.catalogue_id, 10) || 0) + '"' + editAttr + '>'
                 + '<div class="jcat-card-img">' + jcatImgHtml(thumb, 'jcat-thumb')
                 + '<span class="jcat-badge">' + stockBadge(it) + '</span>'
                 + '<input type="checkbox" class="jcat-card-check jcat-row-check" data-barcode="' + esc(bc) + '"' + checked + '></div>'
@@ -891,6 +940,7 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
         });
         $grid.innerHTML = html;
         bindRowChecks($grid);
+        bindCatalogueEditClicks($grid);
         updateSummary(filtered.length, start, slice.length);
     }
 
@@ -908,7 +958,7 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
         document.getElementById('jcatFootAmt').textContent = totAmt.toFixed(2);
 
         if (!slice.length) {
-            $tableBody.innerHTML = '<tr><td colspan="10" class="text-center py-4">No stock items match your filters.</td></tr>';
+            $tableBody.innerHTML = '<tr><td colspan="10" class="text-center py-4">No catalogue items match your filters.</td></tr>';
             updateSummary(filtered.length, start, 0);
             return;
         }
@@ -918,7 +968,10 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             var checked = selectedBarcodes[bc] ? ' checked' : '';
             var thumb = (it.thumb_url && String(it.thumb_url).trim()) ? it.thumb_url : '';
             var activeCls = it.active === 'Active' ? 'jcat-active-pill' : '';
-            html += '<tr data-barcode="' + esc(bc) + '">'
+            var editHref = jcatCatalogueEditHref(it);
+            var rowCls = editHref ? ' jcat-row-editable' : '';
+            var editAttr = editHref ? ' data-edit-href="' + esc(editHref) + '"' : '';
+            html += '<tr class="' + rowCls.trim() + '" data-barcode="' + esc(bc) + '" data-catalogue-id="' + (parseInt(it.catalogue_id, 10) || 0) + '"' + editAttr + '>'
                 + '<td data-col="_cb"><input type="checkbox" class="jcat-row-check" data-barcode="' + esc(bc) + '"' + checked + '></td>'
                 + '<td data-col="imageUrls">' + jcatImgHtml(thumb, 'jcat-list-thumb') + '</td>'
                 + '<td data-col="active"><span class="' + activeCls + '">' + esc(it.active || '') + '</span></td>'
@@ -934,6 +987,7 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
         $tableBody.innerHTML = html;
         jcatSyncColumnLayout();
         bindRowChecks($listWrap);
+        bindCatalogueEditClicks($listWrap);
         updateSummary(filtered.length, start, slice.length);
     }
 
@@ -1145,14 +1199,31 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             .then(function (data) {
                 if ($loading) $loading.style.display = 'none';
                 if (!data || !data.success) {
-                    var msg = esc((data && data.message) || 'Could not load stock.');
+                    var msg = esc((data && data.message) || 'Could not load catalogue.');
                     if ($grid) $grid.innerHTML = '<div class="jcat-empty">' + msg + '</div>';
                     return;
                 }
-                allItems = data.items || [];
+                allItems = sortCatalogueItemsFirst(data.items || []);
                 buildMetalTabs(data.metals || []);
                 page = 1;
+                var hi = highlightCatalogueId();
+                if (hi > 0) {
+                    metalId = 0;
+                    if ($tabs) {
+                        $tabs.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+                        var allBtn = $tabs.querySelector('button[data-metal-id="0"]');
+                        if (allBtn) allBtn.classList.add('active');
+                    }
+                }
                 renderView();
+                if (hi > 0) {
+                    var target = document.querySelector('[data-catalogue-id="' + hi + '"]');
+                    if (target && typeof target.scrollIntoView === 'function') {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        target.classList.add('jcat-card-highlight');
+                        setTimeout(function () { target.classList.remove('jcat-card-highlight'); }, 2500);
+                    }
+                }
             })
             .catch(function () {
                 if ($loading) $loading.style.display = 'none';

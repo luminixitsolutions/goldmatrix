@@ -79,8 +79,27 @@
         row.setAttribute('data-purity-carat', payment.purity_carat != null ? String(payment.purity_carat) : '');
         row.setAttribute('data-diamond-category', payment.diamond_category || '');
         row.setAttribute('data-quantity', payment.quantity != null && payment.quantity !== '' ? String(payment.quantity) : '0');
+        if ((payment.type || '') === 'metal-exchange') {
+            row.setAttribute('data-me-metal-id', payment.metal_exchange_metal_id != null ? String(payment.metal_exchange_metal_id) : '');
+            var mePc = payment.metal_exchange_characteristic_id != null ? payment.metal_exchange_characteristic_id : payment.metal_exchange_product_id;
+            row.setAttribute('data-me-characteristic-id', mePc != null ? String(mePc) : '');
+            row.setAttribute('data-me-product-id', payment.metal_exchange_product_id != null ? String(payment.metal_exchange_product_id) : '');
+            row.setAttribute('data-me-product-name', payment.metal_exchange_product_name != null ? String(payment.metal_exchange_product_name) : '');
+            row.setAttribute('data-me-gross-wt', payment.metal_exchange_gross_wt != null ? String(payment.metal_exchange_gross_wt) : '');
+            row.setAttribute('data-me-purity-wt', payment.metal_exchange_purity_wt != null ? String(payment.metal_exchange_purity_wt) : '');
+            row.setAttribute('data-me-rate', payment.metal_exchange_rate != null ? String(payment.metal_exchange_rate) : '');
+            row.setAttribute('data-me-item-code', payment.metal_exchange_item_code != null ? String(payment.metal_exchange_item_code) : '');
+            row.setAttribute('data-me-stock-id', payment.mi_stock_id != null ? String(payment.mi_stock_id) : '');
+            row.setAttribute('data-me-purity-carat', payment.purity_carat != null ? String(payment.purity_carat) : '');
+        }
         var previousBalanceAmount = parseFloat(payment.previous_balance_amount || 0);
         var curAmt = parseFloat(payment.amount || 0);
+        if ((payment.type || '') === 'metal-exchange' && typeof global.jwoMetalExchangeDisplayAmount === 'function') {
+            var meDisp = global.jwoMetalExchangeDisplayAmount(payment);
+            if (meDisp > 0.00001) {
+                curAmt = meDisp;
+            }
+        }
         var totalPaymentAmount = curAmt + previousBalanceAmount;
         row.setAttribute('data-previous-balance-amount', previousBalanceAmount.toFixed(2));
         row.setAttribute('data-current-order-amount', curAmt.toFixed(2));
@@ -89,12 +108,20 @@
         var cc = currencyCode();
         var amtTitle = 'Current: ' + curAmt.toFixed(2) + ', Previous balance: ' + previousBalanceAmount.toFixed(2);
         var wtHtml = metalWeightBadge(payment);
+        var isSoMeReadonly = !!payment.readonly_from_sale_order && (payment.type || '') === 'metal-exchange';
+        if (isSoMeReadonly) {
+            row.setAttribute('data-readonly-sale-order-me', '1');
+            row.classList.add('pos-payment-card--so-me-readonly');
+        }
+        var actionHtml = isSoMeReadonly
+            ? '<span class="text-muted small" title="From sale order">SO</span>'
+            : '<button type="button" class="btn-edit" title="Edit"><i class="feather icon-edit-2"></i></button>' +
+              '<button type="button" class="btn-delete" title="Delete"><i class="feather icon-trash-2"></i></button>';
         row.innerHTML =
             '<div class="pos-payment-card-hd">' +
             '<span class="pos-payment-card-title">' + escHtml(hdr) + '</span>' +
             '<div class="pos-payment-card-actions">' +
-            '<button type="button" class="btn-edit" title="Edit"><i class="feather icon-edit-2"></i></button>' +
-            '<button type="button" class="btn-delete" title="Delete"><i class="feather icon-trash-2"></i></button>' +
+            actionHtml +
             '</div></div>' +
             '<div class="pos-payment-card-bd">' +
             '<div class="pos-payment-card-desc">' + escHtml(sub) + '</div>' +
@@ -111,26 +138,98 @@
         el.parentNode.replaceChild(buildCardElement(payment), el);
     }
 
+    function syncMetalExchangePaymentFromCard(p) {
+        if (!p || (p.type || '') !== 'metal-exchange') {
+            return p;
+        }
+        var card = p.id ? document.getElementById(p.id) : null;
+        if (!card) {
+            return p;
+        }
+        var merged = Object.assign({}, p);
+        var attrs = [
+            ['metal_exchange_metal_id', 'data-me-metal-id'],
+            ['metal_exchange_product_id', 'data-me-product-id'],
+            ['metal_exchange_product_name', 'data-me-product-name'],
+            ['metal_exchange_gross_wt', 'data-me-gross-wt'],
+            ['metal_exchange_purity_wt', 'data-me-purity-wt'],
+            ['metal_exchange_rate', 'data-me-rate'],
+            ['metal_exchange_item_code', 'data-me-item-code'],
+            ['mi_stock_id', 'data-me-stock-id']
+        ];
+        attrs.forEach(function (pair) {
+            var v = card.getAttribute(pair[1]);
+            if (v !== null && String(v).trim() !== '') {
+                merged[pair[0]] = v;
+            }
+        });
+        var pc = card.getAttribute('data-me-purity-carat');
+        if (pc !== null && String(pc).trim() !== '') {
+            merged.purity_carat = pc;
+        }
+        var meCid = card.getAttribute('data-me-characteristic-id');
+        if (meCid !== null && String(meCid).trim() !== '') {
+            merged.metal_exchange_characteristic_id = meCid;
+            merged.metal_exchange_product_id = meCid;
+        } else if (!merged.metal_exchange_characteristic_id && merged.metal_exchange_product_id) {
+            merged.metal_exchange_characteristic_id = merged.metal_exchange_product_id;
+        }
+        if (!merged.deposit_into) {
+            merged.deposit_into = 'Metal Exchange';
+        }
+        return merged;
+    }
+
     function collectPaymentsForSave() {
         var arr = typeof global.payments !== 'undefined' && Array.isArray(global.payments) ? global.payments : [];
         var out = [];
         arr.forEach(function (p) {
-            var prevBalAmt = parseFloat(p.previous_balance_amount) || 0;
-            var currentOrderAmt = parseFloat(p.amount) || 0;
+            var row = syncMetalExchangePaymentFromCard(p);
+            var prevBalAmt = parseFloat(row.previous_balance_amount) || 0;
+            var currentOrderAmt = parseFloat(row.amount) || 0;
             var totalAmt = currentOrderAmt + prevBalAmt;
             /* Every line the user added to `payments` is saved — amount may be 0 (metal exchange, scrap, placeholder). */
-            out.push(Object.assign({}, p, {
-                payment_type: saveTypeLabel(p.type),
-                deposit_into: p.deposit_into || '',
-                transaction_no: p.transaction_no || '',
-                cheque_date: p.cheque_date || null,
-                purity_carat: p.purity_carat != null ? String(p.purity_carat) : '',
+            var rowOut = Object.assign({}, row, {
+                type: row.type || '',
+                readonly_from_sale_order: !!row.readonly_from_sale_order,
+                jwo_client_metal_exchange: !!row.jwo_client_metal_exchange,
+                mi_client_metal_exchange: !!row.mi_client_metal_exchange,
+                mi_stock_id: row.mi_stock_id != null && row.mi_stock_id !== '' ? String(row.mi_stock_id) : '',
+                payment_type: saveTypeLabel(row.type),
+                deposit_into: row.deposit_into || '',
+                transaction_no: row.transaction_no || '',
+                cheque_date: row.cheque_date || null,
+                purity_carat: row.purity_carat != null ? String(row.purity_carat) : '',
                 amount: totalAmt,
                 previous_balance_amount: prevBalAmt,
                 current_order_amount: currentOrderAmt,
-                diamond_category: p.diamond_category || '',
-                quantity: parseFloat(p.quantity) || 0
-            }));
+                diamond_category: row.diamond_category || '',
+                quantity: parseFloat(row.quantity) || 0,
+                metal_exchange_metal_id: row.metal_exchange_metal_id != null ? String(row.metal_exchange_metal_id) : '',
+                metal_exchange_characteristic_id: row.metal_exchange_characteristic_id != null
+                    ? String(row.metal_exchange_characteristic_id)
+                    : (row.metal_exchange_product_id != null ? String(row.metal_exchange_product_id) : ''),
+                metal_exchange_product_id: row.metal_exchange_product_id != null ? String(row.metal_exchange_product_id) : '',
+                metal_exchange_product_name: row.metal_exchange_product_name != null ? String(row.metal_exchange_product_name) : '',
+                metal_exchange_gross_wt: row.metal_exchange_gross_wt != null ? String(row.metal_exchange_gross_wt) : '',
+                metal_exchange_purity_wt: row.metal_exchange_purity_wt != null ? String(row.metal_exchange_purity_wt) : '',
+                metal_exchange_rate: row.metal_exchange_rate != null ? String(row.metal_exchange_rate) : '',
+                metal_exchange_item_code: row.metal_exchange_item_code != null ? String(row.metal_exchange_item_code) : ''
+            });
+            if (
+                document.body
+                && document.body.classList.contains('material-issue-page')
+                && (rowOut.type || '') === 'metal-exchange'
+                && !rowOut.readonly_from_sale_order
+                && !rowOut.jwo_client_metal_exchange
+            ) {
+                rowOut.mi_client_metal_exchange = true;
+                rowOut.mi_metal_exchange = 1;
+            }
+            if (rowOut.mi_stock_id != null && rowOut.mi_stock_id !== '') {
+                rowOut.mi_stock_id = String(rowOut.mi_stock_id);
+            }
+            out.push(rowOut);
         });
         return out;
     }

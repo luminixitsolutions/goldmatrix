@@ -7,14 +7,21 @@ if (empty($_SESSION['Admin'])) {
 auragold_ensure_branch_id_on_settings_tables($conn);
 $settings_branch_id = auragold_settings_branch_id();
 require_once __DIR__ . '/includes/auragold_carat_dashboard_image_schema.php';
+require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
 require_once __DIR__ . '/includes/auragold_metal_dashboard_image_schema.php';
 if (isset($conn) && $conn) {
     auragold_ensure_tbl_carat_dashboard_images($conn);
+    auragold_ensure_tbl_carat_purity_split($conn);
     auragold_ensure_tbl_metal_dashboard_images($conn);
 }
 $masters_metal_has_dash_img = isset($conn) && $conn && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'dashboard_image_path');
 $masters_metal_show_dash = isset($conn) && $conn && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_metal', 'show_on_dashboard');
 $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($masters_metal_show_dash ? 1 : 0);
+if (!function_exists('masters_req')) {
+    function masters_req() {
+        return ' <span class="text-danger">*</span>';
+    }
+}
 ?>
 <!DOCTYPE html>
 
@@ -151,6 +158,11 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
 
 .master-scroll table{
     white-space: nowrap;
+}
+
+.master-body table th .text-danger,
+.modal-body label .text-danger {
+    font-weight: 700;
 }
 
 
@@ -295,7 +307,7 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:70px;">Action</th>
                     </tr>
                 </thead>
@@ -358,7 +370,7 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
                         <table class="table table-sm table-bordered mb-0">
                             <thead>
                                 <tr>
-                                    <th>Name *</th>
+                                    <th>Name<?php echo masters_req(); ?></th>
                                     <th>Default Value</th>
                                     <th>Calculation Mode</th>
                                     <th>GST supply</th>
@@ -402,6 +414,7 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
             <?php
             $masters_carat_has_metal = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
             $masters_carat_has_dash_img = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'dashboard_image_path');
+            $masters_carat_has_split_purity = function_exists('auragold_carat_has_split_purity') && auragold_carat_has_split_purity($conn);
             $masters_carat_metal_list = [];
             if ($masters_carat_has_metal) {
                 $masters_carat_metal_list = getList('SELECT id, display_name FROM tbl_metal WHERE status = 1 ORDER BY id ASC');
@@ -409,7 +422,9 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
                     $masters_carat_metal_list = [];
                 }
             }
-            $masters_carat_colspan = ($masters_carat_has_metal ? 5 : 4) + ($masters_carat_has_dash_img ? 1 : 0);
+            $masters_carat_colspan = ($masters_carat_has_metal ? 5 : 4)
+                + ($masters_carat_has_split_purity ? 2 : 0)
+                + ($masters_carat_has_dash_img ? 1 : 0);
             ?>
             <!-- CARAT -->
             <div class="master-card">
@@ -419,9 +434,15 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
                     <table class="table table-sm table-bordered mb-0">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <?php if ($masters_carat_has_metal) { ?><th>Metal</th><?php } ?>
+                                <th>Name<?php echo masters_req(); ?></th>
+                                <?php if ($masters_carat_has_metal) { ?><th>Metal<?php echo masters_req(); ?></th><?php } ?>
+                                <?php if ($masters_carat_has_split_purity) { ?>
+                                <th>Sale %<?php echo masters_req(); ?></th>
+                                <th>Purchase %<?php echo masters_req(); ?></th>
+                                <th>Common %</th>
+                                <?php } else { ?>
                                 <th>Purity %</th>
+                                <?php } ?>
                                 <th>Description</th>
                                 <?php if ($masters_carat_has_dash_img) { ?><th style="width:44px;">Img</th><?php } ?>
                                 <th style="width:70px;">Action</th>
@@ -432,6 +453,7 @@ $masters_metal_table_cols = 4 + ($masters_metal_has_dash_img ? 1 : 0) + ($master
 $carats = [];
 if ($masters_carat_has_metal) {
     $sql = "SELECT c.id, c.name, c.purity, c.description, c.metal_id"
+        . ($masters_carat_has_split_purity ? ', c.purity_sales, c.purity_purchase, c.purity_common' : '')
         . ($masters_carat_has_dash_img ? ', c.dashboard_image_path, c.dashboard_image_url' : '') . "
         FROM tbl_carat c
         WHERE c.status = 1 "
@@ -454,6 +476,7 @@ if ($masters_carat_has_metal) {
     }
 } else {
     $sql = "SELECT id, name, purity, description"
+        . ($masters_carat_has_split_purity ? ', purity_sales, purity_purchase, purity_common' : '')
         . ($masters_carat_has_dash_img ? ', dashboard_image_path, dashboard_image_url' : '') . "
         FROM tbl_carat 
         WHERE status = 1 " 
@@ -474,10 +497,18 @@ if (is_array($carats) && count($carats) > 0) {
         $edit_onclick = 'editCarat('
             . (int) ($row['id'] ?? 0) . ', '
             . json_encode((string) ($row['name'] ?? ''), JSON_UNESCAPED_UNICODE) . ', '
-            . json_encode((string) ($row['purity'] ?? ''), JSON_UNESCAPED_UNICODE) . ', '
             . json_encode((string) ($row['description'] ?? ''), JSON_UNESCAPED_UNICODE);
         if ($masters_carat_has_metal) {
             $edit_onclick .= ', ' . (int) ($row['metal_id'] ?? 0);
+        }
+        if ($masters_carat_has_split_purity) {
+            $edit_onclick .= ', '
+                . json_encode((string) ($row['purity_sales'] ?? ''), JSON_UNESCAPED_UNICODE) . ', '
+                . json_encode((string) ($row['purity_purchase'] ?? ''), JSON_UNESCAPED_UNICODE) . ', '
+                . json_encode((string) ($row['purity_common'] ?? ''), JSON_UNESCAPED_UNICODE);
+        } else {
+            $edit_onclick .= ', '
+                . json_encode((string) ($row['purity'] ?? ''), JSON_UNESCAPED_UNICODE);
         }
         $edit_onclick .= ')';
 ?>
@@ -486,7 +517,13 @@ if (is_array($carats) && count($carats) > 0) {
     <?php if ($masters_carat_has_metal) { ?>
     <td><?php echo htmlspecialchars(($row['metal_name'] ?? '') !== '' ? (string) $row['metal_name'] : '—'); ?></td>
     <?php } ?>
+    <?php if ($masters_carat_has_split_purity) { ?>
+    <td><?php echo htmlspecialchars(auragold_carat_format_purity_display($row['purity_sales'] ?? '')); ?></td>
+    <td><?php echo htmlspecialchars(auragold_carat_format_purity_display($row['purity_purchase'] ?? '')); ?></td>
+    <td><?php echo htmlspecialchars(auragold_carat_format_purity_display($row['purity_common'] ?? '')); ?></td>
+    <?php } else { ?>
     <td><?php echo isset($row['purity']) && $row['purity'] !== '' && $row['purity'] !== null ? htmlspecialchars((string) $row['purity']) : '-'; ?></td>
+    <?php } ?>
     <td><?php echo htmlspecialchars((string) ($row['description'] ?? '')); ?></td>
     <?php if ($masters_carat_has_dash_img) { ?>
     <td class="text-center align-middle p-1"><?php if ($thumb_src !== '') { ?><img src="<?php echo htmlspecialchars($thumb_src, ENT_QUOTES, 'UTF-8'); ?>" alt="" style="max-width:36px;max-height:36px;object-fit:contain;vertical-align:middle;"><?php } else { ?><span class="text-muted">—</span><?php } ?></td>
@@ -534,7 +571,7 @@ if (is_array($carats) && count($carats) > 0) {
                     <table class="table table-sm table-bordered mb-0">
     <thead>
         <tr>
-            <th>Name *</th>
+            <th>Name<?php echo masters_req(); ?></th>
             <th>Description</th>
             <th style="width:90px">Action</th>
         </tr>
@@ -593,8 +630,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
-                        <th>Formal Name</th>
+                        <th>Name<?php echo masters_req(); ?></th>
+                        <th>Formal Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -653,7 +690,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -708,10 +745,10 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
-                        <th>Unit</th>
-                        <th>Conversion Rate</th>
-                        <th>Quantity</th>
+                        <th>Name<?php echo masters_req(); ?></th>
+                        <th>Unit<?php echo masters_req(); ?></th>
+                        <th>Conversion Rate<?php echo masters_req(); ?></th>
+                        <th>Quantity<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -781,7 +818,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -825,7 +862,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Display Name *</th>
+                        <th>Display Name<?php echo masters_req(); ?></th>
                         <th>HSN Code</th>
                         <th>System Name</th>
                         <?php if ($masters_metal_show_dash) { ?><th style="width:56px;">Dash</th><?php } ?>
@@ -902,7 +939,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -957,7 +994,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1012,7 +1049,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1067,7 +1104,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1122,8 +1159,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
-                        <th>No Of Decimal</th>
+                        <th>Name<?php echo masters_req(); ?></th>
+                        <th>No Of Decimal<?php echo masters_req(); ?></th>
                         <th>Symbol</th>
                         <th>Description</th>
                         <th>Base Currency</th>
@@ -1190,8 +1227,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Currency Name *</th>
-                        <th>Rate *</th>
+                        <th>Currency Name<?php echo masters_req(); ?></th>
+                        <th>Rate<?php echo masters_req(); ?></th>
                         <th>Description</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -1260,7 +1297,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th>Description</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -1318,7 +1355,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th>Description</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -1376,7 +1413,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th>Location</th>
                         <th>Description</th>
                         <th style="width:90px;">Action</th>
@@ -1437,7 +1474,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th>Weight</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -1495,8 +1532,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
-                        <th>Used In</th>
+                        <th>Name<?php echo masters_req(); ?></th>
+                        <th>Used In<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1553,7 +1590,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1608,7 +1645,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1663,7 +1700,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1729,7 +1766,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1784,7 +1821,7 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1839,8 +1876,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Article Code *</th>
-                        <th>Article Name *</th>
+                        <th>Article Code<?php echo masters_req(); ?></th>
+                        <th>Article Name<?php echo masters_req(); ?></th>
                         <th>Description</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -1900,9 +1937,9 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Type *</th>
-                        <th>Amount In Trans. *</th>
-                        <th>Currency *</th>
+                        <th>Type<?php echo masters_req(); ?></th>
+                        <th>Amount In Trans.<?php echo masters_req(); ?></th>
+                        <th>Currency<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -1961,9 +1998,9 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Policy Name *</th>
-                        <th>Days Duration *</th>
-                        <th>Min % of Gold Amount *</th>
+                        <th>Policy Name<?php echo masters_req(); ?></th>
+                        <th>Days Duration<?php echo masters_req(); ?></th>
+                        <th>Min % of Gold Amount<?php echo masters_req(); ?></th>
                         <th style="width:90px;">Action</th>
                     </tr>
                 </thead>
@@ -2022,8 +2059,8 @@ if (is_array($carats) && count($carats) > 0) {
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th>Name *</th>
-                        <th>Code *</th>
+                        <th>Name<?php echo masters_req(); ?></th>
+                        <th>Code<?php echo masters_req(); ?></th>
                         <th>Sort</th>
                         <th style="width:90px;">Action</th>
                     </tr>
@@ -2108,7 +2145,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="metalId">
 
             <div class="form-group">
-                <label>Display Name *</label>
+                <label>Display Name <?php echo masters_req(); ?></label>
                 <input type="text" id="metalDisplayName" class="form-control">
             </div>
 
@@ -2166,7 +2203,7 @@ if (is_array($carats) && count($carats) > 0) {
         <form id="clarityForm">
           <input type="hidden" id="clarityId">
           <div class="form-group">
-            <label>Name *</label>
+            <label>Name <?php echo masters_req(); ?></label>
             <input type="text" id="clarityName" class="form-control">
           </div>
         </form>
@@ -2193,7 +2230,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="locationId">
 
             <div class="form-group">
-                <label>Location Name *</label>
+                <label>Location Name <?php echo masters_req(); ?></label>
                 <input type="text" id="locationName" class="form-control form-control-sm">
             </div>
         </form>
@@ -2220,7 +2257,7 @@ if (is_array($carats) && count($carats) > 0) {
         <form id="taxMasterForm">
           <input type="hidden" id="taxMasterId">
           <div class="form-group">
-            <label>Tax Name *</label>
+            <label>Tax Name <?php echo masters_req(); ?></label>
             <input type="text" id="taxMasterName" class="form-control form-control-sm" placeholder="e.g. VAT, TAX BAH">
           </div>
           <div class="form-group">
@@ -2276,12 +2313,12 @@ if (is_array($carats) && count($carats) > 0) {
         <form id="caratForm">
 <input type="hidden" id="caratId">
           <div class="form-group">
-            <label>Name <span class="text-danger">*</span></label>
+            <label>Name<?php echo masters_req(); ?></label>
             <input type="text" class="form-control form-control-sm" id="caratName" required>
           </div>
           <?php if ($masters_carat_has_metal) { ?>
           <div class="form-group">
-            <label>Metal <span class="text-danger">*</span></label>
+            <label>Metal<?php echo masters_req(); ?></label>
             <select class="form-control form-control-sm" id="caratMetalId" required>
               <?php foreach ($masters_carat_metal_list as $mm) {
                   $mid = (int) ($mm['id'] ?? 0);
@@ -2292,10 +2329,26 @@ if (is_array($carats) && count($carats) > 0) {
           </div>
           <?php } ?>
 
+          <?php if ($masters_carat_has_split_purity) { ?>
+          <div class="form-group">
+            <label>Sale Purity %<?php echo masters_req(); ?></label>
+            <input type="number" step="0.001" class="form-control form-control-sm" id="caratPuritySales" placeholder="e.g. 91.6" required>
+          </div>
+          <div class="form-group">
+            <label>Purchase Purity %<?php echo masters_req(); ?></label>
+            <input type="number" step="0.001" class="form-control form-control-sm" id="caratPurityPurchase" placeholder="e.g. 91.6" required>
+          </div>
+          <div class="form-group">
+            <label>Common Purity %</label>
+            <input type="number" step="0.001" class="form-control form-control-sm" id="caratPurityCommon" placeholder="e.g. 91.6">
+            <small class="text-muted">Used on stock/opening when Sale or Purchase purity is empty.</small>
+          </div>
+          <?php } else { ?>
           <div class="form-group">
             <label>Purity %</label>
             <input type="number" step="0.001" class="form-control form-control-sm" id="caratPurity">
           </div>
+          <?php } ?>
 
           <div class="form-group">
             <label>Description</label>
@@ -2344,7 +2397,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="collectionId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="collectionName" class="form-control form-control-sm">
             </div>
 
@@ -2378,12 +2431,12 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="unitId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="unitName" class="form-control form-control-sm">
             </div>
 
             <div class="form-group">
-                <label>Formal Name *</label>
+                <label>Formal Name <?php echo masters_req(); ?></label>
                 <input type="text" id="unitFormal" class="form-control form-control-sm">
             </div>
         </form>
@@ -2412,7 +2465,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="remarkId">
 
             <div class="form-group">
-                <label>Remark Name *</label>
+                <label>Remark Name <?php echo masters_req(); ?></label>
                 <input type="text" id="remarkName" class="form-control form-control-sm">
             </div>
         </form>
@@ -2442,12 +2495,12 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="unitConvId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="unitConvName" class="form-control form-control-sm">
             </div>
 
             <div class="form-group">
-                <label>Unit *</label>
+                <label>Unit <?php echo masters_req(); ?></label>
                 <select id="unitConvUnit" class="form-control form-control-sm">
                     <option value="">Select Unit</option>
                     <?php
@@ -2460,12 +2513,12 @@ if (is_array($carats) && count($carats) > 0) {
             </div>
 
             <div class="form-group">
-                <label>Conversion Rate *</label>
+                <label>Conversion Rate <?php echo masters_req(); ?></label>
                 <input type="number" step="0.0001" id="unitConvRate" class="form-control form-control-sm">
             </div>
 
             <div class="form-group">
-                <label>Quantity *</label>
+                <label>Quantity <?php echo masters_req(); ?></label>
                 <input type="number" step="0.0001" id="unitConvQty" class="form-control form-control-sm" value="1">
             </div>
         </form>
@@ -2494,7 +2547,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="cutId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="cutName" class="form-control">
             </div>
         </form>
@@ -2523,7 +2576,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="colorId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="colorName" class="form-control">
             </div>
         </form>
@@ -2552,7 +2605,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="shapeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="shapeName" class="form-control">
             </div>
         </form>
@@ -2581,7 +2634,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="sieveId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="sieveName" class="form-control">
             </div>
         </form>
@@ -2611,12 +2664,12 @@ if (is_array($carats) && count($carats) > 0) {
 
             <div class="row">
                 <div class="col-md-6 form-group">
-                    <label>Name *</label>
+                    <label>Name <?php echo masters_req(); ?></label>
                     <input type="text" id="currencyName" class="form-control">
                 </div>
 
                 <div class="col-md-6 form-group">
-                    <label>No Of Decimal *</label>
+                    <label>No Of Decimal <?php echo masters_req(); ?></label>
                     <input type="number" id="currencyDecimal" class="form-control" value="2">
                 </div>
 
@@ -2662,7 +2715,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="currencyRateId">
 
             <div class="form-group">
-                <label>Currency *</label>
+                <label>Currency <?php echo masters_req(); ?></label>
                 <select id="currencyRateCurrency" class="form-control">
                     <option value="">Select Currency</option>
                     <?php
@@ -2675,7 +2728,7 @@ if (is_array($carats) && count($carats) > 0) {
             </div>
 
             <div class="form-group">
-                <label>Rate *</label>
+                <label>Rate <?php echo masters_req(); ?></label>
                 <input type="number" step="0.000001" id="currencyRateValue" class="form-control">
             </div>
 
@@ -2709,7 +2762,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="sizeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="sizeName" class="form-control">
             </div>
 
@@ -2743,7 +2796,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="docTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="docTypeName" class="form-control">
             </div>
 
@@ -2777,7 +2830,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="counterId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="counterName" class="form-control">
             </div>
 
@@ -2816,7 +2869,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="packetTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="packetTypeName" class="form-control">
             </div>
 
@@ -2850,12 +2903,12 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="taskTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="taskTypeName" class="form-control">
             </div>
 
             <div class="form-group">
-                <label>Used In *</label>
+                <label>Used In <?php echo masters_req(); ?></label>
                 <select id="taskTypeUsedIn" class="form-control">
                     <option value="Both">Both</option>
                     <option value="Task & Event">Task & Event</option>
@@ -2888,7 +2941,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="loanProductTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="loanProductTypeName" class="form-control">
             </div>
         </form>
@@ -2917,12 +2970,12 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="customerTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="customerTypeName" class="form-control" maxlength="100">
             </div>
 
             <div class="form-group">
-                <label>Code *</label>
+                <label>Code <?php echo masters_req(); ?></label>
                 <input type="text" id="customerTypeCode" class="form-control" maxlength="64" placeholder="e.g. RETAILER">
             </div>
 
@@ -2956,7 +3009,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="loanReasonId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="loanReasonName" class="form-control">
             </div>
         </form>
@@ -2985,7 +3038,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="documentTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="documentTypeName" class="form-control">
             </div>
         </form>
@@ -3014,7 +3067,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="breakTypeId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="breakTypeName" class="form-control">
             </div>
         </form>
@@ -3043,7 +3096,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="campaignGroupId">
 
             <div class="form-group">
-                <label>Name *</label>
+                <label>Name <?php echo masters_req(); ?></label>
                 <input type="text" id="campaignGroupName" class="form-control">
             </div>
         </form>
@@ -3072,12 +3125,12 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="articleId">
 
             <div class="form-group">
-                <label>Article Code *</label>
+                <label>Article Code <?php echo masters_req(); ?></label>
                 <input type="text" id="articleCode" class="form-control">
             </div>
 
             <div class="form-group">
-                <label>Article Name *</label>
+                <label>Article Name <?php echo masters_req(); ?></label>
                 <input type="text" id="articleName" class="form-control">
             </div>
 
@@ -3111,7 +3164,7 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="cashDenominationId">
 
             <div class="form-group">
-                <label>Type *</label>
+                <label>Type <?php echo masters_req(); ?></label>
                 <select id="cashType" class="form-control">
                     <option value="">Select</option>
                     <option value="Note">Note</option>
@@ -3120,12 +3173,12 @@ if (is_array($carats) && count($carats) > 0) {
             </div>
 
             <div class="form-group">
-                <label>Amount In Trans. *</label>
+                <label>Amount In Trans. <?php echo masters_req(); ?></label>
                 <input type="number" id="cashAmount" class="form-control">
             </div>
 
             <div class="form-group">
-                <label>Currency *</label>
+                <label>Currency <?php echo masters_req(); ?></label>
                  <select id="cashCurrency" class="form-control">
                     <option value="">Select</option>
                     <option value="AED">AED</option>
@@ -3159,17 +3212,17 @@ if (is_array($carats) && count($carats) > 0) {
             <input type="hidden" id="advancePolicyId">
 
             <div class="form-group">
-                <label>Policy Name *</label>
+                <label>Policy Name <?php echo masters_req(); ?></label>
                 <input type="text" id="policyName" class="form-control">
             </div>
 
             <div class="form-group">
-                <label>Days Duration *</label>
+                <label>Days Duration <?php echo masters_req(); ?></label>
                 <input type="number" id="daysDuration" class="form-control">
             </div>
 
             <div class="form-group">
-                <label>Min % of Gold Amount *</label>
+                <label>Min % of Gold Amount <?php echo masters_req(); ?></label>
                 <input type="number" step="0.01" id="minGoldPercent" class="form-control">
             </div>
         </form>
@@ -6784,6 +6837,11 @@ function loadCaratImageForEdit(id) {
                 return;
             }
             var r = res.row;
+            if ($("#caratPuritySales").length) {
+                $("#caratPuritySales").val(r.purity_sales != null && r.purity_sales !== "" ? r.purity_sales : "");
+                $("#caratPurityPurchase").val(r.purity_purchase != null && r.purity_purchase !== "" ? r.purity_purchase : "");
+                $("#caratPurityCommon").val(r.purity_common != null && r.purity_common !== "" ? r.purity_common : "");
+            }
             $("#caratImageUrl").val(r.dashboard_image_url || "");
             var src = (r.dashboard_image_path || r.dashboard_image_url || "").trim();
             if (src) {
@@ -6792,12 +6850,18 @@ function loadCaratImageForEdit(id) {
         });
 }
 
-function editCarat(id, name, purity, desc, metalId) {
+function editCarat(id, name, desc, metalId, puritySales, purityPurchase, purityCommon) {
 
     $("#caratId").val(id);
     $("#caratName").val(name);
-    $("#caratPurity").val(purity);
     $("#caratDesc").val(desc);
+    if ($("#caratPuritySales").length) {
+        $("#caratPuritySales").val(puritySales != null ? puritySales : "");
+        $("#caratPurityPurchase").val(purityPurchase != null ? purityPurchase : "");
+        $("#caratPurityCommon").val(purityCommon != null ? purityCommon : "");
+    } else if ($("#caratPurity").length) {
+        $("#caratPurity").val(puritySales != null ? puritySales : "");
+    }
     if ($("#caratMetalId").length) {
         var mid = (metalId != null && metalId !== "" && parseInt(metalId, 10) > 0) ? String(parseInt(metalId, 10)) : "1";
         if ($("#caratMetalId option[value='" + mid + "']").length) {
@@ -6817,8 +6881,20 @@ function saveCarat(){
 
     let id     = $("#caratId").val();
     let name   = $("#caratName").val().trim();
-    let purity = $("#caratPurity").val().trim();
     let desc   = $("#caratDesc").val().trim();
+    let purity = "";
+    let puritySales = "";
+    let purityPurchase = "";
+    let purityCommon = "";
+    if ($("#caratPuritySales").length) {
+        puritySales = $("#caratPuritySales").val().trim();
+        purityPurchase = $("#caratPurityPurchase").val().trim();
+        purityCommon = $("#caratPurityCommon").val().trim();
+        purity = purityCommon || puritySales || purityPurchase;
+    } else {
+        purity = $("#caratPurity").val().trim();
+        purityCommon = purity;
+    }
 
     if(name === ""){
         alert("Carat name is required");
@@ -6828,6 +6904,16 @@ function saveCarat(){
         let mid = $("#caratMetalId").val();
         if (mid === "" || mid === null) {
             alert("Metal is required");
+            return;
+        }
+    }
+    if ($("#caratPuritySales").length) {
+        if (puritySales === "") {
+            alert("Sale Purity % is required");
+            return;
+        }
+        if (purityPurchase === "") {
+            alert("Purchase Purity % is required");
             return;
         }
     }
@@ -6849,6 +6935,11 @@ function saveCarat(){
                 let safeDesc = res.description.replace(/'/g, "\\'");
                 let metalTd = <?php echo $masters_carat_has_metal ? "true" : "false"; ?>
                     ? `<td>${res.metal_name ? res.metal_name : '—'}</td>` : '';
+                let splitPurityTds = <?php echo $masters_carat_has_split_purity ? "true" : "false"; ?>
+                    ? `<td>${res.purity_sales || '-'}</td><td>${res.purity_purchase || '-'}</td><td>${res.purity_common || '-'}</td>` : '';
+                let safePuritySales = (res.purity_sales != null) ? String(res.purity_sales).replace(/'/g, "\\'") : "";
+                let safePurityPurchase = (res.purity_purchase != null) ? String(res.purity_purchase).replace(/'/g, "\\'") : "";
+                let safePurityCommon = (res.purity_common != null) ? String(res.purity_common).replace(/'/g, "\\'") : "";
 
                 <?php if ($masters_carat_has_dash_img) { ?>
                 var thumbSrc = "";
@@ -6866,16 +6957,23 @@ function saveCarat(){
                     <tr id="carat_${res.id}">
                         <td>${res.name}</td>
                         ${metalTd}
+                        <?php if ($masters_carat_has_split_purity) { ?>
+                        ${splitPurityTds}
+                        <?php } else { ?>
                         <td>${res.purity || '-'}</td>
+                        <?php } ?>
                         <td>${res.description || '-'}</td>
                         ${thumbTd}
                         <td class="text-center">
                             <a href="javascript:void(0)"
                                onclick="editCarat(${res.id},
                                '${safeName}',
-                               '${res.purity}',
                                '${safeDesc}'<?php if ($masters_carat_has_metal) { ?>,
-                               ${typeof res.metal_id !== 'undefined' ? res.metal_id : 0}<?php } ?>)"
+                               ${typeof res.metal_id !== 'undefined' ? res.metal_id : 0}<?php } ?><?php if ($masters_carat_has_split_purity) { ?>,
+                               '${safePuritySales}',
+                               '${safePurityPurchase}',
+                               '${safePurityCommon}'<?php } else { ?>,
+                               '${(res.purity || '').replace(/'/g, "\\'")}'<?php } ?>)"
                                class="text-primary mr-2">
                                 <i class="feather icon-edit"></i>
                             </a>
@@ -6919,6 +7017,11 @@ function saveCarat(){
         fd.append("name", name);
         fd.append("purity", purity);
         fd.append("description", desc);
+        if ($("#caratPuritySales").length) {
+            fd.append("purity_sales", puritySales);
+            fd.append("purity_purchase", purityPurchase);
+            fd.append("purity_common", purityCommon);
+        }
         if ($("#caratMetalId").length) {
             fd.append("metal_id", $("#caratMetalId").val());
         }
@@ -6941,6 +7044,11 @@ function saveCarat(){
             purity: purity,
             description: desc
         };
+        if ($("#caratPuritySales").length) {
+            ajaxOpts.data.purity_sales = puritySales;
+            ajaxOpts.data.purity_purchase = purityPurchase;
+            ajaxOpts.data.purity_common = purityCommon;
+        }
         if ($("#caratMetalId").length) {
             ajaxOpts.data.metal_id = $("#caratMetalId").val();
         }

@@ -74,6 +74,7 @@ function auragold_nav_basename_permission_map()
         'repair-order.php'              => ['orders', 'repair_order'],
         'sale-order-process.php'        => ['orders', 'sale_repair_order_process'],
         'jobwork-order.php'             => ['orders', 'jobwork_order_manufacturing'],
+        'manufacturing-outsource.php'       => ['orders', 'jobwork_order_outsource'],
         'job-work-order-manufacturing.php' => ['orders', 'jobwork_order_outsource'],
         'department.php'                => ['manufacturer', 'department'],
         'department-report.php'         => ['manufacturer', 'department_report'],

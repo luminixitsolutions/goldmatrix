@@ -149,6 +149,41 @@ if (!function_exists('auragold_jobwork_order_sync_customer_ledger')) {
             }
         }
 
+        if ($worker_id > 0 && $sale_order_id > 0 && function_exists('getList')) {
+            $mi_me_rows = getList(
+                'SELECT s.opening_weight, s.final_weight, s.metal_id, m.system_name AS metal_system'
+                . ' FROM tbl_stock s'
+                . ' INNER JOIN tbl_material_issues mi ON mi.id = s.reference_id'
+                . " WHERE s.status = 1 AND s.reference_type = 'material_issue_metal_exchange'"
+                . ' AND mi.sale_order_id = ' . (int) $sale_order_id
+                . ' AND mi.department_user_id = ' . (int) $worker_id
+            );
+            if (is_array($mi_me_rows)) {
+                foreach ($mi_me_rows as $mrow) {
+                    if (!is_array($mrow)) {
+                        continue;
+                    }
+                    $gross = (float) ($mrow['opening_weight'] ?? 0);
+                    $pure = (float) ($mrow['final_weight'] ?? 0);
+                    if ($pure <= 1e-8) {
+                        $pure = $gross;
+                    }
+                    $wt_use = ($pure > 1e-8) ? $pure : $gross;
+                    if ($wt_use <= 1e-8) {
+                        continue;
+                    }
+                    $msys = strtolower(trim((string) ($mrow['metal_system'] ?? '')));
+                    $is_silver = ($msys !== '' && strpos($msys, 'silver') !== false);
+                    if ($is_silver) {
+                        $total_silver += $wt_use;
+                    } else {
+                        $total_gold += $wt_use;
+                        $total_gold_pure += $wt_use;
+                    }
+                }
+            }
+        }
+
         auragold_voucher_ensure_diamond_issue_table($conn);
         $drow = getRecord(
             'SELECT COALESCE(SUM(weight), 0) AS w FROM tbl_voucher_diamond_stock_issue WHERE voucher_kind = \'jobwork_order\' AND voucher_id = '

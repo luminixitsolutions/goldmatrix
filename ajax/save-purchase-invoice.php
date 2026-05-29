@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/dashboard_currency_display.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_product_metal_tab_match.php';
 
 header('Content-Type: application/json');
 
@@ -1259,6 +1260,34 @@ try {
                         ");
                         $metal_id = $default_metal ? (int)$default_metal['metal_id'] : 1;
                     }
+
+                    $post_metal_id = isset($item['metal_id']) ? (int) $item['metal_id'] : 0;
+                    if ($post_metal_id > 0) {
+                        $metal_id = $post_metal_id;
+                    }
+
+                    $diamond_tab_category = function_exists('auragold_normalize_diamond_tab_category')
+                        ? auragold_normalize_diamond_tab_category((string) ($item['diamond_category'] ?? $item['category'] ?? $diamond_category))
+                        : trim((string) ($item['diamond_category'] ?? $item['category'] ?? $diamond_category));
+                    if ($diamond_tab_category !== '' && function_exists('auragold_resolve_characteristic_for_diamond_category_purchase')) {
+                        $resolved_ds = auragold_resolve_characteristic_for_diamond_category_purchase(
+                            $conn,
+                            $product_id,
+                            $characteristic_id ? (int) $characteristic_id : 0,
+                            $branch_id,
+                            $metal_id,
+                            $diamond_tab_category
+                        );
+                        if ((int) ($resolved_ds['characteristic_id'] ?? 0) > 0) {
+                            $characteristic_id = (int) $resolved_ds['characteristic_id'];
+                        }
+                        if ((int) ($resolved_ds['metal_id'] ?? 0) > 0) {
+                            $metal_id = (int) $resolved_ds['metal_id'];
+                        }
+                        if (!empty($resolved_ds['diamond_category'])) {
+                            $diamond_tab_category = (string) $resolved_ds['diamond_category'];
+                        }
+                    }
                     
                     // Insert stock entry with stock_type='purchase' only (no outward during purchase)
                     $barcode_esc = $barcode ? "'" . mysqli_real_escape_string($conn, $barcode) . "'" : "NULL";
@@ -1347,7 +1376,7 @@ try {
                         'rfid_code' => $rfid,
                         'voucher_type' => 'Purchase Invoice',
                         'design_no' => $design_no,
-                        'category' => '',
+                        'category' => $diamond_tab_category !== '' ? $diamond_tab_category : trim((string) ($item['diamond_category'] ?? $item['category'] ?? $diamond_category)),
                         'comment' => 'auragold_doc|src=pi|iid=' . (int) $invoice_id . '|pii=' . (int) $item_id . '|',
                     ]);
                     

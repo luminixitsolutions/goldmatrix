@@ -4,6 +4,7 @@
  */
 session_start();
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/jwm_material_links.php';
 
 function jwm_format_spent_time($seconds) {
     $sec = (int) $seconds;
@@ -27,27 +28,108 @@ function jwm_parse_image_urls($jsonOrRaw, $baseUrl) {
         if (!empty($dec['images']) && is_array($dec['images'])) {
             foreach ($dec['images'] as $u) {
                 if ($u !== '' && $u !== null) {
-                    $out[] = $u;
+                    $out[] = (string) $u;
                 }
             }
-        } elseif (isset($dec[0])) {
+        }
+        if (empty($out) && !empty($dec['primary'])) {
+            $out[] = (string) $dec['primary'];
+        }
+        if (empty($out) && isset($dec[0])) {
             foreach ($dec as $u) {
                 if (is_string($u) && $u !== '') {
                     $out[] = $u;
                 }
             }
         }
+    } elseif (preg_match('#^https?://#i', $raw) || preg_match('#^(?:admin/)?uploads/#i', $raw)) {
+        $out[] = $raw;
     }
     $base = rtrim((string) $baseUrl, '/');
     $prefix = ($base === '' ? '' : $base . '/');
     foreach ($out as &$u) {
-        if (strpos($u, 'http://') === 0 || strpos($u, 'https://') === 0) {
+        $u = trim((string) $u);
+        if ($u === '') {
             continue;
         }
-        $u = $prefix . auragold_uploads_public_rel(ltrim((string) $u, '/'));
+        if (preg_match('#^https?://#i', $u)) {
+            continue;
+        }
+        if (function_exists('auragold_uploads_public_url')) {
+            $resolved = auragold_uploads_public_url($u);
+            if ($resolved !== '') {
+                $u = $resolved;
+                continue;
+            }
+        }
+        $u = $prefix . auragold_uploads_public_rel(ltrim($u, '/'));
     }
     unset($u);
+    $out = array_values(array_filter($out, function ($u) {
+        return trim((string) $u) !== '';
+    }));
     return array_slice(array_unique($out), 0, 6);
+}
+
+/** Prefer line images, then linked sale/repair order line photos, then jobwork queue photos. */
+function jwm_row_image_urls(array $row, $baseUrl = '') {
+    foreach (['ji_images', 'sale_item_images', 'repair_item_images', 'queue_images'] as $key) {
+        $imgs = jwm_parse_image_urls($row[$key] ?? '', $baseUrl);
+        if (!empty($imgs)) {
+            return $imgs;
+        }
+    }
+    return [];
+}
+
+/**
+ * SQL subselect: images from tbl_sale_order_items for a jobwork line (matches manufacturing-process.php).
+ */
+function jwm_sql_sale_order_item_images($tag_expr, $has_soi_images, $has_ji_product_id) {
+    if (!$has_soi_images) {
+        return 'NULL AS sale_item_images';
+    }
+    $img_nonempty = "soi.images IS NOT NULL AND TRIM(soi.images) <> ''";
+    $so_scope = 'soi.order_id = j.sale_order_id AND j.sale_order_id > 0';
+    $fallback = "(SELECT soi.images FROM tbl_sale_order_items soi WHERE {$so_scope} AND {$img_nonempty} ORDER BY soi.id ASC LIMIT 1)";
+    if ($has_ji_product_id) {
+        $matched = "(SELECT soi.images FROM tbl_sale_order_items soi WHERE {$so_scope} AND {$img_nonempty} AND (
+            (ji.product_id IS NOT NULL AND ji.product_id > 0 AND soi.product_id = ji.product_id)
+            OR (
+                (ji.product_id IS NULL OR ji.product_id = 0)
+                AND LENGTH(TRIM(IFNULL(soi.barcode,''))) > 0
+                AND TRIM(IFNULL(soi.barcode,'')) COLLATE utf8mb4_unicode_ci = TRIM(IFNULL({$tag_expr},'')) COLLATE utf8mb4_unicode_ci
+            )
+        ) ORDER BY soi.id ASC LIMIT 1)";
+    } else {
+        $matched = "(SELECT soi.images FROM tbl_sale_order_items soi WHERE {$so_scope} AND {$img_nonempty} AND LENGTH(TRIM(IFNULL(soi.barcode,''))) > 0 AND TRIM(IFNULL(soi.barcode,'')) COLLATE utf8mb4_unicode_ci = TRIM(IFNULL({$tag_expr},'')) COLLATE utf8mb4_unicode_ci ORDER BY soi.id ASC LIMIT 1)";
+    }
+    return "COALESCE({$matched}, {$fallback}) AS sale_item_images";
+}
+
+/**
+ * SQL subselect: images from tbl_repair_order_items for a repair jobwork line.
+ */
+function jwm_sql_repair_order_item_images($tag_expr, $has_roi_images, $has_rji_product_id) {
+    if (!$has_roi_images) {
+        return 'NULL AS repair_item_images';
+    }
+    $img_nonempty = "roi.images IS NOT NULL AND TRIM(roi.images) <> ''";
+    $ro_scope = 'roi.order_id = rj.repair_order_id AND rj.repair_order_id > 0';
+    $fallback = "(SELECT roi.images FROM tbl_repair_order_items roi WHERE {$ro_scope} AND {$img_nonempty} ORDER BY roi.id ASC LIMIT 1)";
+    if ($has_rji_product_id) {
+        $matched = "(SELECT roi.images FROM tbl_repair_order_items roi WHERE {$ro_scope} AND {$img_nonempty} AND (
+            (rji.product_id IS NOT NULL AND rji.product_id > 0 AND roi.product_id = rji.product_id)
+            OR (
+                (rji.product_id IS NULL OR rji.product_id = 0)
+                AND LENGTH(TRIM(IFNULL(roi.barcode,''))) > 0
+                AND TRIM(IFNULL(roi.barcode,'')) COLLATE utf8mb4_unicode_ci = TRIM(IFNULL({$tag_expr},'')) COLLATE utf8mb4_unicode_ci
+            )
+        ) ORDER BY roi.id ASC LIMIT 1)";
+    } else {
+        $matched = "(SELECT roi.images FROM tbl_repair_order_items roi WHERE {$ro_scope} AND {$img_nonempty} AND LENGTH(TRIM(IFNULL(roi.barcode,''))) > 0 AND TRIM(IFNULL(roi.barcode,'')) COLLATE utf8mb4_unicode_ci = TRIM(IFNULL({$tag_expr},'')) COLLATE utf8mb4_unicode_ci ORDER BY roi.id ASC LIMIT 1)";
+    }
+    return "COALESCE({$matched}, {$fallback}) AS repair_item_images";
 }
 
 $conn = $conn ?? null;
@@ -265,6 +347,7 @@ if ($has_jwo && $has_ji && $conn && function_exists('getList')) {
     }
 
     $ji_img_sel = !empty($ji_cols['images']) ? 'ji.images AS ji_images' : 'NULL AS ji_images';
+    $j_sale_img_sel = jwm_sql_sale_order_item_images($tag_expr, !empty($soi_cols['images']), !empty($ji_cols['product_id']));
     $j_queue_img = !empty($jwo_cols['jobwork_queue_images']) ? 'j.jobwork_queue_images AS queue_images' : 'NULL AS queue_images';
 
     $where = ' WHERE 1=1 ';
@@ -283,10 +366,7 @@ if ($has_jwo && $has_ji && $conn && function_exists('getList')) {
     if ($search !== '') {
         $where .= " AND (j.jobwork_no LIKE '%" . $search . "%' OR j.sale_order_no LIKE '%" . $search . "%' OR j.customer_name LIKE '%" . $search . "%' OR ji.product_name LIKE '%" . $search . "%' OR ji.design_no LIKE '%" . $search . "%' OR ji.barcode LIKE '%" . $search . "%' OR pc.sku_code LIKE '%" . $search . "%') ";
     }
-    // Job work orders created without a department — these appear here; department-assigned orders appear on manufacturing-process.php only.
-    if (!empty($jwo_cols['department_id'])) {
-        $where .= ' AND (j.department_id IS NULL OR j.department_id = 0) ';
-    }
+    // Show all job work order lines here (assigned or unassigned) for material issue/receive/history.
 
     $sql = "
         SELECT
@@ -306,6 +386,8 @@ if ($has_jwo && $has_ji && $conn && function_exists('getList')) {
             $tag_expr AS tag_no,
             " . (!empty($ji_cols['status']) ? 'ji.status' : '1') . " AS item_active,
             $ji_img_sel,
+            $j_sale_img_sel,
+            NULL AS repair_item_images,
             $j_queue_img,
             pc.sku_code AS rfid_code,
             $inv_sel,
@@ -359,6 +441,7 @@ if ($has_rjwo && $has_rji && $conn && function_exists('getList')) {
     }
     $rj_queue_img = !empty($rjwo_cols['jobwork_queue_images']) ? 'rj.jobwork_queue_images AS queue_images' : 'NULL AS queue_images';
     $rji_img_sel = !empty($rji_cols['images']) ? 'rji.images AS ji_images' : 'NULL AS ji_images';
+    $rj_repair_img_sel = jwm_sql_repair_order_item_images($rji_tag, !empty($roi_cols['images']), !empty($rji_cols['product_id']));
     $rji_status_sel = !empty($rji_cols['status']) ? 'rji.status' : '1';
 
     $ro_join_rj = '';
@@ -414,6 +497,8 @@ if ($has_rjwo && $has_rji && $conn && function_exists('getList')) {
             $rji_tag AS tag_no,
             $rji_status_sel AS item_active,
             $rji_img_sel,
+            $rj_repair_img_sel,
+            NULL AS sale_item_images,
             $rj_queue_img,
             pc.sku_code AS rfid_code,
             '' AS jobwork_invoice_no,
@@ -512,6 +597,8 @@ if ($conn && function_exists('getList') && $has_soi) {
             $soi_tag AS tag_no,
             $soi_status_sel AS item_active,
             $soi_img_sel,
+            NULL AS sale_item_images,
+            NULL AS repair_item_images,
             NULL AS queue_images,
             pc.sku_code AS rfid_code,
             '' AS jobwork_invoice_no,
@@ -594,6 +681,8 @@ if ($conn && function_exists('getList') && $has_roi && $has_ro) {
             $roi_tag AS tag_no,
             $roi_status_sel AS item_active,
             $roi_img_sel,
+            NULL AS sale_item_images,
+            NULL AS repair_item_images,
             NULL AS queue_images,
             pc.sku_code AS rfid_code,
             '' AS jobwork_invoice_no,
@@ -645,6 +734,9 @@ $total_pages = $total_records > 0 ? (int) ceil($total_records / $per_page) : 1;
 $page = min($page, max(1, $total_pages));
 $offset = ($page - 1) * $per_page;
 $page_rows = array_slice($all_rows, $offset, $per_page);
+
+$jwm_material_histories = jwm_load_material_histories_for_rows($conn, $page_rows);
+$jwm_row_histories_for_modal = [];
 
 $base_web = isset($SiteUrl) ? rtrim((string) $SiteUrl, '/') : '';
 
@@ -702,8 +794,41 @@ body { background: #f4f6fb; }
 .btn-invoice { background: #0d9488; color: #fff; }
 .btn-print { background: #6366f1; color: #fff; }
 .btn-open { background: #11294b; color: #fff; }
+.btn-mat-issue { background: #ea580c; color: #fff; }
+.btn-mat-receive { background: #0891b2; color: #fff; }
+.jwm-materials-cell { text-align: left; min-width: 120px; max-width: 180px; vertical-align: middle !important; }
+.jwm-mat-btns { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: center; }
+.btn-mat-history { background: #64748b; color: #fff; }
+#jwmMaterialHistoryModal { display: none; position: fixed; inset: 0; z-index: 1065; align-items: center; justify-content: center; padding: 16px; }
+#jwmMaterialHistoryModal.active { display: flex; }
+#jwmMaterialHistoryModal .jwm-mh-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.45); }
+#jwmMaterialHistoryModal .jwm-mh-dialog { position: relative; background: #fff; border-radius: 10px; width: min(860px, 100%); max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.2); overflow: hidden; }
+#jwmMaterialHistoryModal .jwm-mh-header { background: #5b4bce; color: #fff; padding: 12px 16px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+#jwmMaterialHistoryModal .jwm-mh-header h6 { margin: 0; font-size: 15px; font-weight: 700; }
+#jwmMaterialHistoryModal .jwm-mh-sub { font-size: 11px; opacity: 0.9; margin-top: 4px; }
+#jwmMaterialHistoryModal .jwm-mh-close { background: none; border: none; color: #fff; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; }
+#jwmMaterialHistoryModal .jwm-mh-tabs { display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+#jwmMaterialHistoryModal .jwm-mh-tab { flex: 1; border: none; background: transparent; padding: 10px 12px; font-size: 12px; font-weight: 700; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; }
+#jwmMaterialHistoryModal .jwm-mh-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; background: #fff; }
+#jwmMaterialHistoryModal .jwm-mh-body { padding: 12px 16px 16px; overflow-y: auto; flex: 1; min-height: 120px; }
+#jwmMaterialHistoryModal .jwm-mh-pane { display: none; }
+#jwmMaterialHistoryModal .jwm-mh-pane.active { display: block; }
+#jwmMaterialHistoryModal .jwm-mh-list { list-style: none; margin: 0; padding: 0; }
+#jwmMaterialHistoryModal .jwm-mh-item { padding: 12px 0; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
+#jwmMaterialHistoryModal .jwm-mh-item:last-child { border-bottom: none; }
+#jwmMaterialHistoryModal .jwm-mh-item a { color: #4f46e5; font-weight: 700; text-decoration: none; }
+#jwmMaterialHistoryModal .jwm-mh-item a:hover { text-decoration: underline; }
+#jwmMaterialHistoryModal .jwm-mh-meta { color: #64748b; margin-top: 4px; font-size: 11px; }
+#jwmMaterialHistoryModal .jwm-mh-empty { color: #94a3b8; font-style: italic; font-size: 12px; padding: 8px 0; }
+#jwmMaterialHistoryModal .jwm-mh-detail-wrap { margin-top: 8px; overflow-x: auto; }
+#jwmMaterialHistoryModal .jwm-mh-detail-table { width: 100%; border-collapse: collapse; font-size: 10px; min-width: 640px; }
+#jwmMaterialHistoryModal .jwm-mh-detail-table th { background: #f1f5f9; color: #334155; font-weight: 700; padding: 6px 5px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap; }
+#jwmMaterialHistoryModal .jwm-mh-detail-table td { padding: 5px; border: 1px solid #e2e8f0; color: #1e293b; vertical-align: top; }
+#jwmMaterialHistoryModal .jwm-mh-detail-table tr:nth-child(even) td { background: #fafafa; }
+#jwmMaterialHistoryModal .jwm-mh-no-lines { font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 6px; }
 .action-cell-btns { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; }
-.img-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; background: #f1f5f9; margin: 1px; }
+.img-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; background: #f1f5f9; margin: 1px; border: 1px solid #e2e8f0; }
+.jwm-img-cell { white-space: nowrap; min-width: 52px; }
 .pagination-container { background: #fff; padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin: 0 20px 20px 20px; border-radius: 0 0 8px 8px; flex-wrap: wrap; gap: 8px; }
 .jwm-col-hidden { display: none !important; }
 .th-sort-hint { font-size: 9px; color: #94a3b8; font-weight: 400; }
@@ -762,7 +887,7 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
 <div class="container-fluid flex-grow-1" style="padding-top:0;padding-bottom:0;">
 
     <div class="page-header-bar">
-        <span class="ph-title">Manufacturing — unassigned dept. JWO · open SO · open RO</span>
+        <span class="ph-title">Manufacturing — job work orders · open SO · open RO</span>
         <a href="jobwork-order.php" class="btn btn-sm text-white border border-light" style="border-radius:8px;">Open Jobwork Order</a>
     </div>
 
@@ -805,6 +930,7 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
                 <tr>
                     <th data-col="check"><input type="checkbox" id="selectAll"></th>
                     <th data-col="active">active <span class="th-sort-hint">●</span></th>
+                    <th data-col="image_urls">Image</th>
                     <th data-col="jobwork_no">Jobwork Order No. <span class="th-sort-hint">↕</span></th>
                     <th data-col="jobwork_invoice">Jobwork Invoice No. <span class="th-sort-hint">↕</span></th>
                     <th data-col="sale_order_no">SO / RO No. <span class="th-sort-hint">↕</span></th>
@@ -826,7 +952,7 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
                     <th data-col="create_catelog">createCatelog</th>
                     <th data-col="invoice">Invoice</th>
                     <th data-col="print">Print</th>
-                    <th data-col="image_urls">imageUrls</th>
+                    <th data-col="materials">Materials</th>
                     <th data-col="action" class="text-nowrap">
                         action
                         <button type="button" class="btn-col-settings ml-1" id="btnColumnSettings" title="Columns"><i class="feather icon-settings"></i></button>
@@ -835,9 +961,9 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
             </thead>
             <tbody>
             <?php if (!$jwm_can_list): ?>
-                <tr><td colspan="25" class="text-center text-muted py-5">No list sources available. Add jobwork tables (<code>create_tbl_jobwork_orders.sql</code>) and/or sale / repair order tables.</td></tr>
+                <tr><td colspan="26" class="text-center text-muted py-5">No list sources available. Add jobwork tables (<code>create_tbl_jobwork_orders.sql</code>) and/or sale / repair order tables.</td></tr>
             <?php elseif (empty($page_rows)): ?>
-                <tr><td colspan="25" class="text-center text-muted py-5">No Rows To Show</td></tr>
+                <tr><td colspan="26" class="text-center text-muted py-5">No Rows To Show</td></tr>
             <?php else: ?>
                 <?php foreach ($page_rows as $row):
                     $jid = (int) ($row['jobwork_order_id'] ?? 0);
@@ -856,14 +982,44 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
 
                     $ia = isset($row['item_active']) ? (int) $row['item_active'] : 1;
                     $active_ok = ($ia === 1);
-                    $imgs = jwm_parse_image_urls($row['ji_images'] ?? '', $base_web);
-                    if (empty($imgs)) {
-                        $imgs = jwm_parse_image_urls($row['queue_images'] ?? '', $base_web);
+                    $imgs = jwm_row_image_urls($row, $base_web);
+                    $mat_issue_url = jwm_material_issue_url($ls, $jid, $soid, $rid);
+                    $mat_receive_url = jwm_material_receive_url($ls, $jid, $soid, $rid);
+                    $mat_hist = jwm_row_material_history($jwm_material_histories, $row);
+                    $mat_can_materials = ($mat_issue_url !== '' || $mat_receive_url !== '');
+                    $hist_issue = $mat_hist['issues'];
+                    $hist_recv = $mat_hist['receives'];
+                    $hist_repair = !empty($mat_hist['is_repair']);
+                    $hist_row_key = (string) ($row['row_uid'] ?? ($ls . '-' . (int) ($row['line_id'] ?? 0)));
+                    $hist_ref = trim((string) ($row['jobwork_no'] ?? ''));
+                    if ($hist_ref === '') {
+                        $hist_ref = trim((string) ($row['sale_order_no'] ?? $row['repair_order_no'] ?? ''));
                     }
+                    if ($hist_ref === '') {
+                        $hist_ref = 'Job work';
+                    }
+                    $hist_filter_jwo_id = ($ls === 'jwo' && $jid > 0) ? $jid : 0;
+                    $jwm_row_histories_for_modal[$hist_row_key] = [
+                        'title' => $hist_ref,
+                        'subtitle' => trim((string) ($row['product_name'] ?? '')),
+                        'is_repair' => $hist_repair,
+                        'jobwork_order_id' => $hist_filter_jwo_id,
+                        'issues' => jwm_material_history_entries_for_js($conn, $hist_issue, 'issue', $hist_repair, $rid, false, $hist_filter_jwo_id),
+                        'receives' => jwm_material_history_entries_for_js($conn, $hist_recv, 'receive', $hist_repair, $rid, false, $hist_filter_jwo_id),
+                    ];
                 ?>
                 <tr>
                     <td data-col="check"><input type="checkbox" class="row-checkbox" value="<?php echo htmlspecialchars($row['row_uid'] ?? (($row['list_source'] ?? 'jwo') . '-' . (int) ($row['line_id'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?>"></td>
                     <td data-col="active" title="<?php echo $active_ok ? 'Active' : 'Inactive'; ?>"><span class="active-dot <?php echo $active_ok ? 'active-yes' : 'active-no'; ?>"></span></td>
+                    <td data-col="image_urls" class="jwm-img-cell">
+                        <?php if (!empty($imgs)): ?>
+                            <?php foreach ($imgs as $iu): ?>
+                                <a href="<?php echo htmlspecialchars($iu); ?>" target="_blank" rel="noopener" title="View image"><img src="<?php echo htmlspecialchars($iu); ?>" alt="" class="img-thumb" loading="lazy"></a>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td data-col="jobwork_no">
                         <?php if ($ls === 'jwo' && $jid > 0): ?>
                             <a href="jobwork-order.php?id=<?php echo $jid; ?>"><?php echo htmlspecialchars($row['jobwork_no'] ?? '—'); ?></a>
@@ -915,13 +1071,19 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
                         <span class="text-muted">—</span>
                         <?php endif; ?>
                     </td>
-                    <td data-col="image_urls">
-                        <?php if (!empty($imgs)): ?>
-                            <?php foreach ($imgs as $iu): ?>
-                                <img src="<?php echo htmlspecialchars($iu); ?>" alt="" class="img-thumb" loading="lazy">
-                            <?php endforeach; ?>
+                    <td data-col="materials" class="jwm-materials-cell">
+                        <?php if ($mat_can_materials): ?>
+                        <div class="jwm-mat-btns">
+                            <?php if ($mat_issue_url !== ''): ?>
+                            <a class="btn-action btn-mat-issue" href="<?php echo htmlspecialchars($mat_issue_url); ?>" title="Issue material to this job work order">Issue</a>
+                            <?php endif; ?>
+                            <?php if ($mat_receive_url !== ''): ?>
+                            <a class="btn-action btn-mat-receive" href="<?php echo htmlspecialchars($mat_receive_url); ?>" title="Receive material from this job work order">Receive</a>
+                            <?php endif; ?>
+                            <button type="button" class="btn-action btn-mat-history js-jwm-mat-history" data-jwm-hist-key="<?php echo htmlspecialchars($hist_row_key, ENT_QUOTES, 'UTF-8'); ?>" title="Material issue &amp; receive history">History</button>
+                        </div>
                         <?php else: ?>
-                            <span class="text-muted">—</span>
+                        <span class="text-muted">—</span>
                         <?php endif; ?>
                     </td>
                     <td data-col="action">
@@ -1027,6 +1189,31 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
     </div>
 </div>
 
+<div id="jwmMaterialHistoryModal" class="jwm-mh-modal" aria-hidden="true" role="dialog">
+    <div class="jwm-mh-backdrop js-jwm-mh-close" aria-hidden="true"></div>
+    <div class="jwm-mh-dialog" role="document">
+        <div class="jwm-mh-header">
+            <div>
+                <h6 id="jwmMatHistTitle">Material history</h6>
+                <div class="jwm-mh-sub" id="jwmMatHistSubtitle"></div>
+            </div>
+            <button type="button" class="jwm-mh-close js-jwm-mh-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="jwm-mh-tabs" role="tablist">
+            <button type="button" class="jwm-mh-tab active" data-jwm-mh-tab="issue" role="tab" aria-selected="true">Issue history</button>
+            <button type="button" class="jwm-mh-tab" data-jwm-mh-tab="receive" role="tab" aria-selected="false">Receive history</button>
+        </div>
+        <div class="jwm-mh-body">
+            <div class="jwm-mh-pane active" id="jwmMatHistPaneIssue" role="tabpanel">
+                <ul class="jwm-mh-list" id="jwmMatHistListIssue"></ul>
+            </div>
+            <div class="jwm-mh-pane" id="jwmMatHistPaneReceive" role="tabpanel">
+                <ul class="jwm-mh-list" id="jwmMatHistListReceive"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="columnSettingsModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
@@ -1045,9 +1232,158 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
     </div>
 </div>
 
+<?php
+$jwm_hist_json = json_encode(
+    $jwm_row_histories_for_modal,
+    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES
+);
+if ($jwm_hist_json === false) {
+    $jwm_hist_json = '{}';
+}
+?>
 <script>
+window.JWM_MATERIAL_HISTORIES = <?php echo $jwm_hist_json; ?>;
 (function() {
     var table = document.getElementById('jwmTable');
+
+    (function jwmMaterialHistoryModal() {
+        var modal = document.getElementById('jwmMaterialHistoryModal');
+        if (!modal) return;
+        var store = window.JWM_MATERIAL_HISTORIES || {};
+        var titleEl = document.getElementById('jwmMatHistTitle');
+        var subEl = document.getElementById('jwmMatHistSubtitle');
+        var listIssue = document.getElementById('jwmMatHistListIssue');
+        var listRecv = document.getElementById('jwmMatHistListReceive');
+        var paneIssue = document.getElementById('jwmMatHistPaneIssue');
+        var paneRecv = document.getElementById('jwmMatHistPaneReceive');
+        var tabs = modal.querySelectorAll('.jwm-mh-tab');
+
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function fmtAmt(n) {
+            var v = parseFloat(n);
+            if (isNaN(v)) return '';
+            return v.toFixed(2);
+        }
+        function renderDetailTable(lines) {
+            if (!lines || !lines.length) {
+                return '<div class="jwm-mh-no-lines">No line items recorded on this voucher.</div>';
+            }
+            var h = '<div class="jwm-mh-detail-wrap"><table class="jwm-mh-detail-table"><thead><tr>' +
+                '<th>Barcode</th><th>Product</th><th>Category</th><th>Qty</th><th>Wt</th><th>Type</th><th>Status</th><th>Date</th>' +
+                '</tr></thead><tbody>';
+            lines.forEach(function(ln) {
+                h += '<tr><td>' + esc(ln.barcode) + '</td><td>' + esc(ln.product_name) + '</td><td>' + esc(ln.category) + '</td>' +
+                    '<td>' + esc(ln.qty) + '</td><td>' + esc(ln.wt) + '</td><td>' + esc(ln.item_type) + '</td>' +
+                    '<td>' + esc(ln.status) + '</td><td>' + esc(ln.date) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            return h;
+        }
+        function fetchDocLines(docType, docId, fromRepair, filterJwoId, done) {
+            if (!docId) {
+                done([]);
+                return;
+            }
+            var q = 'ajax/jwm-material-history-lines.php?type=' + encodeURIComponent(docType) +
+                '&id=' + encodeURIComponent(String(docId)) + (fromRepair ? '&from_repair=1' : '');
+            if (filterJwoId > 0) {
+                q += '&jobwork_order_id=' + encodeURIComponent(String(filterJwoId));
+            }
+            fetch(q, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (data && data.success && Array.isArray(data.lines)) {
+                        done(data.lines);
+                        return;
+                    }
+                    done([]);
+                })
+                .catch(function() { done([]); });
+        }
+        function renderList(ul, rows, emptyText, docType, fromRepair, filterJwoId) {
+            if (!ul) return;
+            ul.innerHTML = '';
+            if (!rows || !rows.length) {
+                ul.innerHTML = '<li class="jwm-mh-empty">' + esc(emptyText) + '</li>';
+                return;
+            }
+            rows.forEach(function(r) {
+                var li = document.createElement('li');
+                li.className = 'jwm-mh-item';
+                var noHtml = esc(r.no || '—');
+                if (r.url) {
+                    noHtml = '<a href="' + esc(r.url) + '">' + noHtml + '</a>';
+                }
+                var meta = [];
+                if (r.date) meta.push(r.date);
+                if (r.status) meta.push(r.status);
+                if (r.grand_total != null && r.grand_total !== '') {
+                    var gt = fmtAmt(r.grand_total);
+                    if (gt !== '') meta.push('Total ' + gt);
+                }
+                li.innerHTML = '<div>' + noHtml + '</div>' +
+                    (meta.length ? '<div class="jwm-mh-meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+                    '<div class="jwm-mh-lines-host text-muted small">Loading items…</div>';
+                ul.appendChild(li);
+                var host = li.querySelector('.jwm-mh-lines-host');
+                fetchDocLines(docType, r.id, fromRepair, filterJwoId, function(lines) {
+                    if (host) {
+                        host.outerHTML = renderDetailTable(lines);
+                    }
+                });
+            });
+        }
+        function setTab(which) {
+            tabs.forEach(function(t) {
+                var on = t.getAttribute('data-jwm-mh-tab') === which;
+                t.classList.toggle('active', on);
+                t.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            if (paneIssue) paneIssue.classList.toggle('active', which === 'issue');
+            if (paneRecv) paneRecv.classList.toggle('active', which === 'receive');
+        }
+        function openModal(key) {
+            var data = store[key];
+            if (!data) return;
+            if (titleEl) titleEl.textContent = 'Material history — ' + (data.title || '');
+            if (subEl) {
+                subEl.textContent = data.subtitle || '';
+                subEl.style.display = data.subtitle ? '' : 'none';
+            }
+            var fromRepair = !!data.is_repair;
+            var filterJwoId = parseInt(data.jobwork_order_id || '0', 10) || 0;
+            renderList(listIssue, data.issues, 'No material issues yet', 'issue', fromRepair, filterJwoId);
+            renderList(listRecv, data.receives, 'No material receives yet', 'receive', fromRepair, filterJwoId);
+            setTab('issue');
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeModal() {
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.style.overflow = '';
+        }
+        document.querySelectorAll('.js-jwm-mat-history').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                openModal(btn.getAttribute('data-jwm-hist-key') || '');
+            });
+        });
+        modal.querySelectorAll('.js-jwm-mh-close').forEach(function(el) {
+            el.addEventListener('click', closeModal);
+        });
+        tabs.forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                setTab(tab.getAttribute('data-jwm-mh-tab') || 'issue');
+            });
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+        });
+    })();
     document.getElementById('selectAll')?.addEventListener('change', function() {
         document.querySelectorAll('.row-checkbox').forEach(function(cb) { cb.checked = this.checked; }, this);
     });
@@ -1071,6 +1407,7 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
     var COLUMN_KEYS = [
         { key: 'check', label: 'Select' },
         { key: 'active', label: 'active' },
+        { key: 'image_urls', label: 'Image' },
         { key: 'jobwork_no', label: 'Jobwork Order No.' },
         { key: 'jobwork_invoice', label: 'Jobwork Invoice No.' },
         { key: 'sale_order_no', label: 'SO / RO No.' },
@@ -1092,7 +1429,7 @@ body.jwm-col-resizing * { cursor: col-resize !important; }
         { key: 'create_catelog', label: 'createCatelog' },
         { key: 'invoice', label: 'Invoice' },
         { key: 'print', label: 'Print' },
-        { key: 'image_urls', label: 'imageUrls' },
+        { key: 'materials', label: 'Materials' },
         { key: 'action', label: 'action' }
     ];
     var STORAGE_KEY = 'jwm_visible_cols';

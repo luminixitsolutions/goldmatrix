@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 
 // Load master data
@@ -914,12 +915,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
                                             <div class="col-md-6">
                                                 <div class="form-group">
                                                     <label>Name *</label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" required style="padding-right: 35px;" autocomplete="off">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="">
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
-                                                    </div>
+                                                    <div style="display:flex;align-items:stretch;gap:4px;"><div class="auragold-party-select2-wrap"><select class="form-control form-control-sm" id="customerId" name="customer_id" required><option value="">Select customer...</option></select><input type="hidden" id="customerName" name="customer_name" value=""></div><button type="button" class="btn btn-sm btn-outline-secondary p-0" id="addCustomerBtn" title="Add / Edit Customer" style="width:32px;min-width:32px;line-height:1;align-self:stretch;"><i class="feather icon-plus"></i></button></div>
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
@@ -1606,7 +1602,9 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
 
     <?php include 'includes/customer-ledger-modal.php'; ?>
     <!-- Core scripts -->
-    <?php include 'footer-script.php';?>
+    <?php auragold_echo_party_select2_styles(); ?>
+<?php include 'footer-script.php';?>
+<?php auragold_echo_party_select2_scripts(); ?>
     <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
     <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
     <script src="assets/libs/sortablejs/sortable.js"></script>
@@ -3440,8 +3438,12 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             'diamond_issues' => $pv_edit_di,
             'stone_issues' => $pv_edit_si,
         ]); ?>;
-        $('#customerId').val(editData.customer_id || '');
-        $('#customerName').val(editData.customer_name || '');
+        if (typeof setAuragoldPartyValue === 'function') {
+            setAuragoldPartyValue(editData.customer_id || '', editData.customer_name || '');
+        } else {
+            $('#customerId').val(editData.customer_id || '');
+            $('#customerName').val(editData.customer_name || '');
+        }
         $('#refNo').val(editData.ref_no || '');
         $('#voucherType').val(editData.voucher_type || '');
         $('#against').val(editData.against || '');

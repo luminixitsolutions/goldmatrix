@@ -60,7 +60,7 @@
         var urlId = parseInt(urlParams.get(param) || '0', 10);
         var kind = cfg.voucherKind || 'sale_order';
 
-        if (kind === 'jobwork_order') {
+        if (kind === 'jobwork_order' || kind === 'material_issue' || kind === 'material_receive') {
             var edJwo = window.editUrlIdIsJobworkOrder === true || window.editUrlIdIsJobworkOrder === 'true';
             if (edJwo && urlId > 0) {
                 return urlId;
@@ -158,7 +158,12 @@
     function auragoldDsStoneUsageTablesAlwaysVisible() {
         var cfg = window.AURAGOLD_VOUCHER_DS || {};
         var k = cfg.voucherKind || '';
-        return k === 'jobwork_order' || k === 'jobwork_invoice';
+        return (
+            k === 'jobwork_order' ||
+            k === 'jobwork_invoice' ||
+            k === 'material_issue' ||
+            k === 'material_receive'
+        );
     }
 
     function renderSaleOrderStoneLinesPanel() {
@@ -167,19 +172,26 @@
         if (!tbody) {
             return;
         }
+        var issuedRef =
+            getCurrentVoucherKindForStone() === 'material_receive' &&
+            Array.isArray(window.__materialIssueReferenceStoneRows)
+                ? window.__materialIssueReferenceStoneRows
+                : [];
         var saved = Array.isArray(window.__saleOrderStoneIssueRows) ? window.__saleOrderStoneIssueRows : [];
         var pend = Array.isArray(window.__pendingSaleOrderStoneLines) ? window.__pendingSaleOrderStoneLines : [];
         tbody.innerHTML = '';
-        if (saved.length === 0 && pend.length === 0) {
+        if (saved.length === 0 && pend.length === 0 && issuedRef.length === 0) {
             if (card) {
                 if (auragoldDsStoneUsageTablesAlwaysVisible()) {
                     card.hidden = false;
                     var trEmpty = document.createElement('tr');
                     var tdEmpty = document.createElement('td');
-                    tdEmpty.colSpan = 6;
+                    tdEmpty.colSpan = getCurrentVoucherKindForStone() === 'material_receive' ? 8 : 6;
                     tdEmpty.className = 'text-center text-muted py-3';
                     tdEmpty.textContent =
-                        'No gemstones / stones in this list yet. Click the Stone icon above to choose barcode / stock.';
+                        getCurrentVoucherKindForStone() === 'material_receive'
+                            ? 'No stones issued on Material Issue for this sale order yet. After issue, lines appear here; tick lines and add receive weight.'
+                            : 'No gemstones / stones in this list yet. Click the Stone icon above to choose barcode / stock.';
                     trEmpty.appendChild(tdEmpty);
                     tbody.appendChild(trEmpty);
                 } else {
@@ -190,6 +202,33 @@
         }
         if (card) {
             card.hidden = false;
+        }
+        if (
+            issuedRef.length > 0 &&
+            typeof window.mrRenderIssuedStoneRows === 'function' &&
+            window.mrRenderIssuedStoneRows(tbody, issuedRef)
+        ) {
+            /* interactive partial-receive rows */
+        } else {
+            issuedRef.forEach(function (r) {
+                var q = r.qty != null ? r.qty : '';
+                var w = r.weight != null ? r.weight : '';
+                var tr = document.createElement('tr');
+                tr.style.background = '#f8fafc';
+                tr.innerHTML =
+                    '<td>' +
+                    saleOrderStoneEscapeHtml(r.barcode || '') +
+                    '</td><td>' +
+                    saleOrderStoneEscapeHtml(r.product_name || '') +
+                    '</td><td>' +
+                    saleOrderStoneEscapeHtml(r.stone_category || '') +
+                    '</td><td class="text-right">' +
+                    saleOrderStoneFmtNum(q) +
+                    '</td><td class="text-right">' +
+                    saleOrderStoneFmtNum(w) +
+                    '</td><td><span class="badge" style="background:#1e40af;font-size:0.7rem;">Issued</span></td>';
+                tbody.appendChild(tr);
+            });
         }
         saved.forEach(function (r) {
             var q = r.qty != null ? r.qty : '';
@@ -206,7 +245,9 @@
                 saleOrderStoneFmtNum(q) +
                 '</td><td class="text-right">' +
                 saleOrderStoneFmtNum(w) +
-                '</td><td><span class="badge badge-success" style="background:#166534;font-size:0.7rem;">Allocated</span></td>';
+                '</td><td><span class="badge badge-success" style="background:#166534;font-size:0.7rem;">' +
+                (getCurrentVoucherKindForStone() === 'material_receive' ? 'Received' : 'Allocated') +
+                '</span></td>';
             tbody.appendChild(tr);
         });
         pend.forEach(function (r) {
@@ -224,7 +265,11 @@
                 saleOrderStoneFmtNum(q) +
                 '</td><td class="text-right">' +
                 saleOrderStoneFmtNum(w) +
-                '</td><td><span class="badge badge-secondary" style="background:#fde047;color:#422006;font-size:0.7rem;">Pending — deducts on Save</span></td>';
+                '</td><td><span class="badge badge-secondary" style="background:#fde047;color:#422006;font-size:0.7rem;">' +
+                (getCurrentVoucherKindForStone() === 'material_receive'
+                    ? 'Pending receive — saves on Save'
+                    : 'Pending — deducts on Save') +
+                '</span></td>';
             tbody.appendChild(tr);
         });
     }
@@ -788,7 +833,10 @@
         var vid = parseInt(String(window.__auragoldVoucherDbId || '0'), 10) || 0;
         if (
             vid > 0 &&
-            ((cfg.voucherKind || '') === 'jobwork_order' || (cfg.voucherKind || '') === 'jobwork_invoice')
+            ((cfg.voucherKind || '') === 'jobwork_order' ||
+                (cfg.voucherKind || '') === 'jobwork_invoice' ||
+                (cfg.voucherKind || '') === 'material_issue' ||
+                (cfg.voucherKind || '') === 'material_receive')
         ) {
             refreshSaleOrderStoneIssuesFromServer(vid);
         }

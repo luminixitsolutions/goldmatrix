@@ -59,4 +59,36 @@
             key === 'pending_stone_allocations'
         );
     };
+
+    /** Material Receive: show diamonds/stones issued on Material Issue for the linked sale order. */
+    window.auragoldMaterialReceiveApplyIssuedFromSaleOrder = function () {
+        var cfg = window.AURAGOLD_VOUCHER_DS || {};
+        if ((cfg.voucherKind || '') !== 'material_receive') {
+            return;
+        }
+        window.__materialIssueReferenceDiamondRows = Array.isArray(window.MATERIAL_RECEIVE_ISSUED_DIAMONDS)
+            ? window.MATERIAL_RECEIVE_ISSUED_DIAMONDS.slice()
+            : [];
+        window.__materialIssueReferenceStoneRows = Array.isArray(window.MATERIAL_RECEIVE_ISSUED_STONES)
+            ? window.MATERIAL_RECEIVE_ISSUED_STONES.slice()
+            : [];
+        if (typeof window.renderSaleOrderDiamondLinesPanel === 'function') {
+            window.renderSaleOrderDiamondLinesPanel();
+        }
+        if (typeof window.renderSaleOrderStoneLinesPanel === 'function') {
+            window.renderSaleOrderStoneLinesPanel();
+        }
+    };
+
+    function auragoldMaterialReceiveIssuedOnReady() {
+        if (typeof window.auragoldMaterialReceiveApplyIssuedFromSaleOrder === 'function') {
+            window.auragoldMaterialReceiveApplyIssuedFromSaleOrder();
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', auragoldMaterialReceiveIssuedOnReady);
+    } else {
+        auragoldMaterialReceiveIssuedOnReady();
+    }
 })();

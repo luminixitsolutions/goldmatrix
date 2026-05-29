@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 require_once __DIR__ . '/includes/auragold-gst-page-vars.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
@@ -2714,13 +2715,7 @@ text-transform: uppercase;
                                             <div class="col-md-6">
                                                 <div class="form-group">
                                                     <label>Name *</label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" required style="padding-right: 35px;" autocomplete="off">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="">
-                                                        <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
-                                                    </div>
+                                                    <div style="display:flex;align-items:stretch;gap:4px;"><div class="auragold-party-select2-wrap"><select class="form-control form-control-sm" id="customerId" name="customer_id" required><option value="">Select customer...</option></select><input type="hidden" id="customerName" name="customer_name" value=""><input type="hidden" id="customerBillingState" name="customer_billing_state" value=""></div><button type="button" class="btn btn-sm btn-outline-secondary p-0" id="addCustomerBtn" title="Add / Edit Customer" style="width:32px;min-width:32px;line-height:1;align-self:stretch;"><i class="feather icon-plus"></i></button></div>
                                                 </div>
                                             </div>
                                         <div class="col-md-6">
@@ -3107,7 +3102,9 @@ text-transform: uppercase;
 </div>
 
 <?php include 'includes/common-modal.php'; ?>
+<?php auragold_echo_party_select2_styles(); ?>
 <?php include 'footer-script.php';?>
+<?php auragold_echo_party_select2_scripts(); ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
@@ -8548,51 +8545,8 @@ window.PB_PAGE_CONFIG = {
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery / Diamonds / GemStones: each row's Net Amt = that row's metal + making + stone + diamond + other − discount; Final = Net + Tax (do not sum all rows into the Jewellery line).
-    function updateJewelleryNetAmountAndFinal() {
-        function cellNumber(row, col) {
-            var c = row.querySelector('[data-column="' + col + '"]');
-            if (!c) return 0;
-            var inp = c.querySelector('input');
-            if (inp) return parseFloat(inp.value) || 0;
-            var t = (c.textContent || '').replace(/,/g, '').trim();
-            return parseFloat(t) || 0;
-        }
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal !== 'Jewellery' && catVal !== 'Diamonds' && catVal !== 'GemStones') continue;
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
 
-            var metalVal = cellNumber(r, 'metal-value');
-            var making = cellNumber(r, 'making-amount');
-            var stone = cellNumber(r, 'stone-amount');
-            var diamond = cellNumber(r, 'diamond-amount');
-            var other = cellNumber(r, 'other-amount');
-            var discount = cellNumber(r, 'discount');
-            var tax = cellNumber(r, 'tax');
-
-            var netAmt = metalVal + making + stone + diamond + other - discount;
-            if (netAmt < 0) netAmt = 0;
-            var finalAmount = netAmt + tax;
-
-            var netAmtInp = r.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = r.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            else {
-                var netTd = r.querySelector('[data-column="net-amt"]');
-                if (netTd && !netTd.querySelector('input')) netTd.textContent = netAmt.toFixed(2);
-            }
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-            else {
-                var taxTd = r.querySelector('[data-column="net-amt-tax"]');
-                if (taxTd && !taxTd.querySelector('input')) taxTd.textContent = finalAmount.toFixed(2);
-            }
-        }
-    }
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10523,11 +10477,25 @@ window.PB_PAGE_CONFIG = {
         }
         
         // Populate billing form
-        if (document.getElementById('customerName')) {
-            document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
+        if (typeof setAuragoldPartyValue === 'function') {
+            setAuragoldPartyValue(
+                order.supplier_id || order.customer_id || '',
+                order.supplier_name || order.customer_name || ''
+            );
+        } else {
+            if (typeof setAuragoldPartyValue === 'function') {
+            setAuragoldPartyValue(
+                order.supplier_id || order.customer_id || '',
+                order.supplier_name || order.customer_name || ''
+            );
+        } else {
+            if (document.getElementById('customerName')) {
+                document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
+            }
+            if (document.getElementById('customerId')) {
+                document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
+            }
         }
-        if (document.getElementById('customerId')) {
-            document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
         }
         if (document.getElementById('againstOf')) {
             var againstVal = (order.against_of != null && order.against_of !== '') ? String(order.against_of) : '';

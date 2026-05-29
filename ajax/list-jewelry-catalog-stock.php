@@ -1,11 +1,11 @@
 <?php
 /**
- * JSON: available barcoded stock for Jewellery Catalogue (all metals).
+ * JSON: saved Jewellery Catalogue records (tbl_jewelry_catalogue) for the grid/list.
  */
 ob_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/auragold_branch_data_scope.php';
-require_once __DIR__ . '/../includes/jewelry_catalog_stock_include.php';
+require_once __DIR__ . '/../includes/jewelry_catalogue_create_include.php';
 
 function jcat_json_out(array $payload): void
 {
@@ -47,20 +47,13 @@ $opts = [
 ];
 
 try {
-    $fetch = auragold_jewelry_catalog_stock_fetch($conn, $opts);
-    if ($fetch['error'] !== '') {
-        jcat_json_out(['success' => false, 'message' => $fetch['error']]);
-    }
-
-    $items = [];
-    foreach ($fetch['rows'] as $row) {
-        $items[] = auragold_jewelry_catalog_normalize_row($row, $SiteUrl ?? '');
-    }
+    $items = auragold_jewelry_catalogue_grid_fetch($conn, $opts, $SiteUrl ?? '');
+    $metals = auragold_jewelry_catalog_metals($conn);
 
     jcat_json_out([
         'success' => true,
         'items' => $items,
-        'metals' => $fetch['metals'],
+        'metals' => $metals,
         'total' => count($items),
     ]);
 } catch (Throwable $e) {

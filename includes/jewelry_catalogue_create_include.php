@@ -146,6 +146,388 @@ function auragold_jewelry_catalogue_ensure_design_no(mysqli $conn, string $desig
 }
 
 /**
+ * Catalogue headers for Jewellery Catalogue grid (tbl_jewelry_catalogue).
+ *
+ * @param array<string, mixed> $opts Same filter keys as stock fetch (metal_id, branch_id, product_id, category_id, q, …)
+ * @return list<array<string, mixed>>
+ */
+function auragold_jewelry_catalogue_grid_fetch(mysqli $conn, array $opts = [], string $siteUrl = ''): array
+{
+    auragold_ensure_jewelry_catalogue_table($conn);
+
+    $metal_filter = (int) ($opts['metal_id'] ?? 0);
+    $branch_filter = (int) ($opts['branch_id'] ?? 0);
+    $product_filter = (int) ($opts['product_id'] ?? 0);
+    $category_filter = (int) ($opts['category_id'] ?? 0);
+    $search = mb_strtolower(trim((string) ($opts['q'] ?? '')));
+    $barcode_f = trim((string) ($opts['barcode'] ?? ''));
+    $design_f = trim((string) ($opts['design_no'] ?? ''));
+
+    $where = ' WHERE jc.status = 1 ';
+    if ($metal_filter > 0) {
+        $where .= ' AND jc.metal_id = ' . $metal_filter;
+    }
+    if ($branch_filter > 0 && function_exists('auragold_tbl_has_column')
+        && auragold_tbl_has_column($conn, 'tbl_jewelry_catalogue', 'branch_id')) {
+        $where .= ' AND (jc.branch_id = ' . $branch_filter . ' OR jc.branch_id IS NULL OR jc.branch_id = 0)';
+    }
+    if ($product_filter > 0) {
+        $where .= ' AND jc.product_id = ' . $product_filter;
+    }
+    if ($category_filter > 0) {
+        $where .= ' AND jc.category_id = ' . $category_filter;
+    }
+    if ($barcode_f !== '') {
+        $esc = mysqli_real_escape_string($conn, $barcode_f);
+        $where .= " AND jc.barcode LIKE '%{$esc}%'";
+    }
+    if ($design_f !== '') {
+        $esc = mysqli_real_escape_string($conn, $design_f);
+        $where .= " AND jc.design_no LIKE '%{$esc}%'";
+    }
+    if ($branch_filter <= 0 && function_exists('auragold_effective_branch_list_scope_sql')) {
+        $scope = auragold_effective_branch_list_scope_sql($conn, 'tbl_jewelry_catalogue');
+        if ($scope !== '') {
+            $where .= str_replace('branch_id', 'jc.branch_id', $scope);
+        }
+    }
+
+    $join = '';
+    $metalSel = "'' AS metal_name";
+    $prodSel = "'' AS product_name";
+    if (function_exists('gas_tbl_exists')) {
+        if (gas_tbl_exists($conn, 'tbl_metal')) {
+            $join .= ' LEFT JOIN tbl_metal m ON m.id = jc.metal_id ';
+            $metalSel = "COALESCE(NULLIF(TRIM(m.display_name),''), NULLIF(TRIM(m.system_name),''), '') AS metal_name";
+        }
+        if (gas_tbl_exists($conn, 'tbl_products')) {
+            $join .= ' LEFT JOIN tbl_products p ON p.id = jc.product_id ';
+            $prodSel = "COALESCE(NULLIF(TRIM(p.name),''), '') AS product_name";
+        }
+    }
+
+    $sql = "SELECT jc.*, {$metalSel}, {$prodSel}
+            FROM tbl_jewelry_catalogue jc
+            {$join}
+            {$where}
+            ORDER BY jc.id DESC
+            LIMIT 5000";
+    $rows = getList($sql);
+    if (!is_array($rows)) {
+        return [];
+    }
+
+    $out = [];
+    foreach ($rows as $row) {
+        $item = auragold_jewelry_catalogue_row_to_grid_item($row, $siteUrl);
+        if ($search !== '') {
+            $hay = mb_strtolower(implode(' ', [
+                $item['barcode'] ?? '',
+                $item['title'] ?? '',
+                $item['product_name'] ?? '',
+                $item['design_no'] ?? '',
+                $item['metal_name'] ?? '',
+            ]));
+            if (mb_strpos($hay, $search) === false) {
+                continue;
+            }
+        }
+        $out[] = $item;
+    }
+
+    return $out;
+}
+
+/**
+ * @param array<string, mixed> $row DB row with optional metal_name, product_name
+ * @return array<string, mixed>
+ */
+function auragold_jewelry_catalogue_row_to_grid_item(array $row, string $siteUrl = ''): array
+{
+    $images = [];
+    if (!empty($row['images_json'])) {
+        $dec = json_decode((string) $row['images_json'], true);
+        if (is_array($dec)) {
+            $images = $dec;
+        }
+    }
+    $bom = [];
+    if (!empty($row['bom_json'])) {
+        $dec = json_decode((string) $row['bom_json'], true);
+        if (is_array($dec)) {
+            $bom = $dec;
+        }
+    }
+
+    $thumb = '';
+    foreach ($images as $img) {
+        if (!is_array($img)) {
+            continue;
+        }
+        $url = trim((string) ($img['url'] ?? ''));
+        if ($url === '' && !empty($img['path']) && function_exists('gas_public_url_for_stored_path')) {
+            $url = gas_public_url_for_stored_path((string) $img['path'], $siteUrl);
+        }
+        if ($url !== '') {
+            $thumb = $url;
+            break;
+        }
+    }
+
+    $barcode = trim((string) ($row['barcode'] ?? ''));
+    $designNo = trim((string) ($row['design_no'] ?? ''));
+    $title = trim((string) ($row['title'] ?? ''));
+    $productName = trim((string) ($row['product_name'] ?? ''));
+    if ($productName === '' && $title !== '') {
+        $productName = $title;
+    }
+    $metalName = trim((string) ($row['metal_name'] ?? ''));
+    $wt = (float) ($row['weight'] ?? 0);
+    $amount = (float) ($row['amount'] ?? 0);
+    $bomCount = count($bom);
+
+    return [
+        'catalogue_id' => (int) ($row['id'] ?? 0),
+        'stock_id' => 0,
+        'barcode' => $barcode !== '' ? $barcode : ('JC-' . (int) ($row['id'] ?? 0)),
+        'metal_id' => (int) ($row['metal_id'] ?? 0),
+        'metal_name' => $metalName,
+        'product_name' => $productName,
+        'article' => $designNo,
+        'carat' => '',
+        'category' => '',
+        'branch_name' => '',
+        'current_qty' => 1,
+        'current_weight' => $wt,
+        'qty_label' => '1',
+        'weight_label' => function_exists('gas_fmt_num') ? gas_fmt_num($wt, 3) : number_format($wt, 3, '.', ''),
+        'thumb_url' => $thumb,
+        'image_urls' => $images,
+        'subtitle' => $designNo,
+        'title' => $title !== '' ? $title : ($productName !== '' ? $productName . ' — ' . $metalName : $metalName),
+        'active' => 'Active',
+        'jewelry_catalogue' => 'Yes',
+        'design_no' => $designNo !== '' ? $designNo : ('Catalogue #' . (int) ($row['id'] ?? 0)),
+        'variants' => trim((string) ($row['sku'] ?? '')),
+        'bill_of_material' => $bomCount > 0
+            ? (($bomCount === 1 && !empty($bom[0]['description']))
+                ? (string) $bom[0]['description']
+                : ($bomCount . ' item(s)'))
+            : '',
+        'amount' => $amount,
+        'amount_label' => function_exists('gas_fmt_money') ? gas_fmt_money($amount) : number_format($amount, 2, '.', ''),
+        'location' => '',
+        'is_catalogue_only' => true,
+    ];
+}
+
+/**
+ * Attach catalogue_id to stock rows; append catalogue-only entries.
+ *
+ * @param list<array<string, mixed>> $stockItems
+ * @param list<array<string, mixed>> $catalogueItems
+ * @return list<array<string, mixed>>
+ */
+function auragold_jewelry_catalog_merge_stock_and_catalogue(array $stockItems, array $catalogueItems): array
+{
+    $byBarcode = [];
+    foreach ($stockItems as $idx => $it) {
+        $bc = strtolower(trim((string) ($it['barcode'] ?? '')));
+        if ($bc !== '') {
+            $byBarcode[$bc] = $idx;
+        }
+    }
+
+    $merged = $stockItems;
+    $catalogueOnly = [];
+
+    foreach ($catalogueItems as $cat) {
+        $cid = (int) ($cat['catalogue_id'] ?? 0);
+        $bc = strtolower(trim((string) ($cat['barcode'] ?? '')));
+        if ($bc !== '' && isset($byBarcode[$bc])) {
+            $merged[$byBarcode[$bc]]['catalogue_id'] = $cid;
+            $merged[$byBarcode[$bc]]['is_catalogue_only'] = false;
+            if (empty($merged[$byBarcode[$bc]]['thumb_url']) && !empty($cat['thumb_url'])) {
+                $merged[$byBarcode[$bc]]['thumb_url'] = $cat['thumb_url'];
+            }
+            continue;
+        }
+        $catalogueOnly[] = $cat;
+    }
+
+    // Catalogue-only designs first (newest first — grid_fetch is ORDER BY id DESC).
+    return array_merge($catalogueOnly, $merged);
+}
+
+/**
+ * Active catalogue design numbers for product modal dropdown.
+ *
+ * @return list<array{id:int,design_no:string,title:string,metal_id:int,product_name:string}>
+ */
+function auragold_jewelry_catalogue_list_design_nos(mysqli $conn, int $metalId = 0): array
+{
+    auragold_ensure_jewelry_catalogue_table($conn);
+
+    $where = ' WHERE jc.status = 1 AND jc.design_no IS NOT NULL AND TRIM(jc.design_no) <> \'\' ';
+    if ($metalId > 0) {
+        $where .= ' AND jc.metal_id = ' . (int) $metalId;
+    }
+    if (function_exists('auragold_effective_branch_list_scope_sql')) {
+        $scope = auragold_effective_branch_list_scope_sql($conn, 'tbl_jewelry_catalogue');
+        if ($scope !== '') {
+            $where .= str_replace('branch_id', 'jc.branch_id', $scope);
+        }
+    }
+
+    $join = '';
+    $prodSel = "'' AS product_name";
+    if (function_exists('gas_tbl_exists') && gas_tbl_exists($conn, 'tbl_products')) {
+        $join = ' LEFT JOIN tbl_products p ON p.id = jc.product_id ';
+        $prodSel = "COALESCE(NULLIF(TRIM(p.name),''), '') AS product_name";
+    }
+
+    $sql = "SELECT jc.id, jc.design_no, jc.title, jc.metal_id, {$prodSel}
+            FROM tbl_jewelry_catalogue jc
+            {$join}
+            {$where}
+            ORDER BY jc.id DESC
+            LIMIT 2000";
+    $rows = getList($sql);
+    if (!is_array($rows)) {
+        return [];
+    }
+
+    $out = [];
+    foreach ($rows as $row) {
+        $dn = trim((string) ($row['design_no'] ?? ''));
+        if ($dn === '') {
+            continue;
+        }
+        $title = trim((string) ($row['title'] ?? ''));
+        $productName = trim((string) ($row['product_name'] ?? ''));
+        $label = $dn;
+        if ($title !== '') {
+            $label .= ' — ' . $title;
+        } elseif ($productName !== '') {
+            $label .= ' — ' . $productName;
+        }
+        $out[] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'design_no' => $dn,
+            'title' => $title,
+            'metal_id' => (int) ($row['metal_id'] ?? 0),
+            'product_name' => $productName,
+            'label' => $label,
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * @param array<string, mixed> $item
+ * @param array<string, mixed> $catalogue
+ * @return array<string, mixed>
+ */
+function auragold_jewelry_catalogue_bom_item_to_modal_row(array $item, array $catalogue): array
+{
+    if (!empty($item['_modal']) && is_array($item['_modal'])) {
+        $md = $item['_modal'];
+        $catDn = trim((string) ($catalogue['design_no'] ?? ''));
+        if ($catDn !== '' && trim((string) ($md['design_no'] ?? '')) === '') {
+            $md['design_no'] = $catDn;
+        }
+
+        return $md;
+    }
+
+    $catDn = trim((string) ($catalogue['design_no'] ?? ''));
+    $desc = trim((string) ($item['description'] ?? ''));
+    $qty = trim((string) ($item['quantity'] ?? '1'));
+    if ($qty === '' || !is_numeric($qty)) {
+        $qty = '1';
+    }
+
+    return [
+        'product_name' => $desc,
+        'barcode' => trim((string) ($item['barcode'] ?? '')),
+        'design_no' => trim((string) ($item['design_no'] ?? '')) !== '' ? trim((string) $item['design_no']) : $catDn,
+        'quantity' => (float) $qty,
+        'gross_wt' => (float) ($item['gross_wt'] ?? 0),
+        'final_wt' => (float) ($item['final_wt'] ?? 0),
+        'net_wt' => (float) ($item['net_wt'] ?? 0),
+        'pure_wt' => (float) ($item['pure_wt'] ?? 0),
+        'making_amount' => (float) ($item['making'] ?? 0),
+        'tax' => (float) ($item['tax'] ?? 0),
+        'metal_id' => (int) ($catalogue['metal_id'] ?? 0),
+        'amount' => (float) ($item['making'] ?? 0),
+        'calculation_type' => 'Rate X Gross Wt',
+    ];
+}
+
+/**
+ * Expand BOM (incl. merged group_items) to modal row payloads for product selection.
+ *
+ * @param list<array<string, mixed>> $bom
+ * @return list<array<string, mixed>>
+ */
+function auragold_jewelry_catalogue_bom_to_modal_rows(array $bom, array $catalogue): array
+{
+    $out = [];
+    foreach ($bom as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        if (!empty($item['group_items']) && is_array($item['group_items'])) {
+            foreach ($item['group_items'] as $gi) {
+                if (!is_array($gi)) {
+                    continue;
+                }
+                $out[] = auragold_jewelry_catalogue_bom_item_to_modal_row($gi, $catalogue);
+            }
+            continue;
+        }
+        $out[] = auragold_jewelry_catalogue_bom_item_to_modal_row($item, $catalogue);
+    }
+
+    return $out;
+}
+
+/**
+ * Load catalogue header + BOM lines for sale invoice product modal.
+ *
+ * @return array<string, mixed>|null
+ */
+function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo = '', int $catalogueId = 0): ?array
+{
+    auragold_ensure_jewelry_catalogue_table($conn);
+    $designNo = trim($designNo);
+    $row = null;
+    if ($catalogueId > 0) {
+        $row = getRecord('SELECT * FROM tbl_jewelry_catalogue WHERE id = ' . (int) $catalogueId . ' AND status = 1 LIMIT 1');
+    } elseif ($designNo !== '') {
+        $esc = mysqli_real_escape_string($conn, $designNo);
+        $row = getRecord("SELECT * FROM tbl_jewelry_catalogue WHERE status = 1 AND design_no = '" . $esc . "' ORDER BY id DESC LIMIT 1");
+    }
+    if (!$row) {
+        return null;
+    }
+
+    $catalogue = auragold_jewelry_catalogue_normalize_db_row($row);
+    $modalRows = auragold_jewelry_catalogue_bom_to_modal_rows($catalogue['bom'] ?? [], $catalogue);
+
+    return [
+        'catalogue' => $catalogue,
+        'modal_rows' => $modalRows,
+        'design_no' => (string) ($catalogue['design_no'] ?? ''),
+        'title' => (string) ($catalogue['title'] ?? ''),
+        'metal_id' => (int) ($catalogue['metal_id'] ?? 0),
+        'weight' => (string) ($catalogue['weight'] ?? ''),
+        'amount' => (string) ($catalogue['amount'] ?? ''),
+    ];
+}
+
+/**
  * @return array<string, mixed>
  */
 function auragold_jewelry_catalogue_blank_row(): array
@@ -355,6 +737,73 @@ function auragold_jewelry_catalogue_prefill_from_order(
 }
 
 /**
+ * True if another active catalogue row uses this design no.
+ */
+function auragold_jewelry_catalogue_design_no_taken(mysqli $conn, string $designNo, int $excludeId = 0): bool
+{
+    $designNo = trim($designNo);
+    if ($designNo === '') {
+        return false;
+    }
+    $esc = mysqli_real_escape_string($conn, $designNo);
+    $sql = "SELECT id FROM tbl_jewelry_catalogue WHERE status = 1 AND design_no = '" . $esc . "'";
+    if ($excludeId > 0) {
+        $sql .= ' AND id <> ' . (int) $excludeId;
+    }
+    $sql .= ' LIMIT 1';
+    $row = getRecord($sql);
+
+    return is_array($row) && !empty($row['id']);
+}
+
+/**
+ * @return array{exists:bool,message:string,design_no:string}
+ */
+function auragold_jewelry_catalogue_check_design_no(mysqli $conn, string $designNo, int $excludeId = 0): array
+{
+    auragold_ensure_jewelry_catalogue_table($conn);
+    $designNo = trim($designNo);
+    if ($designNo === '') {
+        return ['exists' => false, 'message' => '', 'design_no' => ''];
+    }
+    $exists = auragold_jewelry_catalogue_design_no_taken($conn, $designNo, $excludeId);
+    $msg = $exists
+        ? ('Design No. "' . $designNo . '" already exists. Please enter a different number.')
+        : '';
+
+    return ['exists' => $exists, 'message' => $msg, 'design_no' => $designNo];
+}
+
+/**
+ * Auto next number when blank; error if user-entered duplicate.
+ *
+ * @return array{design_no:string,error:string}
+ */
+function auragold_jewelry_catalogue_prepare_design_no(mysqli $conn, string $designNo, int $excludeId, bool $userProvided): array
+{
+    $designNo = trim($designNo);
+    if ($designNo === '') {
+        $designNo = auragold_next_jewelry_catalogue_design_no($conn, $excludeId);
+        $cfg = auragold_jewelry_catalogue_bill_series_config($conn);
+        $guard = 0;
+        while ($guard < 5000 && auragold_jewelry_catalogue_design_no_taken($conn, $designNo, $excludeId)) {
+            $designNo = auragold_bump_jewelry_catalogue_design_no($conn, $designNo, $cfg);
+            $guard++;
+        }
+
+        return ['design_no' => $designNo, 'error' => ''];
+    }
+    if (auragold_jewelry_catalogue_design_no_taken($conn, $designNo, $excludeId)) {
+        return [
+            'design_no' => $designNo,
+            'error' => 'Design No. "' . $designNo . '" already exists. Please enter a different number.',
+        ];
+    }
+
+    return ['design_no' => $designNo, 'error' => ''];
+}
+
+/**
  * @param array<string, mixed> $payload
  * @return array{success: bool, message: string, id?: int}
  */
@@ -385,8 +834,9 @@ function auragold_jewelry_catalogue_save(mysqli $conn, array $payload): array
     $productId = (int) ($payload['product_id'] ?? 0);
     $categoryId = (int) ($payload['category_id'] ?? 0);
     $barcode = trim((string) ($payload['barcode'] ?? ''));
-    $designNo = trim((string) ($payload['design_no'] ?? ''));
-    $cfgDesign = auragold_jewelry_catalogue_bill_series_config($conn);
+    $designNoInput = trim((string) ($payload['design_no'] ?? ''));
+    $userProvidedDesign = ($designNoInput !== '');
+    $designNo = $designNoInput;
     $sku = trim((string) ($payload['sku'] ?? ''));
     $fullDesc = (string) ($payload['full_desc'] ?? '');
     $fillDmd = !empty($payload['fill_dmd_gms_rate']) ? 1 : 0;
@@ -452,10 +902,13 @@ function auragold_jewelry_catalogue_save(mysqli $conn, array $payload): array
         if ($designNo === '') {
             $existingDn = getRecord('SELECT design_no FROM tbl_jewelry_catalogue WHERE id = ' . $id . ' LIMIT 1');
             $designNo = trim((string) ($existingDn['design_no'] ?? ''));
+            $userProvidedDesign = false;
         }
-        if ($designNo === '') {
-            $designNo = auragold_next_jewelry_catalogue_design_no($conn, $id);
+        $prepared = auragold_jewelry_catalogue_prepare_design_no($conn, $designNo, $id, $userProvidedDesign);
+        if ($prepared['error'] !== '') {
+            return ['success' => false, 'message' => $prepared['error']];
         }
+        $designNo = $prepared['design_no'];
         $sets = array_filter($sets, static function ($s) {
             return strpos($s, 'design_no =') !== 0;
         });
@@ -468,18 +921,11 @@ function auragold_jewelry_catalogue_save(mysqli $conn, array $payload): array
         return ['success' => true, 'message' => 'Catalogue saved.', 'id' => $id, 'design_no' => $designNo];
     }
 
-    $designNo = auragold_jewelry_catalogue_ensure_design_no($conn, $designNo, 0);
-    $guard = 0;
-    while ($guard < 5000) {
-        $dup = getRecord(
-            "SELECT id FROM tbl_jewelry_catalogue WHERE status = 1 AND design_no = '" . $esc($designNo) . "' LIMIT 1"
-        );
-        if (!$dup) {
-            break;
-        }
-        $designNo = auragold_bump_jewelry_catalogue_design_no($conn, $designNo, $cfgDesign);
-        $guard++;
+    $prepared = auragold_jewelry_catalogue_prepare_design_no($conn, $designNo, 0, $userProvidedDesign);
+    if ($prepared['error'] !== '') {
+        return ['success' => false, 'message' => $prepared['error']];
     }
+    $designNo = $prepared['design_no'];
     $sets = array_filter($sets, static function ($s) {
         return strpos($s, 'design_no =') !== 0;
     });

@@ -1,4 +1,11 @@
 <?php
+/** Cut / Color / Shape / Clarity / Seive / Size masters for modal spec dropdowns (all voucher pages). */
+if (empty($GLOBALS['auragold_common_modal_spec_masters_loaded'])) {
+    if (isset($conn) && $conn) {
+        require_once __DIR__ . '/auragold_product_modal_spec_masters.php';
+        $GLOBALS['auragold_common_modal_spec_masters_loaded'] = true;
+    }
+}
 /**
  * Product selection modal markup. Included from includes/common-modal.php and other screens (e.g. stock journal).
  * Optional flags (all have defaults; set only what you need before include):
@@ -160,13 +167,10 @@ if (empty($common_modal_show_checkbox_column)) {
                     </div>
                     <div class="col-md-2">
                         <div class="form-group mb-2">
-                            <label>Des. No.</label>
-                            <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm" id="modalProductDesignNo" placeholder="Design number">
-                                <div class="input-group-append">
-                                    <span class="input-group-text" style="background: #f8fafc;"><i class="feather icon-chevron-down"></i></span>
-                                </div>
-                            </div>
+                            <label for="modalProductDesignNo">Des. No.</label>
+                            <select class="form-control form-control-sm" id="modalProductDesignNo" title="Jewellery catalogue design number">
+                                <option value="">Select design no</option>
+                            </select>
                         </div>
                     </div>
                     <div class="col-md-1">
@@ -694,6 +698,71 @@ if (empty($common_modal_show_checkbox_column)) {
                 @keyframes productModalExcelImportSpin {
                     to { transform: rotate(360deg); }
                 }
+                #catalogDesignLoadOverlay.catalog-design-load-overlay {
+                    display: none;
+                    position: absolute;
+                    inset: 0;
+                    z-index: 80;
+                    align-items: center;
+                    justify-content: center;
+                    flex-direction: column;
+                    background: rgba(255, 255, 255, 0.92);
+                    border-radius: 6px;
+                    min-height: 180px;
+                }
+                #catalogDesignLoadOverlay.catalog-design-load-overlay.is-visible {
+                    display: flex;
+                }
+                #catalogDesignLoadOverlay .catalog-design-load-overlay__spinner {
+                    width: 2.25rem;
+                    height: 2.25rem;
+                    margin-bottom: 0.65rem;
+                    border: 3px solid rgba(17, 41, 75, 0.15);
+                    border-top-color: #c5a864;
+                    border-radius: 50%;
+                    animation: productModalExcelImportSpin 0.7s linear infinite;
+                }
+                #catalogDesignLoadOverlay .catalog-design-load-overlay__text {
+                    margin: 0;
+                    font-size: 1rem;
+                    font-weight: 700;
+                    color: #11294b;
+                }
+                #catalogDesignLoadOverlay .catalog-design-load-overlay__sub {
+                    margin: 0.35rem 0 0;
+                    font-size: 0.8125rem;
+                    color: #64748b;
+                }
+                #productSelectionModal #modalProductDesignNo + .select2-container {
+                    width: 100% !important;
+                    max-width: 100%;
+                }
+                #productSelectionModal .select2-container--default .select2-selection--single {
+                    height: calc(1.5em + 0.5rem + 2px);
+                    min-height: calc(1.5em + 0.5rem + 2px);
+                    border: 1px solid #ced4da;
+                    border-radius: 0.2rem;
+                    font-size: 0.875rem;
+                }
+                #productSelectionModal .select2-container--default .select2-selection--single .select2-selection__rendered {
+                    line-height: calc(1.5em + 0.5rem);
+                    padding-left: 0.5rem;
+                    color: #495057;
+                }
+                #productSelectionModal .select2-container--default .select2-selection--single .select2-selection__arrow {
+                    height: calc(1.5em + 0.5rem + 2px);
+                }
+                #productSelectionModal .select2-container--default.select2-container--disabled .select2-selection--single {
+                    background-color: #e9ecef;
+                    opacity: 1;
+                }
+                #productSelectionModal .select2-container {
+                    z-index: 10050;
+                }
+                #productSelectionModal .select2-dropdown {
+                    z-index: 10051;
+                    font-size: 0.875rem;
+                }
                 /* Show/Hide Columns: hidden by default; flex layout + scroll only when .show (see page .table-settings-dropdown). */
                 #productSelectionModal .table-settings-dropdown.show {
                     display: flex;
@@ -881,6 +950,11 @@ if (empty($common_modal_show_checkbox_column)) {
                 <!-- Product List Table with All Options - Horizontally Scrollable (scroll wrapper needed for sticky right columns) -->
                 <div class="product-list-table-outer product-selection-wrapper" id="productListTableOuter">
                 <div id="productListTableScrollWrapper" class="table-responsive" style="overflow-x: auto; overflow-y: auto; max-height: 500px; border: 1px solid #e2e8f0; border-radius: 6px; position: relative;">
+                    <div id="catalogDesignLoadOverlay" class="catalog-design-load-overlay" aria-hidden="true" aria-live="polite">
+                        <div class="catalog-design-load-overlay__spinner" role="status" aria-label="Loading"></div>
+                        <p class="catalog-design-load-overlay__text">Please wait…</p>
+                        <p class="catalog-design-load-overlay__sub">Loading catalogue items…</p>
+                    </div>
                     <table class="table table-bordered table-sm mb-0<?php echo $common_modal_pl_table_class_extra !== '' ? ' ' . htmlspecialchars($common_modal_pl_table_class_extra) : ''; ?>" id="productListTable" style="<?php echo htmlspecialchars($common_modal_pl_table_style, ENT_QUOTES, 'UTF-8'); ?>" data-modal-images-column="<?php echo !empty($common_modal_show_images_column) ? '1' : '0'; ?>">
                         <thead class="product-modal-thead" style="position: sticky; top: 0; background: #f8fafc; z-index: 6;">
                             <?php
@@ -1061,4 +1135,11 @@ if (empty($common_modal_show_checkbox_column)) {
         </div>
     </div>
 </div>
-<?php $GLOBALS['auragold_common_modal_product_selection_included'] = true; ?>
+<?php
+if (function_exists('auragold_echo_product_modal_spec_masters_js')) {
+    echo "<script>\n";
+    auragold_echo_product_modal_spec_masters_js();
+    echo "</script>\n";
+}
+$GLOBALS['auragold_common_modal_product_selection_included'] = true;
+?>

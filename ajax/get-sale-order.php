@@ -41,6 +41,12 @@ foreach ($items as &$item) {
 $payments = getList("SELECT * FROM tbl_sale_order_payments WHERE order_id = $order_id ORDER BY id ASC");
 require_once __DIR__ . '/../includes/auragold_payment_details_merge.php';
 auragold_merge_payment_details_into_payments($payments);
+require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+if (function_exists('auragold_sale_order_filter_display_payments')) {
+    auragold_sale_order_filter_display_payments($conn, $order_id, $payments);
+} elseif (function_exists('auragold_sale_order_filter_customer_payments')) {
+    auragold_sale_order_filter_customer_payments($payments);
+}
 
 $diamond_issues = [];
 $tDiamondIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_diamond_stock_issue'");

@@ -413,6 +413,27 @@ if ($newId > 0
     }
 }
 
+$metalCaratCopyDetail = '';
+$metalCaratCopiedOk   = false;
+if ($newId > 0
+    && (int) $main_branch_id > 0
+    && $db_name_req !== ''
+    && function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
+    $mc = auragold_seed_sub_branch_metal_and_carat_from_main(
+        $conn_master,
+        (int) $main_branch_id,
+        $newId,
+        $db_name_req,
+        $db_users_req,
+        $db_pass_req
+    );
+    $metalCaratCopyDetail = trim((string) ($mc['message'] ?? ''));
+    $metalCaratCopiedOk   = !empty($mc['ok']) && (int) ($mc['metals'] ?? 0) > 0;
+    if (empty($mc['ok'])) {
+        error_log('AuraGold save_branch: metal/carat copy from main: ' . $metalCaratCopyDetail);
+    }
+}
+
 if ($newId > 0
     && $db_name_req !== ''
     && defined('DB_NAME')
@@ -427,7 +448,8 @@ if ($newId > 0
     );
     if ($mConn) {
         mysqli_set_charset($mConn, 'utf8mb4');
-        auragold_seed_metal_and_customer_types_for_new_branch($mConn, (int) $newId);
+        $metalSeedOpts = ['skip_metal' => (int) $main_branch_id > 0 && $metalCaratCopiedOk];
+        auragold_seed_metal_and_customer_types_for_new_branch($mConn, (int) $newId, $metalSeedOpts);
         mysqli_close($mConn);
     } else {
         error_log('AuraGold save_branch: could not connect for metal / customer type seed: ' . mysqli_connect_error());
@@ -455,6 +477,9 @@ if (!empty($dbProv['skipped'])) {
 
 if ($ledgerCopyDetail !== '') {
     $baseMsg .= ' ' . $ledgerCopyDetail;
+}
+if ($metalCaratCopyDetail !== '') {
+    $baseMsg .= ' ' . $metalCaratCopyDetail;
 }
 
 $portalProv = ['ok' => true, 'message' => '', 'url_hint' => ''];

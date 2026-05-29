@@ -16,7 +16,7 @@ auragold_ensure_jewelry_catalogue_table($conn);
 $jcc_title = function_exists('auragold_t')
     ? auragold_t('inv.jewellery_catalogue')
     : 'Jewellery Catalogue';
-$page_heading = 'Jewellery Catelog';
+$page_heading = 'Jewellery Catalogue';
 
 $catalogue_id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $order_kind = isset($_GET['order_kind']) ? trim((string) $_GET['order_kind']) : 'sale';
@@ -73,18 +73,45 @@ if (!empty($_GET['return'])) {
             --jcc-pink: #e83e8c;
             --jcc-pink-dark: #d62d7c;
         }
-        .jcc-wrap { padding: 12px 16px 32px; max-width: 1400px; }
+        /* Scroll: page grows naturally + large footer gap */
+        html:has(body.jewelry-catalogue-create-page),
+        body.jewelry-catalogue-create-page {
+            overflow-x: hidden !important;
+            overflow-y: auto !important;
+            height: auto !important;
+            min-height: 100%;
+        }
+        body.jewelry-catalogue-create-page .layout-wrapper,
+        body.jewelry-catalogue-create-page .layout-container,
+        body.jewelry-catalogue-create-page .layout-inner {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+        }
+        body.jewelry-catalogue-create-page .layout-content {
+            height: auto !important;
+            min-height: calc(100vh - 58px);
+            max-height: none !important;
+            overflow-x: hidden !important;
+            overflow-y: visible !important;
+            padding-bottom: 0 !important;
+        }
+        .jcc-wrap {
+            padding: 6px 12px 0;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
         .jcc-top {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 16px;
+            gap: 8px;
+            margin-bottom: 8px;
         }
         .jcc-top h1 {
             margin: 0;
-            font-size: 1.35rem;
+            font-size: 1.15rem;
             font-weight: 700;
             color: var(--jcc-navy);
         }
@@ -109,20 +136,21 @@ if (!empty($_GET['return'])) {
             border-radius: 6px; width: 36px; height: 36px;
             display: inline-flex; align-items: center; justify-content: center;
         }
-        .jcc-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
-        .jcc-main { flex: 1 1 520px; min-width: 0; }
+        .jcc-layout { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+        .jcc-main { flex: 1 1 480px; min-width: 0; }
         .jcc-side {
-            flex: 0 0 280px; max-width: 100%;
+            flex: 0 0 200px; max-width: 100%;
             background: #f8fafc; border: 1px solid #e2e8f0;
-            border-radius: 10px; padding: 14px;
+            border-radius: 8px; padding: 8px 10px;
         }
-        .jcc-side h3 { font-size: 0.95rem; font-weight: 700; color: var(--jcc-navy); margin: 0 0 10px; }
+        .jcc-side h3 { font-size: 0.85rem; font-weight: 700; color: var(--jcc-navy); margin: 0 0 6px; }
         .jcc-upload-zone {
-            border: 2px dashed #cbd5e1; border-radius: 10px;
-            min-height: 200px; display: flex; flex-direction: column;
+            border: 2px dashed #cbd5e1; border-radius: 8px;
+            min-height: 110px; display: flex; flex-direction: column;
             align-items: center; justify-content: center;
             color: #94a3b8; cursor: pointer; background: #fff;
             position: relative; overflow: hidden;
+            font-size: 0.8rem;
         }
         .jcc-upload-zone:hover { border-color: var(--jcc-pink); color: var(--jcc-pink); }
         .jcc-upload-zone input[type="file"] {
@@ -142,23 +170,80 @@ if (!empty($_GET['return'])) {
         }
         .jcc-card {
             background: #fff; border: 1px solid #e2e8f0;
-            border-radius: 10px; padding: 16px; margin-bottom: 16px;
+            border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
         }
-        .jcc-label { font-size: 0.8125rem; font-weight: 600; color: #475569; margin-bottom: 4px; }
+        .jcc-label { font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px; display: block; }
         .jcc-label .req { color: #dc2626; }
+        #jccForm.jcc-compact .form-group { margin-bottom: 0.35rem; }
+        #jccForm.jcc-compact .row { margin-left: -5px; margin-right: -5px; }
+        #jccForm.jcc-compact .row > [class*="col-"] { padding-left: 5px; padding-right: 5px; }
+        #jccForm.jcc-compact .form-control-sm { padding: 0.2rem 0.45rem; font-size: 0.8125rem; height: calc(1.5em + 0.45rem); }
+        #jccForm.jcc-compact textarea.form-control-sm { height: auto; min-height: calc(1.5em + 0.45rem); }
+        #jccDesignNo.is-invalid { border-color: #dc2626; }
+        .jcc-design-no-error {
+            display: none;
+            font-size: 0.7rem;
+            color: #dc2626;
+            margin-top: 2px;
+            line-height: 1.2;
+        }
         .jcc-bom-head {
             display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        .jcc-bom-head h3 { margin: 0; font-size: 0.9rem; font-weight: 700; color: var(--jcc-navy); }
+        .jcc-bom-actions {
+            display: flex; align-items: center; justify-content: center; gap: 2px;
+            white-space: nowrap;
+        }
+        .jcc-bom-act {
+            border: none; background: transparent; padding: 2px 4px;
+            line-height: 1; cursor: pointer; border-radius: 4px;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .jcc-bom-act .feather { width: 15px; height: 15px; }
+        .jcc-bom-edit { color: #2563eb; }
+        .jcc-bom-edit:hover { background: #eff6ff; color: #1d4ed8; }
+        .jcc-bom-del { color: #dc2626; }
+        .jcc-bom-del:hover { background: #fef2f2; color: #b91c1c; }
+        .jcc-bom-edit-loader {
+            position: fixed;
+            inset: 0;
+            z-index: 10060;
+            background: rgba(17, 41, 75, 0.42);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .jcc-bom-edit-loader.show { display: flex; }
+        .jcc-bom-edit-loader-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 22px 28px;
+            text-align: center;
+            box-shadow: 0 12px 40px rgba(17, 41, 75, 0.25);
+            min-width: 160px;
+        }
+        .jcc-bom-edit-loader-box .spinner-border {
+            width: 2rem;
+            height: 2rem;
+            color: var(--jcc-pink);
             margin-bottom: 10px;
         }
-        .jcc-bom-head h3 { margin: 0; font-size: 1rem; font-weight: 700; color: var(--jcc-navy); }
+        .jcc-bom-edit-loader-box span {
+            display: block;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            color: var(--jcc-navy);
+        }
         .jcc-add-item {
             display: block; width: 100%; border: 2px dashed var(--jcc-pink);
-            background: #fff5f9; color: var(--jcc-pink); border-radius: 10px;
-            padding: 14px; text-align: center; font-weight: 600;
-            cursor: pointer; margin-bottom: 12px;
+            background: #fff5f9; color: var(--jcc-pink); border-radius: 8px;
+            padding: 8px; text-align: center; font-weight: 600; font-size: 0.8125rem;
+            cursor: pointer; margin-bottom: 8px;
         }
         .jcc-add-item:hover { background: #ffe8f3; }
-        .jcc-bom-table-wrap { overflow-x: auto; }
+        .jcc-bom-table-wrap { overflow-x: auto; margin-bottom: 20px; padding-bottom: 8px; }
         .jcc-bom-table { width: 100%; font-size: 0.8125rem; border-collapse: collapse; }
         .jcc-bom-table th {
             background: #f1f5f9; padding: 8px 6px; white-space: nowrap;
@@ -167,12 +252,39 @@ if (!empty($_GET['return'])) {
         .jcc-bom-table td {
             padding: 6px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
         }
-        .jcc-bom-table input { width: 100%; min-width: 70px; font-size: 0.8125rem; }
+        .jcc-bom-val {
+            display: block;
+            min-width: 70px;
+            max-width: 180px;
+            font-size: 0.8125rem;
+            color: #334155;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .jcc-bom-val.jcc-bom-merged-desc {
+            font-weight: 600;
+            color: var(--jcc-navy);
+        }
         .jcc-bom-empty { text-align: center; color: #94a3b8; padding: 24px; }
         .jcc-cat-plus {
             border: none; background: #2563eb; color: #fff;
             width: 32px; height: 32px; border-radius: 6px;
             display: inline-flex; align-items: center; justify-content: center;
+        }
+        .jcc-page-footer-spacer {
+            height: 1px;
+            flex-shrink: 0;
+            pointer-events: none;
+        }
+        .jcc-page-footer-scroll {
+            display: block;
+            height: max(180px, 24vh);
+            min-height: 180px;
+            line-height: 0;
+            font-size: 0;
+            pointer-events: none;
+            user-select: none;
         }
         @media (max-width: 991px) {
             .jcc-side { flex: 1 1 100%; }
@@ -180,7 +292,7 @@ if (!empty($_GET['return'])) {
     </style>
     <link rel="stylesheet" href="assets/css/jewelry-catalogue-product-modal.css?v=<?php echo @filemtime(__DIR__ . '/assets/css/jewelry-catalogue-product-modal.css'); ?>">
 </head>
-<body>
+<body class="jewelry-catalogue-create-page">
 <?php include __DIR__ . '/sidebar.php'; ?>
 <div class="layout-content">
     <div class="jcc-wrap container-fluid">
@@ -194,7 +306,7 @@ if (!empty($_GET['return'])) {
             </div>
         </div>
 
-        <form id="jccForm" autocomplete="off">
+        <form id="jccForm" class="jcc-compact" autocomplete="off">
             <input type="hidden" id="jccId" value="<?php echo (int) ($jcc_row['id'] ?? 0); ?>">
             <input type="hidden" id="jccSaleOrderId" value="<?php echo (int) ($jcc_row['sale_order_id'] ?? 0); ?>">
             <input type="hidden" id="jccSaleItemId" value="<?php echo (int) ($jcc_row['sale_order_item_id'] ?? 0); ?>">
@@ -253,34 +365,35 @@ if (!empty($_GET['return'])) {
                             </div>
                         </div>
                         <div class="row">
-                            <div class="col-md-3 form-group">
+                            <div class="col-lg-2 col-md-4 col-6 form-group">
                                 <label class="jcc-label" for="jccBarcode">Barcode</label>
                                 <input type="text" class="form-control form-control-sm" id="jccBarcode" value="<?php echo htmlspecialchars($jcc_row['barcode'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                             </div>
-                            <div class="col-md-3 form-group">
+                            <div class="col-lg-2 col-md-4 col-6 form-group">
                                 <label class="jcc-label" for="jccDesignNo">Design No.</label>
                                 <input type="text" class="form-control form-control-sm" id="jccDesignNo"
                                     value="<?php echo htmlspecialchars($jcc_row['design_no'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                                    placeholder="Auto from Bill Series (e.g. JC-1)"
+                                    placeholder="JC-1"
                                     title="From Bill Series master for Jewellery Catalogue voucher type">
+                                <div class="jcc-design-no-error" id="jccDesignNoError" role="alert"></div>
                             </div>
-                            <div class="col-md-3 form-group">
+                            <div class="col-lg-2 col-md-4 col-6 form-group">
                                 <label class="jcc-label" for="jccSku">SKU</label>
                                 <input type="text" class="form-control form-control-sm" id="jccSku" value="<?php echo htmlspecialchars($jcc_row['sku'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                             </div>
-                            <div class="col-md-3 form-group">
+                            <div class="col-lg-2 col-md-4 col-6 form-group">
                                 <label class="jcc-label" for="jccWeight">Weight <span class="req">*</span></label>
                                 <input type="text" class="form-control form-control-sm" id="jccWeight" inputmode="decimal" value="<?php echo htmlspecialchars($jcc_row['weight'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" required>
                             </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-3 form-group">
+                            <div class="col-lg-2 col-md-4 col-6 form-group">
                                 <label class="jcc-label" for="jccAmount">Amount <span class="req">*</span></label>
                                 <input type="text" class="form-control form-control-sm" id="jccAmount" inputmode="decimal" value="<?php echo htmlspecialchars($jcc_row['amount'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" required>
                             </div>
-                            <div class="col-md-9 form-group">
+                        </div>
+                        <div class="row">
+                            <div class="col-12 form-group mb-0">
                                 <label class="jcc-label" for="jccFullDesc">Full Desc.</label>
-                                <textarea class="form-control form-control-sm" id="jccFullDesc" rows="4"><?php echo htmlspecialchars($jcc_row['full_desc'] ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                                <textarea class="form-control form-control-sm" id="jccFullDesc" rows="2"><?php echo htmlspecialchars($jcc_row['full_desc'] ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                             </div>
                         </div>
                     </div>
@@ -300,7 +413,7 @@ if (!empty($_GET['return'])) {
                             <table class="jcc-bom-table" id="jccBomTable">
                                 <thead>
                                     <tr>
-                                        <th style="width:36px;"></th>
+                                        <th style="width:64px;"></th>
                                         <th>Variants</th>
                                         <th>Barcode</th>
                                         <th>Description</th>
@@ -331,6 +444,15 @@ if (!empty($_GET['return'])) {
                 </div>
             </div>
         </form>
+        <div class="jcc-page-footer-spacer" aria-hidden="true"></div>
+        <div class="jcc-page-footer-scroll" aria-hidden="true"><br><br><br><br><br><br><br><br><br><br></div>
+    </div>
+</div>
+
+<div id="jccBomEditLoader" class="jcc-bom-edit-loader" aria-hidden="true" aria-live="polite">
+    <div class="jcc-bom-edit-loader-box">
+        <div class="spinner-border" role="status" aria-hidden="true"></div>
+        <span>Please wait…</span>
     </div>
 </div>
 
@@ -349,17 +471,120 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
         repair_order_id: 0,
         repair_order_item_id: 0
     };
+    var designNoState = { duplicate: false, checkTimer: null };
+
+    function getDesignNoEl() {
+        return document.getElementById('jccDesignNo');
+    }
+
+    function setDesignNoError(msg) {
+        var el = getDesignNoEl();
+        var err = document.getElementById('jccDesignNoError');
+        if (msg) {
+            if (el) el.classList.add('is-invalid');
+            if (err) {
+                err.textContent = msg;
+                err.style.display = 'block';
+            }
+            designNoState.duplicate = true;
+        } else {
+            if (el) el.classList.remove('is-invalid');
+            if (err) {
+                err.textContent = '';
+                err.style.display = 'none';
+            }
+            designNoState.duplicate = false;
+        }
+    }
+
+    function checkDesignNoRemote(designNo) {
+        return fetch(
+            'ajax/check-jewelry-catalogue-design-no.php?design_no='
+                + encodeURIComponent(designNo)
+                + '&exclude_id='
+                + (state.id || 0),
+            { credentials: 'same-origin' }
+        )
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.exists) {
+                    setDesignNoError(data.message || 'Design No. already exists.');
+                    return false;
+                }
+                setDesignNoError('');
+                return true;
+            })
+            .catch(function () { return true; });
+    }
+
+    function ensureDesignNoBeforeSave() {
+        var dnEl = getDesignNoEl();
+        var val = dnEl ? dnEl.value.trim() : '';
+        if (val !== '') {
+            return checkDesignNoRemote(val);
+        }
+        return fetch(
+            'ajax/get-next-jewelry-catalogue-design-no.php?exclude_id=' + (state.id || 0),
+            { credentials: 'same-origin' }
+        )
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.success && data.design_no && dnEl) {
+                    dnEl.value = data.design_no;
+                    setDesignNoError('');
+                    return true;
+                }
+                alert('Could not generate Design No.');
+                return false;
+            })
+            .catch(function () {
+                alert('Could not generate Design No.');
+                return false;
+            });
+    }
+
+    function bindDesignNoValidation() {
+        var dnEl = getDesignNoEl();
+        if (!dnEl) return;
+        dnEl.addEventListener('blur', function () {
+            var val = dnEl.value.trim();
+            if (val === '') {
+                setDesignNoError('');
+                return;
+            }
+            checkDesignNoRemote(val);
+        });
+        dnEl.addEventListener('input', function () {
+            if (designNoState.checkTimer) clearTimeout(designNoState.checkTimer);
+            var val = dnEl.value.trim();
+            if (val === '') {
+                setDesignNoError('');
+                return;
+            }
+            designNoState.checkTimer = setTimeout(function () {
+                checkDesignNoRemote(val);
+            }, 400);
+        });
+    }
 
     function esc(s) {
         if (s == null) return '';
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    function showJccBomEditLoader(show) {
+        var el = document.getElementById('jccBomEditLoader');
+        if (!el) return;
+        el.classList.toggle('show', !!show);
+        el.setAttribute('aria-hidden', show ? 'false' : 'true');
+    }
+    window.jccShowBomEditLoader = showJccBomEditLoader;
+
     function initFromServer() {
         var init = window.JCC_INITIAL || {};
         state.id = parseInt(init.id, 10) || 0;
         state.images = Array.isArray(init.images) ? init.images.slice() : [];
-        state.bom = Array.isArray(init.bom) ? init.bom.slice() : [];
+        state.bom = normalizeBomOnLoad(Array.isArray(init.bom) ? init.bom.slice() : []);
         state.sale_order_id = parseInt(init.sale_order_id, 10) || 0;
         state.sale_order_item_id = parseInt(init.sale_order_item_id, 10) || 0;
         state.repair_order_id = parseInt(init.repair_order_id, 10) || 0;
@@ -403,9 +628,111 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
         });
     }
 
-    function bomField(row, key, placeholder) {
-        var v = row[key] != null ? row[key] : '';
-        return '<input type="text" class="form-control form-control-sm jcc-bom-inp" data-key="' + esc(key) + '" value="' + esc(v) + '" placeholder="' + esc(placeholder || '') + '">';
+    function parseBomNum(v) {
+        var n = parseFloat(String(v == null ? '' : v).replace(/,/g, ''));
+        return isFinite(n) ? n : 0;
+    }
+
+    function fmtBomNum(n, dec) {
+        dec = dec == null ? 3 : dec;
+        if (!isFinite(n) || Math.abs(n) < 0.0000001) return '';
+        return String(parseFloat(n.toFixed(dec)));
+    }
+
+    function mergeBomItems(items) {
+        if (!items || !items.length) return null;
+        if (items.length === 1) {
+            var one = Object.assign({}, items[0]);
+            if (!one.group_items && (one._modal || one.description)) {
+                one.group_items = items.slice();
+            }
+            return one;
+        }
+        var descriptions = items.map(function (it) {
+            return String(it.description || '').trim();
+        }).filter(Boolean);
+        var barcodes = items.map(function (it) {
+            return String(it.barcode || '').trim();
+        }).filter(Boolean);
+        var variants = items.map(function (it) {
+            return String(it.variants || '').trim();
+        }).filter(Boolean);
+        var first = items[0] || {};
+        var merged = {
+            variants: variants.length ? variants.join(' | ') : (first.variants || ''),
+            barcode: barcodes.length > 1 ? barcodes.join(', ') : (barcodes[0] || first.barcode || ''),
+            description: descriptions.length ? descriptions.join(' + ') : (items.length + ' items'),
+            quantity: '0',
+            gross_wt: '0',
+            final_wt: '0',
+            net_wt: '0',
+            pure_wt: '0',
+            making: '0',
+            design_no: first.design_no || '',
+            tax: '0',
+            group_items: items.slice()
+        };
+        items.forEach(function (it) {
+            merged.quantity = fmtBomNum(parseBomNum(merged.quantity) + parseBomNum(it.quantity), 2);
+            merged.gross_wt = fmtBomNum(parseBomNum(merged.gross_wt) + parseBomNum(it.gross_wt));
+            merged.final_wt = fmtBomNum(parseBomNum(merged.final_wt) + parseBomNum(it.final_wt));
+            merged.net_wt = fmtBomNum(parseBomNum(merged.net_wt) + parseBomNum(it.net_wt));
+            merged.pure_wt = fmtBomNum(parseBomNum(merged.pure_wt) + parseBomNum(it.pure_wt));
+            merged.making = fmtBomNum(parseBomNum(merged.making) + parseBomNum(it.making), 2);
+            merged.tax = fmtBomNum(parseBomNum(merged.tax) + parseBomNum(it.tax), 2);
+        });
+        return merged;
+    }
+
+    function normalizeBomOnLoad(bom) {
+        if (!Array.isArray(bom) || bom.length <= 1) return bom || [];
+        var hasMerged = bom.some(function (r) {
+            return Array.isArray(r.group_items) && r.group_items.length > 0;
+        });
+        if (hasMerged) return bom;
+        return [mergeBomItems(bom)];
+    }
+
+    function syncHeaderFromBom() {
+        var totalWt = 0;
+        var totalAmt = 0;
+        state.bom.forEach(function (row) {
+            totalWt += parseBomNum(row.final_wt || row.net_wt || row.gross_wt);
+            var rowAmt = parseBomNum(row.making);
+            if (rowAmt > 0) {
+                totalAmt += rowAmt;
+                return;
+            }
+            if (Array.isArray(row.group_items)) {
+                row.group_items.forEach(function (gi) {
+                    if (gi._modal && gi._modal.net_amt_tax != null) {
+                        totalAmt += parseBomNum(gi._modal.net_amt_tax);
+                    } else if (gi._modal && gi._modal.amount != null) {
+                        totalAmt += parseBomNum(gi._modal.amount);
+                    }
+                });
+            } else if (row._modal && row._modal.net_amt_tax != null) {
+                totalAmt += parseBomNum(row._modal.net_amt_tax);
+            } else if (row._modal && row._modal.amount != null) {
+                totalAmt += parseBomNum(row._modal.amount);
+            }
+        });
+        var wtEl = document.getElementById('jccWeight');
+        var amtEl = document.getElementById('jccAmount');
+        if (wtEl && totalWt > 0) {
+            wtEl.value = fmtBomNum(totalWt);
+        }
+        if (amtEl && totalAmt > 0) {
+            amtEl.value = fmtBomNum(totalAmt, 2);
+        }
+    }
+
+    function bomCell(row, key) {
+        var v = row[key] != null ? String(row[key]) : '';
+        var isMergedDesc = key === 'description' && Array.isArray(row.group_items) && row.group_items.length > 1;
+        var cls = 'jcc-bom-val' + (isMergedDesc ? ' jcc-bom-merged-desc' : '');
+        var title = v !== '' ? ' title="' + esc(v) + '"' : '';
+        return '<span class="' + cls + '"' + title + '>' + esc(v) + '</span>';
     }
 
     function renderBom() {
@@ -418,74 +745,130 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
         var html = '';
         state.bom.forEach(function (row, idx) {
             html += '<tr data-idx="' + idx + '">'
-                + '<td><button type="button" class="btn btn-sm btn-link text-danger jcc-bom-del" data-idx="' + idx + '">&times;</button></td>'
-                + '<td>' + bomField(row, 'variants', '') + '</td>'
-                + '<td>' + bomField(row, 'barcode', '') + '</td>'
-                + '<td>' + bomField(row, 'description', '') + '</td>'
-                + '<td>' + bomField(row, 'quantity', '') + '</td>'
-                + '<td>' + bomField(row, 'gross_wt', '') + '</td>'
-                + '<td>' + bomField(row, 'final_wt', '') + '</td>'
-                + '<td>' + bomField(row, 'net_wt', '') + '</td>'
-                + '<td>' + bomField(row, 'pure_wt', '') + '</td>'
-                + '<td>' + bomField(row, 'making', '') + '</td>'
-                + '<td>' + bomField(row, 'design_no', '') + '</td>'
-                + '<td>' + bomField(row, 'tax', '') + '</td>'
+                + '<td class="jcc-bom-actions">'
+                + '<button type="button" class="jcc-bom-act jcc-bom-edit" data-idx="' + idx + '" title="Edit item"><i class="feather icon-edit-2"></i></button>'
+                + '<button type="button" class="jcc-bom-act jcc-bom-del" data-idx="' + idx + '" title="Delete item"><i class="feather icon-trash-2"></i></button>'
+                + '</td>'
+                + '<td>' + bomCell(row, 'variants') + '</td>'
+                + '<td>' + bomCell(row, 'barcode') + '</td>'
+                + '<td>' + bomCell(row, 'description') + '</td>'
+                + '<td>' + bomCell(row, 'quantity') + '</td>'
+                + '<td>' + bomCell(row, 'gross_wt') + '</td>'
+                + '<td>' + bomCell(row, 'final_wt') + '</td>'
+                + '<td>' + bomCell(row, 'net_wt') + '</td>'
+                + '<td>' + bomCell(row, 'pure_wt') + '</td>'
+                + '<td>' + bomCell(row, 'making') + '</td>'
+                + '<td>' + bomCell(row, 'design_no') + '</td>'
+                + '<td>' + bomCell(row, 'tax') + '</td>'
                 + '</tr>';
         });
         tbody.innerHTML = html;
+        if (typeof feather !== 'undefined' && feather.replace) {
+            feather.replace({ scope: tbody });
+        }
+        tbody.querySelectorAll('.jcc-bom-edit').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                var i = parseInt(btn.getAttribute('data-idx'), 10);
+                if (isNaN(i)) return;
+                if (!state.bom[i]) return;
+                showJccBomEditLoader(true);
+                setTimeout(function () {
+                    try {
+                        if (typeof window.jccOpenBomProductModalForEdit === 'function') {
+                            window.jccOpenBomProductModalForEdit(state.bom[i], i);
+                        } else {
+                            openBomProductModal();
+                        }
+                    } finally {
+                        showJccBomEditLoader(false);
+                    }
+                }, 40);
+            });
+        });
         tbody.querySelectorAll('.jcc-bom-del').forEach(function (btn) {
-            btn.addEventListener('click', function () {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
                 var i = parseInt(btn.getAttribute('data-idx'), 10);
                 if (!isNaN(i)) {
                     state.bom.splice(i, 1);
                     renderBom();
+                    syncHeaderFromBom();
                 }
             });
-        });
-        tbody.querySelectorAll('.jcc-bom-inp').forEach(function (inp) {
-            inp.addEventListener('change', syncBomFromDom);
-            inp.addEventListener('blur', syncBomFromDom);
         });
     }
 
     function syncBomFromDom() {
-        var tbody = document.getElementById('jccBomBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('tr[data-idx]');
-        var next = [];
-        rows.forEach(function (tr) {
-            var row = {};
-            tr.querySelectorAll('.jcc-bom-inp').forEach(function (inp) {
-                var k = inp.getAttribute('data-key');
-                if (k) row[k] = inp.value;
-            });
-            next.push(row);
+        /* BOM rows are read-only in the table; state.bom is updated via modal add/edit only. */
+    }
+
+    function bomItemFromModalBatch(it) {
+        if (!it) return null;
+        var row = {
+            variants: it.variants || '',
+            barcode: it.barcode || '',
+            description: it.description || '',
+            quantity: it.quantity != null ? String(it.quantity) : '',
+            gross_wt: it.gross_wt != null ? String(it.gross_wt) : '',
+            final_wt: it.final_wt != null ? String(it.final_wt) : '',
+            net_wt: it.net_wt != null ? String(it.net_wt) : '',
+            pure_wt: it.pure_wt != null ? String(it.pure_wt) : '',
+            making: it.making != null ? String(it.making) : '',
+            design_no: it.design_no || '',
+            tax: it.tax != null ? String(it.tax) : '',
+            group_items: Array.isArray(it.group_items) ? it.group_items : (it._modal ? [it] : [])
+        };
+        if (it._modal) row._modal = it._modal;
+        return row;
+    }
+
+    function applyBomBatch(items, replaceIndex) {
+        var batch = (items || []).filter(Boolean);
+        if (batch.length > 1) {
+            batch = [mergeBomItems(batch)];
+        } else if (batch.length === 1) {
+            batch = [mergeBomItems(batch)];
+        }
+        batch.forEach(function (it) {
+            var row = bomItemFromModalBatch(it);
+            if (!row) return;
+            if (typeof replaceIndex === 'number' && replaceIndex >= 0 && replaceIndex < state.bom.length) {
+                state.bom[replaceIndex] = row;
+                replaceIndex = -1;
+            } else {
+                state.bom.push(row);
+            }
         });
-        state.bom = next;
+        renderBom();
+        syncHeaderFromBom();
+        if (batch.length && batch[0].description) {
+            var shortEl = document.getElementById('jccShortDesc');
+            var titleEl = document.getElementById('jccTitle');
+            if (shortEl && !shortEl.value.trim()) shortEl.value = batch[0].description;
+            if (titleEl && !titleEl.value.trim()) {
+                titleEl.value = String(batch[0].description).split(' + ')[0].trim();
+            }
+        }
     }
 
     function appendBomItems(items) {
-        syncBomFromDom();
-        (items || []).forEach(function (it) {
-            if (!it) return;
-            state.bom.push({
-                variants: it.variants || '',
-                barcode: it.barcode || '',
-                description: it.description || '',
-                quantity: it.quantity != null ? String(it.quantity) : '',
-                gross_wt: it.gross_wt != null ? String(it.gross_wt) : '',
-                final_wt: it.final_wt != null ? String(it.final_wt) : '',
-                net_wt: it.net_wt != null ? String(it.net_wt) : '',
-                pure_wt: it.pure_wt != null ? String(it.pure_wt) : '',
-                making: it.making != null ? String(it.making) : '',
-                design_no: it.design_no || '',
-                tax: it.tax != null ? String(it.tax) : ''
-            });
-        });
-        renderBom();
+        applyBomBatch(items, -1);
     }
 
-    window.JCC_BOM_BRIDGE = { appendBomItems: appendBomItems };
+    function replaceBomItemsAt(index, items) {
+        if (typeof index !== 'number' || index < 0) {
+            appendBomItems(items);
+            return;
+        }
+        applyBomBatch(items, index);
+    }
+
+    window.JCC_BOM_BRIDGE = {
+        appendBomItems: appendBomItems,
+        mergeBomItems: mergeBomItems,
+        replaceBomItemsAt: replaceBomItemsAt
+    };
 
     function openBomProductModal() {
         if (typeof window.jccOpenBomProductModal === 'function') {
@@ -549,44 +932,67 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
     }
 
     function saveCatalogue() {
-        var payload = collectPayload();
-        var btn = document.getElementById('jccBtnSave');
-        if (btn) btn.disabled = true;
-        fetch('ajax/save-jewelry-catalogue.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-            body: JSON.stringify(payload)
-        })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (btn) btn.disabled = false;
-                if (!data || !data.success) {
-                    alert((data && data.message) || 'Save failed.');
-                    return;
-                }
-                alert(data.message || 'Saved.');
-                if (data.design_no) {
-                    var dn = document.getElementById('jccDesignNo');
-                    if (dn) dn.value = data.design_no;
-                }
-                if (data.id) {
-                    document.getElementById('jccId').value = data.id;
-                    state.id = data.id;
-                    if (window.history && window.history.replaceState) {
-                        var u = new URL(window.location.href);
-                        u.searchParams.set('id', String(data.id));
-                        u.searchParams.delete('order_id');
-                        u.searchParams.delete('item_id');
-                        u.searchParams.delete('order_kind');
-                        window.history.replaceState({}, '', u.toString());
-                    }
-                }
+        ensureDesignNoBeforeSave().then(function (ok) {
+            if (!ok || designNoState.duplicate) {
+                var dn = getDesignNoEl();
+                if (dn) dn.focus();
+                return;
+            }
+            var payload = collectPayload();
+            var wasNew = (parseInt(payload.id, 10) || 0) <= 0;
+            var btn = document.getElementById('jccBtnSave');
+            if (btn) btn.disabled = true;
+            fetch('ajax/save-jewelry-catalogue.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
             })
-            .catch(function () {
-                if (btn) btn.disabled = false;
-                alert('Save failed.');
-            });
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (btn) btn.disabled = false;
+                    if (!data || !data.success) {
+                        var msg = (data && data.message) || 'Save failed.';
+                        if (/design no/i.test(msg)) {
+                            setDesignNoError(msg);
+                            var dnEl = getDesignNoEl();
+                            if (dnEl) dnEl.focus();
+                        } else {
+                            alert(msg);
+                        }
+                        return;
+                    }
+                    setDesignNoError('');
+                    if (wasNew && data.id) {
+                        var ret = window.JCC_RETURN_URL || 'jewelry-catalogue.php';
+                        var sep = ret.indexOf('?') >= 0 ? '&' : '?';
+                        window.location.href = ret + sep + 'catalogue_id=' + encodeURIComponent(String(data.id));
+                        return;
+                    }
+                    alert(data.message || 'Saved.');
+                    if (data.design_no) {
+                        var dn = getDesignNoEl();
+                        if (dn) dn.value = data.design_no;
+                    }
+                    setDesignNoError('');
+                    if (data.id) {
+                        document.getElementById('jccId').value = data.id;
+                        state.id = data.id;
+                        if (window.history && window.history.replaceState) {
+                            var u = new URL(window.location.href);
+                            u.searchParams.set('id', String(data.id));
+                            u.searchParams.delete('order_id');
+                            u.searchParams.delete('item_id');
+                            u.searchParams.delete('order_kind');
+                            window.history.replaceState({}, '', u.toString());
+                        }
+                    }
+                })
+                .catch(function () {
+                    if (btn) btn.disabled = false;
+                    alert('Save failed.');
+                });
+        });
     }
 
     document.getElementById('jccBtnSave').addEventListener('click', function (e) {
@@ -594,7 +1000,8 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
         saveCatalogue();
     });
     document.getElementById('jccBtnNew').addEventListener('click', function () {
-        window.location.href = 'jewelry-catalogue-create.php';
+        var ret = window.JCC_RETURN_URL || 'jewelry-catalogue.php';
+        window.location.href = 'jewelry-catalogue-create.php?return=' + encodeURIComponent(ret);
     });
     document.getElementById('jccAddBomRow').addEventListener('click', function (e) {
         e.preventDefault();
@@ -626,6 +1033,7 @@ window.JCC_RETURN_URL = <?php echo json_encode($back_url, JSON_UNESCAPED_UNICODE
     }
 
     initFromServer();
+    bindDesignNoValidation();
 })();
 </script>
 <?php include __DIR__ . '/includes/jewelry_catalogue_product_modal_inc.php'; ?>

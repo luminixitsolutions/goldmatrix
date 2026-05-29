@@ -7,8 +7,9 @@ $metals = getList("SELECT id, display_name, system_name FROM tbl_metal WHERE sta
 require_once __DIR__ . '/includes/auragold_voucher_runtime_settings.php';
 $auragold_voucher_runtime_client = auragold_voucher_runtime_bootstrap($conn, $metals, 'Purchase Order');
 
-// Load Carat master data
-$carats = getList("SELECT id, name, purity, description FROM tbl_carat WHERE status = 1 ORDER BY id ASC");
+// Load Carat master data (Purchase + Common)
+require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
+$carats = auragold_get_carat_list($conn, 'purchase');
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 ORDER BY id ASC");

@@ -27,13 +27,20 @@ if (!function_exists('auragold_voucher_parse_pending_diamond_lines_from_post')) 
             if (!is_array($ln)) {
                 continue;
             }
+            $source_issue_id = (int) ($ln['source_issue_id'] ?? $ln['issue_line_id'] ?? $ln['issue_id'] ?? 0);
             $sid = (int) ($ln['stock_id'] ?? 0);
             $qty = isset($ln['allocate_qty']) ? (float) $ln['allocate_qty'] : (isset($ln['qty']) ? (float) $ln['qty'] : 0);
             $wt = isset($ln['allocate_weight']) ? (float) $ln['allocate_weight'] : (isset($ln['weight']) ? (float) $ln['weight'] : 0);
-            if ($sid < 1 || ($qty <= 0 && $wt <= 0)) {
+            if ($source_issue_id < 1 && $sid < 1) {
                 continue;
             }
-            $diamond_lines[] = [
+            if ($source_issue_id < 1 && ($qty <= 0 && $wt <= 0)) {
+                continue;
+            }
+            if ($source_issue_id > 0 && $wt <= 0.0000001) {
+                continue;
+            }
+            $line = [
                 'stock_id' => $sid,
                 'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
                 'qty' => $qty,
@@ -41,6 +48,10 @@ if (!function_exists('auragold_voucher_parse_pending_diamond_lines_from_post')) 
                 'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
                 'diamond_category' => isset($ln['diamond_category']) ? trim((string) $ln['diamond_category']) : '',
             ];
+            if ($source_issue_id > 0) {
+                $line['source_issue_id'] = $source_issue_id;
+            }
+            $diamond_lines[] = $line;
         }
 
         return $diamond_lines;
@@ -69,13 +80,20 @@ if (!function_exists('auragold_voucher_parse_pending_stone_lines_from_post')) {
             if (!is_array($ln)) {
                 continue;
             }
+            $source_issue_id = (int) ($ln['source_issue_id'] ?? $ln['issue_line_id'] ?? $ln['issue_id'] ?? 0);
             $sid = (int) ($ln['stock_id'] ?? 0);
             $qty = isset($ln['allocate_qty']) ? (float) $ln['allocate_qty'] : (isset($ln['qty']) ? (float) $ln['qty'] : 0);
             $wt = isset($ln['allocate_weight']) ? (float) $ln['allocate_weight'] : (isset($ln['weight']) ? (float) $ln['weight'] : 0);
-            if ($sid < 1 || ($qty <= 0 && $wt <= 0)) {
+            if ($source_issue_id < 1 && $sid < 1) {
                 continue;
             }
-            $stone_lines[] = [
+            if ($source_issue_id < 1 && ($qty <= 0 && $wt <= 0)) {
+                continue;
+            }
+            if ($source_issue_id > 0 && $wt <= 0.0000001) {
+                continue;
+            }
+            $line = [
                 'stock_id' => $sid,
                 'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
                 'qty' => $qty,
@@ -83,6 +101,10 @@ if (!function_exists('auragold_voucher_parse_pending_stone_lines_from_post')) {
                 'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
                 'stone_category' => isset($ln['stone_category']) ? trim((string) $ln['stone_category']) : '',
             ];
+            if ($source_issue_id > 0) {
+                $line['source_issue_id'] = $source_issue_id;
+            }
+            $stone_lines[] = $line;
         }
 
         return $stone_lines;

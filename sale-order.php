@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 
 // Load Metals for category tabs
 $metals = getList("SELECT id, display_name, system_name FROM tbl_metal WHERE status = 1 ORDER BY id ASC");
@@ -18,8 +19,9 @@ if ($auragold_working_branch_id <= 0 && !empty($_SESSION['working_branch_id'])) 
 // Voucher settings (metal-wise): used for reverse calculation result column
 $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherSettings() : [];
 
-// Load Karat master data
-$carats = getList("SELECT id, name, purity, description FROM tbl_carat WHERE status = 1 ORDER BY id ASC");
+// Load Karat master data (Sales + Common)
+require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
+$carats = auragold_get_carat_list($conn, 'sales');
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 ORDER BY id ASC");
@@ -34,6 +36,7 @@ if (!is_array($currencies)) {
 $categories = getList("SELECT id, name FROM tbl_categories WHERE status = 1 ORDER BY name ASC");
 $branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
 $calculation_modes = getList("SELECT id, name, code FROM tbl_calculation_modes WHERE status = 1 ORDER BY sort_order ASC, name ASC");
+require_once __DIR__ . '/includes/auragold_product_modal_spec_masters.php';
 
 // Standard ledger groups for dropdown
 $ledger_groups = [
@@ -122,6 +125,12 @@ if (!empty($edit_order_id)) {
         if (is_array($edit_payments)) {
             require_once __DIR__ . '/includes/auragold_payment_details_merge.php';
             auragold_merge_payment_details_into_payments($edit_payments);
+            require_once __DIR__ . '/includes/auragold_metal_exchange_stock.php';
+            if (function_exists('auragold_sale_order_filter_display_payments')) {
+                auragold_sale_order_filter_display_payments($conn, (int) $edit_order_id, $edit_payments);
+            } elseif (function_exists('auragold_sale_order_filter_customer_payments')) {
+                auragold_sale_order_filter_customer_payments($edit_payments);
+            }
         }
         $tDiamondIss = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_diamond_stock_issue'");
         if ($tDiamondIss && mysqli_num_rows($tDiamondIss) > 0) {
@@ -2824,13 +2833,7 @@ text-transform: uppercase;
                                             <div class="col-md-6">
                                                 <div class="form-group">
                                                     <label>Name *</label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" required style="padding-right: 35px;" autocomplete="off">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="">
-                                                        <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
-                                                    </div>
+                                                    <div style="display:flex;align-items:stretch;gap:4px;"><div class="auragold-party-select2-wrap"><select class="form-control form-control-sm" id="customerId" name="customer_id" required><option value="">Select customer...</option></select><input type="hidden" id="customerName" name="customer_name" value=""><input type="hidden" id="customerBillingState" name="customer_billing_state" value=""></div><button type="button" class="btn btn-sm btn-outline-secondary p-0" id="addCustomerBtn" title="Add / Edit Customer" style="width:32px;min-width:32px;line-height:1;align-self:stretch;"><i class="feather icon-plus"></i></button></div>
                                                 </div>
                                             </div>
                                         <div class="col-md-6">
@@ -3470,7 +3473,9 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
 <script src="assets/js/sale-order-stone-modal.js"></script>
 <script src="assets/js/auragold-voucher-diamond-stone-payment-bind.js"></script>
 
+<?php auragold_echo_party_select2_styles(); ?>
 <?php include 'footer-script.php';?>
+<?php auragold_echo_party_select2_scripts(); ?>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -3482,6 +3487,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     const carats = <?php echo json_encode(isset($carats) && is_array($carats) ? $carats : []); ?>;
     const locations = <?php echo json_encode(isset($locations) && is_array($locations) ? $locations : []); ?>;
     const categories = <?php echo json_encode(isset($categories) && is_array($categories) ? $categories : []); ?>;
+<?php if (function_exists('auragold_echo_product_modal_spec_masters_js')) { auragold_echo_product_modal_spec_masters_js(); } ?>
     const metals = <?php echo json_encode(isset($metals) && is_array($metals) ? $metals : []); ?>;
     window.metals = metals;
     window.voucherSettingsByMetal = <?php echo json_encode(isset($voucher_settings_by_metal) && is_array($voucher_settings_by_metal) ? $voucher_settings_by_metal : []); ?>;
@@ -4486,7 +4492,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                     // Hide suggestions
                     suggestionsDiv.hide();
                     
-                    // Open customer creation modal
+                    initNewLedgerModalDefaults();
                     $('#customerCreationModal').modal('show');
                     
                     // Pre-fill the name field in the modal
@@ -5042,6 +5048,27 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
         shareHolderFiles = [];
     }
 
+    /** Select Customer Type by option label (matches tbl_customer_types.name, case-insensitive). */
+    function applyDefaultLedgerCustomerType(typeName) {
+        const sel = document.getElementById('customerType');
+        if (!sel || !typeName) return;
+        const want = String(typeName).trim().toLowerCase();
+        for (let i = 0; i < sel.options.length; i++) {
+            const opt = sel.options[i];
+            if (!opt.value) continue;
+            if (opt.text.trim().toLowerCase() === want) {
+                sel.selectedIndex = i;
+                return;
+            }
+        }
+    }
+
+    function initNewLedgerModalDefaults() {
+        clearCustomerForm();
+        setCustomerModalMode('add');
+        applyDefaultLedgerCustomerType('customer');
+    }
+
     function setCustomerModalMode(mode) {
         const label = document.getElementById('customerCreationModalLabel');
         const saveBtn = document.getElementById('customerModalSaveBtn');
@@ -5055,8 +5082,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     }
 
     function openCustomerModalForAdd() {
-        clearCustomerForm();
-        setCustomerModalMode('add');
+        initNewLedgerModalDefaults();
         $('#customerCreationModal').modal('show');
     }
 
@@ -9218,52 +9244,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     
     // updateJewelleryDiamondCaratFromDiamondAndGemstone: product-modal-add-item-common.js (Jewellery carat/D.Weight only sync from Diamonds+GemStones when those rows exist)
     
-    // Jewellery category: Net Amount = Metal Value + Diamond + Stone + Making + Other - Discount; Final = NetAmt + Tax
-    function updateJewelleryNetAmountAndFinal() {
-        var tbody = document.getElementById('productListBody');
-        if (!tbody) return;
-        var rows = tbody.querySelectorAll('.product-row');
-        var totalMetalValue = 0;
-        var totalMaking = 0;
-        var totalStone = 0;
-        var totalDiamond = 0;
-        var totalOther = 0;
-        var totalDiscount = 0;
-        var totalTax = 0;
-        var jewelleryRows = [];
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var catSel = r.querySelector('[data-column="category"] select');
-            var catVal = (catSel && catSel.value) ? (catSel.value || '').trim() : '';
-            if (catVal === 'Jewellery' || catVal === 'Diamonds' || catVal === 'GemStones') {
-                var mvInp = r.querySelector('[data-column="metal-value"] input');
-                if (mvInp) totalMetalValue += parseFloat(mvInp.value) || 0;
-                var maInp = r.querySelector('[data-column="making-amount"] input');
-                if (maInp) totalMaking += parseFloat(maInp.value) || 0;
-                var saInp = r.querySelector('[data-column="stone-amount"] input');
-                if (saInp) totalStone += parseFloat(saInp.value) || 0;
-                var daInp = r.querySelector('[data-column="diamond-amount"] input');
-                if (daInp) totalDiamond += parseFloat(daInp.value) || 0;
-                var oaInp = r.querySelector('[data-column="other-amount"] input');
-                if (oaInp) totalOther += parseFloat(oaInp.value) || 0;
-                var dcInp = r.querySelector('[data-column="discount"] input');
-                if (dcInp) totalDiscount += parseFloat(dcInp.value) || 0;
-                var taxInp = r.querySelector('[data-column="tax"] input');
-                if (taxInp) totalTax += parseFloat(taxInp.value) || 0;
-                if (catVal === 'Jewellery') jewelleryRows.push(r);
-            }
-        }
-        var netAmt = totalMetalValue + totalMaking + totalStone + totalDiamond + totalOther - totalDiscount;
-        if (netAmt < 0) netAmt = 0;
-        var finalAmount = netAmt + totalTax;
-        for (var j = 0; j < jewelleryRows.length; j++) {
-            var jr = jewelleryRows[j];
-            var netAmtInp = jr.querySelector('[data-column="net-amt"] input');
-            var netAmtTaxInp = jr.querySelector('[data-column="net-amt-tax"] input');
-            if (netAmtInp) netAmtInp.value = netAmt.toFixed(2);
-            if (netAmtTaxInp) netAmtTaxInp.value = finalAmount.toFixed(2);
-        }
-    }
+    // updateJewelleryNetAmountAndFinal: product-modal-add-item-common.js (JewelStep-style rollups)
     
     // Product search in modal
     const modalProductSearchInput = document.getElementById('modalProductSearchInput');
@@ -10757,13 +10738,55 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     let isSaving = false;
 
     /**
-     * After successful save: same HTML “Print bill” modal as Sale Invoice — barcode labels (if any), then print sale order, then redirect.
+     * After successful save: barcode labels (product + metal exchange), then print sale order, then redirect.
      */
-    function saleReturnAfterSavePrompts(returnId, returnNo, newBarcodes) {
-        var barcodeList = '';
-        if (newBarcodes && newBarcodes.length) {
-            barcodeList = newBarcodes.map(function (b) { return (b && b.barcode) ? b.barcode : b; }).join(', ');
+    function formatSaleOrderSavedBarcodes(newBarcodes) {
+        var out = { list: '', message: '', hasAny: false };
+        if (!newBarcodes || !newBarcodes.length) {
+            return out;
         }
+        var productLines = [];
+        var meLines = [];
+        var otherLines = [];
+        var allCodes = [];
+        newBarcodes.forEach(function (b) {
+            var bc = (b && b.barcode) ? String(b.barcode).trim() : String(b || '').trim();
+            if (!bc) return;
+            allCodes.push(bc);
+            var name = (b && b.product_name) ? String(b.product_name).trim() : '';
+            var line = name ? (bc + ' — ' + name) : bc;
+            var src = (b && b.source) ? String(b.source).toLowerCase() : '';
+            if (src === 'metal_exchange' || src === 'metal-exchange') {
+                meLines.push(line);
+            } else if (src === 'product') {
+                productLines.push(line);
+            } else {
+                otherLines.push(line);
+            }
+        });
+        if (!allCodes.length) {
+            return out;
+        }
+        out.hasAny = true;
+        out.list = allCodes.join(', ');
+        var parts = [];
+        if (productLines.length) {
+            parts.push('Product barcode(s):\n' + productLines.join('\n'));
+        }
+        if (meLines.length) {
+            parts.push('Metal exchange barcode(s):\n' + meLines.join('\n'));
+        }
+        if (otherLines.length) {
+            parts.push('Barcode(s):\n' + otherLines.join('\n'));
+        }
+        out.message = parts.join('\n\n');
+        return out;
+    }
+
+    function saleReturnAfterSavePrompts(returnId, returnNo, newBarcodes) {
+        var barcodeFmt = formatSaleOrderSavedBarcodes(newBarcodes);
+        var barcodeList = barcodeFmt.list;
+        var barcodeMessage = barcodeFmt.message;
 
         function doRedirect(options) {
             options = options || {};
@@ -10824,11 +10847,11 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                 if (typeof window.srOpenPrintBillModal === 'function' && document.getElementById('printInvoiceModal')) {
                     window.srOpenPrintBillModal({
                         title: 'Print bill',
-                        message: 'Do you want to print the new barcode label(s)?\n\n' + barcodeList,
+                        message: 'Do you want to print the new barcode label(s)?\n\n' + (barcodeMessage || barcodeList),
                         whiteSpace: 'pre-line'
                     });
                 } else {
-                    if (confirm('Do you want to print the new barcode label(s)?\n\n' + barcodeList)) {
+                    if (confirm('Do you want to print the new barcode label(s)?\n\n' + (barcodeMessage || barcodeList))) {
                         window.open('barcode-print.php?barcodes=' + encodeURIComponent(barcodeList), '_blank', 'width=900,height=700');
                     }
                     setTimeout(openReturnPrintModalOnly, 300);
@@ -11194,7 +11217,10 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                             if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(false);
                         }
                         const returnId = response.return_id || response.order_id;
-                        const barcodes = response.new_barcodes || [];
+                        var barcodes = response.new_barcodes || [];
+                        if ((!barcodes || !barcodes.length) && (response.product_barcodes || response.metal_exchange_barcodes)) {
+                            barcodes = [].concat(response.product_barcodes || [], response.metal_exchange_barcodes || []);
+                        }
                         const returnNo = response.return_no || response.order_no;
                         var _rid = parseInt(returnId, 10) || 0;
                         if (_rid > 0) {
@@ -11272,7 +11298,10 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                         if (typeof updateSiSaveBlockedByPfd === 'function') updateSiSaveBlockedByPfd(false);
                     }
                     const returnId = data.return_id || data.order_id;
-                    const barcodes = data.new_barcodes || [];
+                    var barcodes = data.new_barcodes || [];
+                    if ((!barcodes || !barcodes.length) && (data.product_barcodes || data.metal_exchange_barcodes)) {
+                        barcodes = [].concat(data.product_barcodes || [], data.metal_exchange_barcodes || []);
+                    }
                     const returnNo = data.return_no || data.order_no;
                     var _ridF = parseInt(returnId, 10) || 0;
                     if (_ridF > 0) {
@@ -11925,11 +11954,18 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
         }
         
         // Populate billing form
-        if (document.getElementById('customerName')) {
-            document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
-        }
-        if (document.getElementById('customerId')) {
-            document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
+        if (typeof setAuragoldPartyValue === 'function') {
+            setAuragoldPartyValue(
+                order.supplier_id || order.customer_id || '',
+                order.supplier_name || order.customer_name || ''
+            );
+        } else {
+            if (document.getElementById('customerName')) {
+                document.getElementById('customerName').value = order.supplier_name || order.customer_name || '';
+            }
+            if (document.getElementById('customerId')) {
+                document.getElementById('customerId').value = order.supplier_id || order.customer_id || '';
+            }
         }
         (function loadCustomerBillingStateForGst() {
             var custId0 = order.supplier_id || order.customer_id;
@@ -12229,7 +12265,10 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                 }
                 if (paymentType === 'metal-exchange') {
                     paymentData.metal_exchange_metal_id = payment.metal_exchange_metal_id || payment.metal_id || payment.scrap_metal_id || '';
-                    paymentData.metal_exchange_product_id = payment.metal_exchange_product_id || payment.product_id || payment.scrap_product_id || '';
+                    paymentData.metal_exchange_characteristic_id = payment.metal_exchange_characteristic_id
+                        || payment.metal_exchange_product_id || payment.product_characteristic_id || payment.product_id || '';
+                    paymentData.metal_exchange_product_id = payment.metal_exchange_characteristic_id
+                        || payment.metal_exchange_product_id || payment.product_id || payment.scrap_product_id || '';
                     paymentData.metal_exchange_product_name = payment.metal_exchange_product_name || payment.product_name || payment.scrap_product_name || '';
                     var meGross = payment.metal_exchange_gross_wt != null && payment.metal_exchange_gross_wt !== '' ? String(payment.metal_exchange_gross_wt) : (payment.gross_weight != null && payment.gross_weight !== '' ? String(payment.gross_weight) : '');
                     if (!meGross || meGross === '0') {
@@ -12682,13 +12721,24 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             var meMetal = document.getElementById('metalExchangeMetal');
             var meProdIn = document.getElementById('metalExchangeProductInput');
             var meProdId = document.getElementById('metalExchangeProductId');
-            paymentData.metal_exchange_metal_id = (meMetal && meMetal.value) ? meMetal.value : '';
-            paymentData.metal_exchange_product_id = (meProdId && meProdId.value) ? meProdId.value : '';
-            paymentData.metal_exchange_product_name = (meProdIn && meProdIn.value) ? meProdIn.value : '';
             var meGw = document.getElementById('metalExchangeGrossWt');
             var meIc = document.getElementById('metalExchangeItemCode');
             var meRt = document.getElementById('metalExchangeRate');
             var mePw = document.getElementById('metalExchangePurityWt');
+            paymentData.metal_exchange_metal_id = (meMetal && meMetal.value) ? meMetal.value : '';
+            var meCharId = (meProdId && meProdId.value) ? String(meProdId.value).trim() : '';
+            paymentData.metal_exchange_characteristic_id = meCharId;
+            paymentData.metal_exchange_product_id = meCharId;
+            paymentData.metal_exchange_product_name = (meProdIn && meProdIn.value) ? meProdIn.value : '';
+            var meGrossVal = meGw ? (parseFloat(meGw.value) || 0) : 0;
+            if (!paymentData.metal_exchange_metal_id || !meCharId) {
+                alert('Metal exchange: select metal and product from the search list.');
+                return;
+            }
+            if (meGrossVal <= 0) {
+                alert('Metal exchange: enter gross weight.');
+                return;
+            }
             paymentData.metal_exchange_gross_wt = meGw ? meGw.value : '0';
             paymentData.metal_exchange_item_code = meIc ? meIc.value : '';
             paymentData.metal_exchange_rate = meRt ? meRt.value : '0';
@@ -12712,9 +12762,12 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
         }
         paymentData.previous_balance_amount = 0; // Previous balance is applied via "Use previous balance" on main form only
         
-        if (paymentData.amount < 0 || !isFinite(paymentData.amount)) {
+        if (type !== 'metal-exchange' && (paymentData.amount < 0 || !isFinite(paymentData.amount))) {
             alert('Please enter a valid amount');
             return;
+        }
+        if (type === 'metal-exchange' && (paymentData.amount < 0 || !isFinite(paymentData.amount))) {
+            paymentData.amount = 0;
         }
         
         // Refresh summary panel so totals and balance are up to date
@@ -12751,6 +12804,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                     existingPayment.quantity = paymentData.quantity;
                     existingPayment.amount = paymentData.amount;
                     existingPayment.metal_exchange_metal_id = paymentData.metal_exchange_metal_id;
+                    existingPayment.metal_exchange_characteristic_id = paymentData.metal_exchange_characteristic_id;
                     existingPayment.metal_exchange_product_id = paymentData.metal_exchange_product_id;
                     existingPayment.metal_exchange_product_name = paymentData.metal_exchange_product_name;
                     existingPayment.metal_exchange_gross_wt = paymentData.metal_exchange_gross_wt;

@@ -25,4 +25,8 @@ require __DIR__ . '/sale-order-stone-stock-modal.php';
 <script src="assets/js/sale-order-diamond-modal.js"></script>
 <script src="assets/js/sale-order-stone-modal.js"></script>
 <script src="assets/js/auragold-voucher-diamond-stone-orderdata.js"></script>
+<?php if (($auragold_voucher_ds_kind ?? '') === 'material_receive'): ?>
+<script src="assets/js/material-receive-issued-receive.js?v=<?php echo @filemtime(__DIR__ . '/../assets/js/material-receive-issued-receive.js'); ?>"></script>
+<script src="assets/js/material-receive-me-issued.js?v=<?php echo @filemtime(__DIR__ . '/../assets/js/material-receive-me-issued.js'); ?>"></script>
+<?php endif; ?>
 <script src="assets/js/auragold-voucher-diamond-stone-payment-bind.js"></script>

@@ -77,6 +77,50 @@ if (!function_exists('auragold_voucher_diamond_journal_meta')) {
     }
 }
 
+if (!function_exists('auragold_voucher_ensure_voucher_gem_issue_source_column')) {
+    function auragold_voucher_ensure_voucher_gem_issue_source_column(mysqli $conn, string $tbl): void
+    {
+        if (!function_exists('auragold_tbl_has_column')) {
+            return;
+        }
+        if (!auragold_tbl_has_column($conn, $tbl, 'source_issue_id')) {
+            @mysqli_query(
+                $conn,
+                'ALTER TABLE `' . preg_replace('/[^a-zA-Z0-9_]/', '', $tbl) . '` '
+                . 'ADD COLUMN `source_issue_id` int(11) DEFAULT NULL AFTER `voucher_id`, '
+                . 'ADD KEY `idx_vd_source_issue` (`source_issue_id`)'
+            );
+        }
+    }
+}
+
+if (!function_exists('auragold_voucher_received_sum_for_source_issue')) {
+    /**
+     * @return array{weight: float, qty: float}
+     */
+    function auragold_voucher_received_sum_for_source_issue(mysqli $conn, string $tbl, int $source_issue_id): array
+    {
+        $out = ['weight' => 0.0, 'qty' => 0.0];
+        if ($source_issue_id < 1 || !function_exists('getRecord')) {
+            return $out;
+        }
+        auragold_voucher_ensure_voucher_gem_issue_source_column($conn, $tbl);
+        if (!function_exists('auragold_tbl_has_column') || !auragold_tbl_has_column($conn, $tbl, 'source_issue_id')) {
+            return $out;
+        }
+        $r = getRecord(
+            'SELECT COALESCE(SUM(weight),0) AS w, COALESCE(SUM(qty),0) AS q FROM `' . preg_replace('/[^a-zA-Z0-9_]/', '', $tbl) . '` '
+            . " WHERE voucher_kind IN ('material_receive', 'jobwork_invoice') AND source_issue_id = " . (int) $source_issue_id
+        );
+        if (is_array($r)) {
+            $out['weight'] = (float) ($r['w'] ?? 0);
+            $out['qty'] = (float) ($r['q'] ?? 0);
+        }
+
+        return $out;
+    }
+}
+
 if (!function_exists('auragold_voucher_ensure_diamond_issue_table')) {
     function auragold_voucher_ensure_diamond_issue_table(mysqli $conn): void
     {
@@ -99,6 +143,7 @@ if (!function_exists('auragold_voucher_ensure_diamond_issue_table')) {
               KEY `idx_vd_stock` (`stock_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        auragold_voucher_ensure_voucher_gem_issue_source_column($conn, $tbl);
     }
 }
 
@@ -291,6 +336,244 @@ if (!function_exists('auragold_voucher_remove_diamond_issue')) {
     }
 }
 
+if (!function_exists('auragold_voucher_receive_stock_inward_partial')) {
+    /**
+     * Material receive: add weight/qty back to inward stock and reduce matching outward rows (partial OK).
+     */
+    function auragold_voucher_receive_stock_inward_partial(
+        mysqli $conn,
+        int $stock_id,
+        float $add_wt,
+        float $add_qty,
+        string $bc_raw,
+        bool &$tx_ok,
+        string &$tx_err
+    ): void {
+        if (!$tx_ok || $stock_id < 1 || $add_wt <= 0.0000001) {
+            return;
+        }
+        if (!function_exists('getRecord')) {
+            return;
+        }
+        $st = getRecord('SELECT id, current_weight, current_qty, rate FROM tbl_stock WHERE id = ' . $stock_id . ' LIMIT 1');
+        if (!$st || empty($st['id'])) {
+            $tx_ok = false;
+            $tx_err = 'Inward stock row not found (id ' . $stock_id . ').';
+
+            return;
+        }
+        $add_wt = round(max(0.0, $add_wt), 4);
+        $prev_cw = (float) ($st['current_weight'] ?? 0);
+        $prev_cq = (float) ($st['current_qty'] ?? 0);
+        $rate = (float) ($st['rate'] ?? 0);
+        $add_q = $add_qty > 0.0000001 ? round($add_qty, 4) : 0.0;
+        if ($add_q <= 0.0000001 && $prev_cw > 0.0000001 && $prev_cq > 0.0000001) {
+            $add_q = round($add_wt * ($prev_cq / $prev_cw), 4);
+        } elseif ($add_q <= 0.0000001) {
+            $add_q = 1.0;
+        }
+        $new_cw = round($prev_cw + $add_wt, 4);
+        $new_cq = round($prev_cq + $add_q, 4);
+        $new_val = round($rate * $new_cw, 2);
+        $upd = 'UPDATE tbl_stock SET current_weight = ' . $new_cw . ', final_weight = ' . $new_cw
+            . ', current_qty = ' . $new_cq . ', value = ' . $new_val . ' WHERE id = ' . $stock_id . ' LIMIT 1';
+        if (!@mysqli_query($conn, $upd)) {
+            $tx_ok = false;
+            $tx_err = 'Could not restore inward stock: ' . mysqli_error($conn);
+
+            return;
+        }
+
+        $remaining = $add_wt;
+        $bc_trim = trim($bc_raw);
+        if ($bc_trim === '' || !function_exists('getList')) {
+            return;
+        }
+        $bc_esc = mysqli_real_escape_string($conn, $bc_trim);
+        $outs = getList(
+            'SELECT id, current_weight, current_qty, rate FROM tbl_stock WHERE status = 1'
+            . " AND LOWER(TRIM(COALESCE(stock_type,''))) = 'outward'"
+            . " AND barcode = '" . $bc_esc . "'"
+            . ' AND COALESCE(current_weight,0) > 0.00001'
+            . ' ORDER BY id DESC'
+        );
+        if (!is_array($outs)) {
+            return;
+        }
+        foreach ($outs as $out) {
+            if ($remaining <= 0.0000001) {
+                break;
+            }
+            $oid = (int) ($out['id'] ?? 0);
+            $ow = (float) ($out['current_weight'] ?? 0);
+            if ($oid < 1 || $ow <= 0.0000001) {
+                continue;
+            }
+            $reduce = min($remaining, $ow);
+            $new_ow = round($ow - $reduce, 4);
+            $oq = (float) ($out['current_qty'] ?? 0);
+            $reduce_q = $ow > 0.0000001 ? round($oq * ($reduce / $ow), 4) : 0.0;
+            $new_oq = max(0.0, round($oq - $reduce_q, 4));
+            if ($new_ow <= 0.0000001) {
+                @mysqli_query(
+                    $conn,
+                    'UPDATE tbl_stock SET status = 0, current_weight = 0, current_qty = 0, final_weight = 0, value = 0 WHERE id = ' . $oid . ' LIMIT 1'
+                );
+            } else {
+                $or = (float) ($out['rate'] ?? 0);
+                $oval = round($or * $new_ow, 2);
+                @mysqli_query(
+                    $conn,
+                    'UPDATE tbl_stock SET current_weight = ' . $new_ow . ', final_weight = ' . $new_ow
+                    . ', current_qty = ' . $new_oq . ', value = ' . $oval . ' WHERE id = ' . $oid . ' LIMIT 1'
+                );
+            }
+            $remaining = round($remaining - $reduce, 4);
+        }
+    }
+}
+
+if (!function_exists('auragold_voucher_apply_diamond_receive_allocations')) {
+    /**
+     * Material receive against prior material issue lines (partial weight/qty allowed).
+     *
+     * @param array<int, array<string, mixed>> $rows source_issue_id, weight, qty, barcode, product_name, diamond_category
+     * @return array{saved:int}
+     */
+    function auragold_voucher_apply_diamond_receive_allocations(
+        mysqli $conn,
+        int $voucher_id,
+        array $rows,
+        string $document_no,
+        string $document_date_ymd,
+        bool &$tx_ok,
+        string &$tx_err,
+        string $receive_voucher_kind = 'material_receive'
+    ): array {
+        $stats = ['saved' => 0];
+        if (!$tx_ok || $voucher_id < 1 || $rows === []) {
+            return $stats;
+        }
+        $receive_voucher_kind = strtolower(trim($receive_voucher_kind));
+        if ($receive_voucher_kind === '') {
+            $receive_voucher_kind = 'material_receive';
+        }
+        if (!auragold_voucher_diamond_kind_valid($receive_voucher_kind)) {
+            $tx_ok = false;
+            $tx_err = 'Invalid receive voucher type for diamond stock.';
+
+            return $stats;
+        }
+        auragold_voucher_ensure_diamond_issue_table($conn);
+        $tbl = 'tbl_voucher_diamond_stock_issue';
+        [$voucher_label, $sj_prefix, $comment_tag] = auragold_voucher_diamond_journal_meta($receive_voucher_kind);
+        $document_no = trim($document_no);
+        $d = trim($document_date_ymd);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+            $d = date('Y-m-d');
+        }
+        require_once __DIR__ . '/stock_history_audit_journal.php';
+        $kind_esc = mysqli_real_escape_string($conn, $receive_voucher_kind);
+        $has_src_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, $tbl, 'source_issue_id');
+
+        foreach ($rows as $r) {
+            if (!is_array($r)) {
+                continue;
+            }
+            $source_issue_id = (int) ($r['source_issue_id'] ?? 0);
+            $recv_wt = isset($r['weight']) ? (float) $r['weight'] : 0.0;
+            $recv_qty = isset($r['qty']) ? (float) $r['qty'] : 0.0;
+            if ($source_issue_id < 1 || $recv_wt <= 0.0000001) {
+                continue;
+            }
+            $src = function_exists('getRecord')
+                ? getRecord(
+                    'SELECT * FROM `' . $tbl . '` WHERE id = ' . $source_issue_id
+                    . " AND voucher_kind = 'material_issue' LIMIT 1"
+                )
+                : null;
+            if (!$src || empty($src['id'])) {
+                $tx_ok = false;
+                $tx_err = 'Issued diamond line not found (id ' . $source_issue_id . ').';
+
+                return $stats;
+            }
+            $issued_wt = (float) ($src['weight'] ?? 0);
+            $issued_qty = (float) ($src['qty'] ?? 0);
+            $already = $has_src_col
+                ? auragold_voucher_received_sum_for_source_issue($conn, $tbl, $source_issue_id)
+                : ['weight' => 0.0, 'qty' => 0.0];
+            $bal_wt = max(0.0, round($issued_wt - (float) $already['weight'], 4));
+            if ($recv_wt > $bal_wt + 0.0001) {
+                $tx_ok = false;
+                $tx_err = 'Receive weight exceeds balance for barcode ' . trim((string) ($src['barcode'] ?? ''))
+                    . ' (balance ' . $bal_wt . ').';
+
+                return $stats;
+            }
+            if ($recv_qty <= 0.0000001 && $issued_qty > 0.0000001 && $issued_wt > 0.0000001) {
+                $recv_qty = round($issued_qty * ($recv_wt / $issued_wt), 4);
+            }
+            $sid = (int) ($src['stock_id'] ?? 0);
+            $bc = trim((string) ($src['barcode'] ?? ($r['barcode'] ?? '')));
+            if ($sid < 1) {
+                $tx_ok = false;
+                $tx_err = 'Issued line has no stock reference for barcode ' . ($bc !== '' ? $bc : '?') . '.';
+
+                return $stats;
+            }
+            auragold_voucher_receive_stock_inward_partial($conn, $sid, $recv_wt, $recv_qty, $bc, $tx_ok, $tx_err);
+            if (!$tx_ok) {
+                return $stats;
+            }
+
+            $pn_esc = mysqli_real_escape_string($conn, trim((string) ($r['product_name'] ?? $src['product_name'] ?? '')));
+            $cat_esc = mysqli_real_escape_string($conn, trim((string) ($r['diamond_category'] ?? $src['diamond_category'] ?? 'Diamonds')));
+            $bc_esc = mysqli_real_escape_string($conn, $bc);
+            $w_log = round($recv_wt, 4);
+            $q_log = round(max(0.0, $recv_qty), 4);
+            $src_sql = $has_src_col ? (string) (int) $source_issue_id : 'NULL';
+            $ins = "INSERT INTO `$tbl` (voucher_kind, voucher_id, source_issue_id, stock_id, barcode, product_name, diamond_category, weight, qty, created_at) VALUES ("
+                . "'" . $kind_esc . "', " . (int) $voucher_id . ', ' . $src_sql . ', ' . $sid . ", '" . $bc_esc . "', '" . $pn_esc . "', '" . $cat_esc . "', "
+                . $w_log . ', ' . $q_log . ', NOW())';
+            if (!@mysqli_query($conn, $ins)) {
+                $tx_ok = false;
+                $tx_err = 'Could not log diamond stock receive: ' . mysqli_error($conn);
+
+                return $stats;
+            }
+            $alloc_id = (int) mysqli_insert_id($conn);
+            if ($document_no !== '' && $alloc_id > 0) {
+                auragold_stock_history_audit_for_document_barcode_line(
+                    $conn,
+                    $voucher_label,
+                    $document_no,
+                    $d,
+                    $sj_prefix,
+                    $voucher_id,
+                    $alloc_id,
+                    $comment_tag,
+                    [
+                        'barcode' => $bc,
+                        'product_id' => 0,
+                        'product_characteristic_id' => 0,
+                        'product_name' => trim((string) ($r['product_name'] ?? $src['product_name'] ?? '')),
+                        'quantity' => $q_log > 0.0000001 ? $q_log : 1,
+                        'gross_weight' => $w_log,
+                        'final_weight' => $w_log,
+                        'net_weight' => $w_log,
+                        'category' => trim((string) ($r['diamond_category'] ?? $src['diamond_category'] ?? 'Diamonds')),
+                        'diamond_category' => trim((string) ($r['diamond_category'] ?? $src['diamond_category'] ?? 'Diamonds')),
+                    ]
+                );
+            }
+            $stats['saved']++;
+        }
+
+        return $stats;
+    }
+}
+
 if (!function_exists('auragold_voucher_stock_inward_where_sql')) {
     function auragold_voucher_stock_inward_where_sql(): string
     {
@@ -423,6 +706,30 @@ if (!function_exists('auragold_voucher_apply_diamond_allocations')) {
         $stats = ['saved' => 0];
         $voucher_kind = strtolower(trim($voucher_kind));
         if (!$tx_ok || $voucher_id < 1 || $rows === [] || !auragold_voucher_diamond_kind_valid($voucher_kind)) {
+            return $stats;
+        }
+        if ($voucher_kind === 'material_receive') {
+            $receive_rows = [];
+            foreach ($rows as $r) {
+                if (!is_array($r)) {
+                    continue;
+                }
+                if ((int) ($r['source_issue_id'] ?? 0) > 0) {
+                    $receive_rows[] = $r;
+                }
+            }
+            if ($receive_rows !== []) {
+                return auragold_voucher_apply_diamond_receive_allocations(
+                    $conn,
+                    $voucher_id,
+                    $receive_rows,
+                    $document_no,
+                    $document_date_ymd,
+                    $tx_ok,
+                    $tx_err
+                );
+            }
+
             return $stats;
         }
         auragold_voucher_ensure_diamond_issue_table($conn);

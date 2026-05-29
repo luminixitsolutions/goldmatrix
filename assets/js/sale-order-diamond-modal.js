@@ -53,10 +53,15 @@
         return cfg.voucherKind || 'sale_order';
     }
 
-    /** Job work order / invoice: queue diamonds until document Save (no immediate stock API). */
+    /** Job work / material issue: queue diamonds until document Save (no immediate stock API). */
     function voucherDefersDiamondDeductionToSave() {
         var kind = getCurrentVoucherKindForDiamond();
-        return kind === 'jobwork_order' || kind === 'jobwork_invoice';
+        return (
+            kind === 'jobwork_order' ||
+            kind === 'jobwork_invoice' ||
+            kind === 'material_issue' ||
+            kind === 'material_receive'
+        );
     }
 
     function saleOrderDiamondHasQueuedOrAllocatedLines() {
@@ -450,8 +455,8 @@
         var urlId = parseInt(urlParams.get(param) || '0', 10);
         var kind = cfg.voucherKind || 'sale_order';
 
-        /** Job work order: ?id= may be sale order id when creating from SO — only trust URL when it is known JWO id. */
-        if (kind === 'jobwork_order') {
+        /** Job work / material issue: ?id= may be sale order id when creating from SO — only trust URL when document id mode. */
+        if (kind === 'jobwork_order' || kind === 'material_issue' || kind === 'material_receive') {
             var edJwo = window.editUrlIdIsJobworkOrder === true || window.editUrlIdIsJobworkOrder === 'true';
             if (edJwo && urlId > 0) {
                 return urlId;
@@ -747,7 +752,12 @@
     function auragoldDsUsageTablesAlwaysVisible() {
         var cfg = window.AURAGOLD_VOUCHER_DS || {};
         var k = cfg.voucherKind || '';
-        return k === 'jobwork_order' || k === 'jobwork_invoice';
+        return (
+            k === 'jobwork_order' ||
+            k === 'jobwork_invoice' ||
+            k === 'material_issue' ||
+            k === 'material_receive'
+        );
     }
 
     function renderSaleOrderDiamondLinesPanel() {
@@ -759,19 +769,26 @@
         if (!tbody) {
             return;
         }
+        var issuedRef =
+            getCurrentVoucherKindForDiamond() === 'material_receive' &&
+            Array.isArray(window.__materialIssueReferenceDiamondRows)
+                ? window.__materialIssueReferenceDiamondRows
+                : [];
         var saved = Array.isArray(window.__saleOrderDiamondIssueRows) ? window.__saleOrderDiamondIssueRows : [];
         var pend = Array.isArray(window.__pendingSaleOrderDiamondLines) ? window.__pendingSaleOrderDiamondLines : [];
         tbody.innerHTML = '';
-        if (saved.length === 0 && pend.length === 0) {
+        if (saved.length === 0 && pend.length === 0 && issuedRef.length === 0) {
             if (card) {
                 if (auragoldDsUsageTablesAlwaysVisible()) {
                     card.hidden = false;
                     var trEmpty = document.createElement('tr');
                     var tdEmpty = document.createElement('td');
-                    tdEmpty.colSpan = 7;
+                    tdEmpty.colSpan = getCurrentVoucherKindForDiamond() === 'material_receive' ? 9 : 7;
                     tdEmpty.className = 'text-center text-muted py-3';
                     tdEmpty.textContent =
-                        'No diamonds in this list yet. Click the Diamond icon above to choose barcode / stock.';
+                        getCurrentVoucherKindForDiamond() === 'material_receive'
+                            ? 'No diamonds issued on Material Issue for this sale order yet. After issue, lines appear here; tick lines and add receive weight.'
+                            : 'No diamonds in this list yet. Click the Diamond icon above to choose barcode / stock.';
                     trEmpty.appendChild(tdEmpty);
                     tbody.appendChild(trEmpty);
                 } else {
@@ -782,6 +799,32 @@
         }
         if (card) {
             card.hidden = false;
+        }
+        if (
+            issuedRef.length > 0 &&
+            typeof window.mrRenderIssuedDiamondRows === 'function' &&
+            window.mrRenderIssuedDiamondRows(tbody, issuedRef)
+        ) {
+            /* interactive partial-receive rows */
+        } else {
+            issuedRef.forEach(function (r) {
+                var q = r.qty != null ? r.qty : '';
+                var w = r.weight != null ? r.weight : '';
+                var tr = document.createElement('tr');
+                tr.style.background = '#f8fafc';
+                saleOrderDiamondTdAppendText(tr, r.barcode || '');
+                saleOrderDiamondTdAppendText(tr, r.product_name || '');
+                saleOrderDiamondTdAppendText(tr, r.diamond_category || '');
+                saleOrderDiamondTdAppendText(tr, saleOrderDiamondFmtNum(q), 'text-right');
+                saleOrderDiamondTdAppendText(tr, saleOrderDiamondFmtNum(w), 'text-right');
+                var tdIss = document.createElement('td');
+                tdIss.innerHTML =
+                    '<span class="badge" style="background:#1e40af;font-size:0.7rem;">Issued</span>';
+                tr.appendChild(tdIss);
+                var tdEmptyDel = document.createElement('td');
+                tr.appendChild(tdEmptyDel);
+                tbody.appendChild(tr);
+            });
         }
         saved.forEach(function (r) {
             var q = r.qty != null ? r.qty : '';
@@ -795,7 +838,9 @@
             saleOrderDiamondTdAppendText(tr, saleOrderDiamondFmtNum(w), 'text-right');
             var tdBadge = document.createElement('td');
             tdBadge.innerHTML =
-                '<span class="badge badge-success" style="background:#166534;font-size:0.7rem;">Allocated</span>';
+                getCurrentVoucherKindForDiamond() === 'material_receive'
+                    ? '<span class="badge badge-success" style="background:#166534;font-size:0.7rem;">Received</span>'
+                    : '<span class="badge badge-success" style="background:#166534;font-size:0.7rem;">Allocated</span>';
             tr.appendChild(tdBadge);
             saleOrderDiamondAppendRemoveTd(tr, 'saved', { issueId: issueId });
             tbody.appendChild(tr);
@@ -811,9 +856,16 @@
             saleOrderDiamondTdAppendText(tr, saleOrderDiamondFmtNum(w), 'text-right');
             var tdPend = document.createElement('td');
             tdPend.innerHTML =
-                '<span class="badge badge-secondary" style="background:#fde047;color:#422006;font-size:0.7rem;">Pending — deducts on Save</span>';
+                getCurrentVoucherKindForDiamond() === 'material_receive'
+                    ? '<span class="badge badge-secondary" style="background:#fde047;color:#422006;font-size:0.7rem;">Pending receive — saves on Save</span>'
+                    : '<span class="badge badge-secondary" style="background:#fde047;color:#422006;font-size:0.7rem;">Pending — deducts on Save</span>';
             tr.appendChild(tdPend);
-            saleOrderDiamondAppendRemoveTd(tr, 'pending', { idx: pidx });
+            if (getCurrentVoucherKindForDiamond() !== 'material_receive') {
+                saleOrderDiamondAppendRemoveTd(tr, 'pending', { idx: pidx });
+            } else {
+                var tdEmptyDelP = document.createElement('td');
+                tr.appendChild(tdEmptyDelP);
+            }
             tbody.appendChild(tr);
         });
     }
@@ -1400,7 +1452,10 @@
         var vid = parseInt(String(window.__auragoldVoucherDbId || '0'), 10) || 0;
         if (
             vid > 0 &&
-            ((cfg.voucherKind || '') === 'jobwork_order' || (cfg.voucherKind || '') === 'jobwork_invoice')
+            ((cfg.voucherKind || '') === 'jobwork_order' ||
+                (cfg.voucherKind || '') === 'jobwork_invoice' ||
+                (cfg.voucherKind || '') === 'material_issue' ||
+                (cfg.voucherKind || '') === 'material_receive')
         ) {
             refreshSaleOrderDiamondIssuesFromServer(vid);
         }

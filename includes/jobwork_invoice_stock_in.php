@@ -55,13 +55,96 @@ if (!function_exists('auragold_jobwork_invoice_remove_stock_for_invoice')) {
     }
 
     /**
+     * When JWO line weights are zero, copy from tbl_sale_order_items (same as save-jobwork-order.php).
+     *
+     * @param array<string,mixed> $item
+     */
+    function auragold_jobwork_invoice_merge_item_weights_from_sale_order(mysqli $conn, int $sale_order_id, array &$item): void
+    {
+        $sid = (int) $sale_order_id;
+        if ($sid < 1) {
+            return;
+        }
+        $g = (float) ($item['gross_weight'] ?? 0);
+        $f = (float) ($item['final_weight'] ?? 0);
+        $n = (float) ($item['net_weight'] ?? 0);
+        if (($g > 0.0000001) || ($f > 0.0000001) || ($n > 0.0000001)) {
+            return;
+        }
+        $chk = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_items'");
+        if (!$chk || mysqli_num_rows($chk) === 0) {
+            if ($chk) {
+                mysqli_free_result($chk);
+            }
+            return;
+        }
+        mysqli_free_result($chk);
+
+        $pid = (int) ($item['product_id'] ?? 0);
+        $cid = isset($item['product_characteristic_id']) ? (int) $item['product_characteristic_id'] : 0;
+        $barcode = isset($item['barcode']) ? trim((string) $item['barcode']) : '';
+        $barcode_esc = mysqli_real_escape_string($conn, $barcode);
+
+        $row = null;
+        if ($pid > 0 && $cid > 0 && function_exists('getRecord')) {
+            $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid
+                . ' AND product_characteristic_id = ' . $cid . ' ORDER BY id ASC LIMIT 1');
+        }
+        if (!$row && $pid > 0 && $barcode !== '' && function_exists('getRecord')) {
+            $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid
+                . " AND TRIM(IFNULL(barcode,'')) = '" . $barcode_esc . "' ORDER BY id ASC LIMIT 1");
+        }
+        if (!$row && $pid > 0 && function_exists('getRecord')) {
+            $row = getRecord('SELECT * FROM tbl_sale_order_items WHERE order_id = ' . $sid . ' AND product_id = ' . $pid . ' ORDER BY id ASC LIMIT 1');
+        }
+        if (!$row || !is_array($row)) {
+            return;
+        }
+
+        $sg = isset($row['gross_weight']) ? (float) $row['gross_weight'] : 0.0;
+        if ($sg > 0.0000001) {
+            $item['gross_weight'] = $sg;
+        }
+        if (isset($row['less_weight']) && (float) $row['less_weight'] > 0.0000001) {
+            $item['less_weight'] = (float) $row['less_weight'];
+        }
+        if (isset($row['net_weight']) && (float) $row['net_weight'] > 0.0000001) {
+            $item['net_weight'] = (float) $row['net_weight'];
+        }
+        if (isset($row['final_weight']) && (float) $row['final_weight'] > 0.0000001) {
+            $item['final_weight'] = (float) $row['final_weight'];
+        }
+        $pp = null;
+        if (isset($row['pure_weight'])) {
+            $pp = (float) $row['pure_weight'];
+        } elseif (isset($row['purity_weight'])) {
+            $pp = (float) $row['purity_weight'];
+        }
+        if ($pp !== null && $pp > 0.0000001) {
+            $item['pure_weight'] = $pp;
+            $item['purity_weight'] = $pp;
+        }
+        if (isset($row['purity']) && (float) $row['purity'] > 0.0000001) {
+            $item['purity'] = (float) $row['purity'];
+        }
+    }
+
+    /**
+     * @param array<int,string> $posted_barcodes_out
      * @throws RuntimeException
      */
-    function auragold_jobwork_invoice_apply_stock_in(mysqli $conn, int $jobwork_invoice_id, int $jobwork_order_id, string $invoice_no): void
-    {
+    function auragold_jobwork_invoice_apply_stock_in(
+        mysqli $conn,
+        int $jobwork_invoice_id,
+        int $jobwork_order_id,
+        string $invoice_no,
+        int $repair_jobwork_order_id = 0,
+        array &$posted_barcodes_out = []
+    ): void {
         $jwi_id = (int) $jobwork_invoice_id;
         $jwo_id = (int) $jobwork_order_id;
-        if ($jwi_id <= 0 || $jwo_id <= 0) {
+        $rjwo_id = (int) $repair_jobwork_order_id;
+        if ($jwi_id <= 0 || ($jwo_id <= 0 && $rjwo_id <= 0)) {
             return;
         }
 
@@ -88,14 +171,36 @@ if (!function_exists('auragold_jobwork_invoice_remove_stock_for_invoice')) {
 
         auragold_jobwork_invoice_remove_stock_for_invoice($conn, $jwi_id);
 
-        $jwo = getRecord("SELECT id, sale_order_id, sale_order_no, jobwork_no FROM tbl_jobwork_orders WHERE id = $jwo_id LIMIT 1");
-        if (!$jwo) {
-            throw new RuntimeException('Job work order not found for stock posting');
+        $sale_order_id = 0;
+        $items = [];
+        if ($jwo_id > 0) {
+            $jwo = getRecord("SELECT id, sale_order_id, sale_order_no, jobwork_no FROM tbl_jobwork_orders WHERE id = $jwo_id LIMIT 1");
+            if (!$jwo) {
+                throw new RuntimeException('Job work order not found for stock posting');
+            }
+            $sale_order_id = isset($jwo['sale_order_id']) ? (int) $jwo['sale_order_id'] : 0;
+            $items = getList("SELECT * FROM tbl_jobwork_order_items WHERE jobwork_order_id = $jwo_id ORDER BY id ASC");
+        } else {
+            $t_rj = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_repair_jobwork_order_items'");
+            if (!$t_rj || mysqli_num_rows($t_rj) === 0) {
+                if ($t_rj) {
+                    mysqli_free_result($t_rj);
+                }
+                return;
+            }
+            mysqli_free_result($t_rj);
+            $items = getList("SELECT * FROM tbl_repair_jobwork_order_items WHERE repair_jobwork_order_id = $rjwo_id ORDER BY id ASC");
         }
-
-        $items = getList("SELECT * FROM tbl_jobwork_order_items WHERE jobwork_order_id = $jwo_id ORDER BY id ASC");
         if (!is_array($items) || empty($items)) {
             return;
+        }
+
+        if ($sale_order_id > 0) {
+            foreach ($items as $ik => $_row) {
+                if (is_array($items[$ik])) {
+                    auragold_jobwork_invoice_merge_item_weights_from_sale_order($conn, $sale_order_id, $items[$ik]);
+                }
+            }
         }
 
         $user_id = 0;
@@ -387,7 +492,7 @@ if (!function_exists('auragold_jobwork_invoice_remove_stock_for_invoice')) {
             $ref_cols_sql = $has_reference_cols ? ', reference_id, reference_type' : '';
             $ref_vals_sql = $has_reference_cols ? ", $journal_id, 'stock_journal'" : '';
             $sjid_col_sql = $has_stock_journal_id ? ', stock_journal_id' : '';
-            $sjid_val_sql = $has_stock_journal_id ? ', NULL' : '';
+            $sjid_val_sql = $has_stock_journal_id ? ", $journal_id" : '';
 
             $barcode_sql = "'" . $barcode_esc . "'";
             $inward_stock_sql = "
@@ -495,6 +600,273 @@ if (!function_exists('auragold_jobwork_invoice_remove_stock_for_invoice')) {
                     }
                 }
             }
+
+            if ($barcode !== '') {
+                $posted_barcodes_out[] = $barcode;
+            }
+        }
+    }
+
+    /**
+     * Jobwork invoice complete: return issued diamonds/stones to stock (material receive against issue lines,
+     * then clear sale-order gem issue rows). Metal finished goods use auragold_jobwork_invoice_apply_stock_in().
+     *
+     * @throws RuntimeException
+     */
+    function auragold_jobwork_invoice_apply_gem_stock_in(
+        mysqli $conn,
+        int $jobwork_invoice_id,
+        string $invoice_no,
+        int $sale_order_id
+    ): void {
+        $jwi_id = (int) $jobwork_invoice_id;
+        if ($jwi_id <= 0) {
+            return;
+        }
+
+        require_once __DIR__ . '/auragold_voucher_pending_diamond_stone.php';
+        require_once __DIR__ . '/auragold_voucher_diamond_stock.php';
+        require_once __DIR__ . '/auragold_voucher_stone_stock.php';
+        require_once __DIR__ . '/auragold_material_issue_rows_for_sale_order.php';
+
+        $invoice_no = trim($invoice_no);
+        $doc_date = date('Y-m-d');
+        $tx_ok = true;
+        $tx_err = '';
+
+        $pending_diamond = auragold_voucher_parse_pending_diamond_lines_from_post();
+        $pending_stone = auragold_voucher_parse_pending_stone_lines_from_post();
+
+        $diamond_receive = [];
+        foreach ($pending_diamond as $ln) {
+            if (!is_array($ln)) {
+                continue;
+            }
+            $src_id = (int) ($ln['source_issue_id'] ?? 0);
+            $wt = isset($ln['weight']) ? (float) $ln['weight'] : 0.0;
+            if ($src_id < 1 || $wt <= 0.0000001) {
+                continue;
+            }
+            $diamond_receive[] = [
+                'source_issue_id' => $src_id,
+                'weight' => $wt,
+                'qty' => isset($ln['qty']) ? (float) $ln['qty'] : 0.0,
+                'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
+                'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
+                'diamond_category' => isset($ln['diamond_category']) ? trim((string) $ln['diamond_category']) : '',
+            ];
+        }
+
+        $stone_receive = [];
+        foreach ($pending_stone as $ln) {
+            if (!is_array($ln)) {
+                continue;
+            }
+            $src_id = (int) ($ln['source_issue_id'] ?? 0);
+            $wt = isset($ln['weight']) ? (float) $ln['weight'] : 0.0;
+            if ($src_id < 1 || $wt <= 0.0000001) {
+                continue;
+            }
+            $stone_receive[] = [
+                'source_issue_id' => $src_id,
+                'weight' => $wt,
+                'qty' => isset($ln['qty']) ? (float) $ln['qty'] : 0.0,
+                'barcode' => isset($ln['barcode']) ? trim((string) $ln['barcode']) : '',
+                'product_name' => isset($ln['product_name']) ? trim((string) $ln['product_name']) : '',
+                'stone_category' => isset($ln['stone_category']) ? trim((string) $ln['stone_category']) : '',
+            ];
+        }
+
+        $soid = (int) $sale_order_id;
+        if ($soid > 0) {
+            $mi_diamonds = auragold_material_issue_list_diamond_rows_for_sale_order($conn, $soid);
+            foreach ($mi_diamonds as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $bal_wt = (float) ($row['balance_weight'] ?? 0);
+                if ($bal_wt <= 0.0000001) {
+                    continue;
+                }
+                $issue_line_id = (int) ($row['issue_line_id'] ?? $row['id'] ?? 0);
+                if ($issue_line_id < 1) {
+                    continue;
+                }
+                $already = false;
+                foreach ($diamond_receive as $ex) {
+                    if ((int) ($ex['source_issue_id'] ?? 0) === $issue_line_id) {
+                        $already = true;
+                        break;
+                    }
+                }
+                if ($already) {
+                    continue;
+                }
+                $diamond_receive[] = [
+                    'source_issue_id' => $issue_line_id,
+                    'weight' => $bal_wt,
+                    'qty' => (float) ($row['balance_qty'] ?? 0),
+                    'barcode' => trim((string) ($row['barcode'] ?? '')),
+                    'product_name' => trim((string) ($row['product_name'] ?? '')),
+                    'diamond_category' => trim((string) ($row['diamond_category'] ?? 'Diamonds')),
+                ];
+            }
+
+            $mi_stones = auragold_material_issue_list_stone_rows_for_sale_order($conn, $soid);
+            foreach ($mi_stones as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $bal_wt = (float) ($row['balance_weight'] ?? 0);
+                if ($bal_wt <= 0.0000001) {
+                    continue;
+                }
+                $issue_line_id = (int) ($row['issue_line_id'] ?? $row['id'] ?? 0);
+                if ($issue_line_id < 1) {
+                    continue;
+                }
+                $already = false;
+                foreach ($stone_receive as $ex) {
+                    if ((int) ($ex['source_issue_id'] ?? 0) === $issue_line_id) {
+                        $already = true;
+                        break;
+                    }
+                }
+                if ($already) {
+                    continue;
+                }
+                $stone_receive[] = [
+                    'source_issue_id' => $issue_line_id,
+                    'weight' => $bal_wt,
+                    'qty' => (float) ($row['balance_qty'] ?? 0),
+                    'barcode' => trim((string) ($row['barcode'] ?? '')),
+                    'product_name' => trim((string) ($row['product_name'] ?? '')),
+                    'stone_category' => trim((string) ($row['stone_category'] ?? 'Stones')),
+                ];
+            }
+        }
+
+        if ($diamond_receive !== []) {
+            auragold_voucher_apply_diamond_receive_allocations(
+                $conn,
+                $jwi_id,
+                $diamond_receive,
+                $invoice_no,
+                $doc_date,
+                $tx_ok,
+                $tx_err,
+                'jobwork_invoice'
+            );
+            if (!$tx_ok) {
+                throw new RuntimeException($tx_err !== '' ? $tx_err : 'Diamond stock receive failed on jobwork invoice.');
+            }
+        }
+
+        if ($stone_receive !== []) {
+            auragold_voucher_apply_stone_receive_allocations(
+                $conn,
+                $jwi_id,
+                $stone_receive,
+                $invoice_no,
+                $doc_date,
+                $tx_ok,
+                $tx_err,
+                'jobwork_invoice'
+            );
+            if (!$tx_ok) {
+                throw new RuntimeException($tx_err !== '' ? $tx_err : 'Stone stock receive failed on jobwork invoice.');
+            }
+        }
+
+        if ($soid > 0) {
+            auragold_jobwork_invoice_restore_sale_order_gem_issues($conn, $soid, $tx_ok, $tx_err);
+            if (!$tx_ok) {
+                throw new RuntimeException($tx_err !== '' ? $tx_err : 'Could not restore sale order gem stock on jobwork invoice.');
+            }
+        }
+    }
+
+    /**
+     * Reverse sale-order diamond/stone allocations (return weight to inward stock).
+     */
+    function auragold_jobwork_invoice_restore_sale_order_gem_issues(
+        mysqli $conn,
+        int $sale_order_id,
+        bool &$tx_ok,
+        string &$tx_err
+    ): void {
+        $soid = (int) $sale_order_id;
+        if (!$tx_ok || $soid <= 0) {
+            return;
+        }
+        require_once __DIR__ . '/auragold_sale_order_diamond_stock.php';
+        require_once __DIR__ . '/auragold_sale_order_stone_stock.php';
+        require_once __DIR__ . '/auragold_voucher_diamond_stock.php';
+        require_once __DIR__ . '/auragold_voucher_stone_stock.php';
+
+        auragold_sale_order_ensure_diamond_issue_table($conn);
+        if (function_exists('auragold_sale_order_ensure_stone_issue_table')) {
+            auragold_sale_order_ensure_stone_issue_table($conn);
+        }
+
+        $d_rows = getList('SELECT id FROM tbl_sale_order_diamond_stock_issue WHERE order_id = ' . $soid . ' ORDER BY id ASC');
+        if (is_array($d_rows)) {
+            foreach ($d_rows as $rec) {
+                $issue_id = (int) ($rec['id'] ?? 0);
+                if ($issue_id < 1) {
+                    continue;
+                }
+                auragold_voucher_remove_diamond_issue($conn, 'sale_order', $soid, $issue_id, $tx_ok, $tx_err);
+                if (!$tx_ok) {
+                    return;
+                }
+            }
+        }
+
+        $t_stone = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_sale_order_stone_stock_issue'");
+        if ($t_stone && mysqli_num_rows($t_stone) > 0) {
+            mysqli_free_result($t_stone);
+            $s_rows = getList(
+                'SELECT id, stock_id, barcode, weight, qty FROM tbl_sale_order_stone_stock_issue WHERE order_id = '
+                . $soid . ' ORDER BY id ASC'
+            );
+            if (is_array($s_rows)) {
+                auragold_voucher_ensure_stone_issue_table($conn);
+                foreach ($s_rows as $rec) {
+                    $issue_id = (int) ($rec['id'] ?? 0);
+                    $sid = (int) ($rec['stock_id'] ?? 0);
+                    $wt = (float) ($rec['weight'] ?? 0);
+                    $qt = (float) ($rec['qty'] ?? 0);
+                    $bc = trim((string) ($rec['barcode'] ?? ''));
+                    if ($issue_id < 1) {
+                        continue;
+                    }
+                    if ($sid > 0 && $wt > 0.0000001) {
+                        auragold_voucher_restore_inward_diamond_stock_after_removal($conn, $sid, $wt, $qt, $bc, $tx_ok, $tx_err);
+                        if (!$tx_ok) {
+                            return;
+                        }
+                    }
+                    if (!@mysqli_query($conn, 'DELETE FROM tbl_sale_order_stone_stock_issue WHERE id = ' . $issue_id . ' LIMIT 1')) {
+                        $tx_ok = false;
+                        $tx_err = 'Could not clear sale order stone allocation: ' . mysqli_error($conn);
+
+                        return;
+                    }
+                    @mysqli_query(
+                        $conn,
+                        "DELETE FROM tbl_voucher_stone_stock_issue WHERE voucher_kind = 'sale_order' AND voucher_id = "
+                        . $soid . ' AND id = ' . $issue_id . ' LIMIT 1'
+                    );
+                    @mysqli_query(
+                        $conn,
+                        "DELETE FROM tbl_voucher_stone_stock_issue WHERE voucher_kind = 'sale_order' AND voucher_id = "
+                        . $soid . ' AND stock_id = ' . $sid . ' LIMIT 1'
+                    );
+                }
+            }
+        } elseif ($t_stone) {
+            mysqli_free_result($t_stone);
         }
     }
 }

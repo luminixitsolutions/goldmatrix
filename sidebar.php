@@ -70,6 +70,7 @@ $auragold_inventory_pages = [
     'platinum-stock.php',
     'diamond-stone-analysis.php',
     'diamond-stock.php',
+    'diamond-and-stones.php',
     'jewelry-catalogue.php',
     'imitation-analysis.php',
     'stock-history.php',
@@ -84,6 +85,8 @@ $auragold_orders_pages = [
     'purchase-order.php',
     'jobwork-order.php',
     'jobwork-order-print.php',
+    'manufacturing-outsource.php',
+    'job-work-order-manufacturing.php',
 ];
 $auragold_manufacturer_pages = [
     'department.php',
@@ -92,7 +95,6 @@ $auragold_manufacturer_pages = [
     'closing-report.php',
     'loss-tracking.php',
     'jobwork-queue.php',
-    'job-work-order-manufacturing.php',
     'job-card-print.php',
 ];
 $auragold_financial_statement_pages = [
@@ -557,7 +559,8 @@ if ($auragold_dropdown_branch_title === '') {
                                                     <?php if (auragold_nav_show_php_href('platinum-analysis.php')): ?><li><a class="dropdown-item" href="platinum-analysis.php"><i class="feather icon-trending-up"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.platinum_analysis'), ENT_QUOTES, 'UTF-8') : 'Platinum Analysis'; ?></a></li><?php endif; ?>
                                                     <?php if (auragold_nav_show_php_href('platinum-stock.php')): ?><li><a class="dropdown-item" href="platinum-stock.php"><i class="feather icon-disc"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.platinum_stock'), ENT_QUOTES, 'UTF-8') : 'Platinum Stock'; ?></a></li><?php endif; ?>
                                                     <?php if (auragold_nav_show_php_href('diamond-stone-analysis.php')): ?><li><a class="dropdown-item" href="diamond-stone-analysis.php"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.diamond_stone_analysis'), ENT_QUOTES, 'UTF-8') : 'Diamond & Stone Analysis'; ?></a></li><?php endif; ?>
-                                                    <?php if (auragold_nav_show_php_href('diamond-stock.php')): ?><li><a class="dropdown-item" href="diamond-stock.php"><i class="feather icon-octagon"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.diamond_stock'), ENT_QUOTES, 'UTF-8') : 'Diamond Stock'; ?></a></li><?php endif; ?>
+                                                    <?php if (auragold_nav_show_php_href('diamond-and-stones.php')): ?><li><a class="dropdown-item" href="diamond-and-stones.php"><i class="feather icon-octagon"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.diamond_stone'), ENT_QUOTES, 'UTF-8') : 'Diamond & Stone Stock'; ?></a></li><?php endif; ?>
+                                                    <?php if (auragold_nav_show_php_href('diamond-stock.php')): ?><li><a class="dropdown-item" href="diamond-stock.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('inv.diamond_stock'), ENT_QUOTES, 'UTF-8') : 'Diamond Stock'; ?></a></li><?php endif; ?>
                                                 </ul>
                                             </div>
                                             <div class="mega-menu-column">
@@ -587,7 +590,8 @@ if ($auragold_dropdown_branch_title === '') {
                                         <?php if (auragold_nav_show_php_href('repair-order.php')): ?><li><a class="dropdown-item" href="repair-order.php"><i class="feather icon-clipboard"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.repair_order'), ENT_QUOTES, 'UTF-8') : 'Repair Order'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('sale-order-process.php')): ?><li><a class="dropdown-item" href="sale-order-process.php"><i class="feather icon-refresh-cw"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.sale_repair_process'), ENT_QUOTES, 'UTF-8') : 'Sale / Repair Order Process'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('jobwork-order.php')): ?><li><a class="dropdown-item" href="jobwork-order.php"><i class="feather icon-settings"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.jobwork_mfg'), ENT_QUOTES, 'UTF-8') : 'Jobwork Order Manufacturing'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('job-work-order-manufacturing.php')): ?><li><a class="dropdown-item" href="job-work-order-manufacturing.php"><i class="feather icon-globe"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.jobwork_outsource'), ENT_QUOTES, 'UTF-8') : 'Jobwork Order Outsource'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_show_php_href('manufacturing-outsource.php')): ?><li><a class="dropdown-item" href="manufacturing-outsource.php"><i class="feather icon-globe"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.manufacturing_outsource'), ENT_QUOTES, 'UTF-8') : 'Manufacturing Outsource'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_show_php_href('job-work-order-manufacturing.php')): ?><li><a class="dropdown-item" href="job-work-order-manufacturing.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.jobwork_outsource'), ENT_QUOTES, 'UTF-8') : 'Jobwork Order Outsource'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_can_page_keys('orders', 'catalogue_quotation')): ?><li data-mm-page="orders.catalogue_quotation"><a class="dropdown-item" href="#"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.catalogue_quotation'), ENT_QUOTES, 'UTF-8') : 'Catalogue Quotation'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_can_page_keys('orders', 'sales')): ?><li data-mm-page="orders.sales"><a class="dropdown-item" href="#"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('ord.sales'), ENT_QUOTES, 'UTF-8') : 'Sales'; ?></a></li><?php endif; ?>
                                     </ul>

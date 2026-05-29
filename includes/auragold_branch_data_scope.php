@@ -922,6 +922,68 @@ if (!function_exists('auragold_master_can_mutate_row')) {
     }
 }
 
+if (!function_exists('auragold_copy_master_rows_preserve_id_branch')) {
+    /**
+     * Copy master rows from one branch_id to another keeping the same `id` (and metal_id on carat).
+     * Used for tbl_metal / tbl_carat so product and stock FKs stay aligned with the main branch.
+     *
+     * @return int Rows inserted, or -1 on failure
+     */
+    function auragold_copy_master_rows_preserve_id_branch($conn, string $table, int $fromBranchId, int $toBranchId): int {
+        if (!$conn instanceof mysqli) {
+            return -1;
+        }
+        $table = preg_replace('/[^a-zA-Z0-9_]/', '', $table);
+        if ($table === '' || $fromBranchId <= 0 || $toBranchId <= 0 || $fromBranchId === $toBranchId) {
+            return 0;
+        }
+        auragold_ensure_table_branch_id_column($conn, $table);
+        if (!auragold_tbl_has_column($conn, $table, 'branch_id')) {
+            return 0;
+        }
+        $rs = mysqli_query($conn, 'SHOW COLUMNS FROM `' . $table . '`');
+        $fields    = [];
+        $selectSql = [];
+        if (!$rs) {
+            return -1;
+        }
+        while ($row = mysqli_fetch_assoc($rs)) {
+            $f = $row['Field'] ?? '';
+            if ($f === '') {
+                continue;
+            }
+            $fields[] = '`' . str_replace('`', '``', $f) . '`';
+            if (strcasecmp($f, 'branch_id') === 0) {
+                $selectSql[] = (string) (int) $toBranchId;
+            } else {
+                $selectSql[] = '`' . str_replace('`', '``', $f) . '`';
+            }
+        }
+        mysqli_free_result($rs);
+        if ($fields === []) {
+            return 0;
+        }
+        $where = '`branch_id` = ' . (int) $fromBranchId;
+        if (auragold_tbl_has_column($conn, $table, 'status')) {
+            $where .= ' AND `status` = 1';
+        }
+        $sql = 'INSERT INTO `' . $table . '` (' . implode(',', $fields) . ') SELECT ' . implode(',', $selectSql)
+            . ' FROM `' . $table . '` WHERE ' . $where;
+        if (!mysqli_query($conn, $sql)) {
+            return -1;
+        }
+        $n = (int) mysqli_affected_rows($conn);
+        $mxR = @mysqli_query($conn, 'SELECT COALESCE(MAX(`id`), 0) + 1 AS n FROM `' . $table . '`');
+        if ($mxR && ($mx = mysqli_fetch_assoc($mxR))) {
+            @mysqli_query($conn, 'ALTER TABLE `' . $table . '` AUTO_INCREMENT = ' . (int) ($mx['n'] ?? 1));
+            mysqli_free_result($mxR);
+        } elseif ($mxR) {
+            mysqli_free_result($mxR);
+        }
+        return $n;
+    }
+}
+
 if (!function_exists('auragold_copy_master_rows_simple_branch')) {
     /**
      * Copy active master rows from one branch_id to another (new PKs). Used to seed a sub-branch from its main.
@@ -1089,12 +1151,17 @@ if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
         if ($chk && (int) ($chk['c'] ?? 0) > 0) {
             return array_merge($out, ['skipped' => true]);
         }
-        $simple = ['tbl_location', 'tbl_unit', 'tbl_metal', 'tbl_tax_master', 'tbl_carat'];
+        $preserveIdTables = ['tbl_metal' => true, 'tbl_carat' => true];
+        $simple           = ['tbl_location', 'tbl_unit', 'tbl_metal', 'tbl_tax_master', 'tbl_carat'];
         foreach ($simple as $t) {
             if (!auragold_tbl_has_column($conn, $t, 'branch_id')) {
                 continue;
             }
-            $n = auragold_copy_master_rows_simple_branch($conn, $t, $mainBranchId, $subBranchId);
+            if (!empty($preserveIdTables[$t]) && function_exists('auragold_copy_master_rows_preserve_id_branch')) {
+                $n = auragold_copy_master_rows_preserve_id_branch($conn, $t, $mainBranchId, $subBranchId);
+            } else {
+                $n = auragold_copy_master_rows_simple_branch($conn, $t, $mainBranchId, $subBranchId);
+            }
             if ($n >= 0) {
                 $out['tables'][$t] = $n;
             }
@@ -1121,7 +1188,11 @@ if (!function_exists('auragold_seed_subbranch_carat_from_main_if_empty')) {
         if ($chk && (int) ($chk['c'] ?? 0) > 0) {
             return;
         }
-        auragold_copy_master_rows_simple_branch($conn, 'tbl_carat', $mainBranchId, $subBranchId);
+        if (function_exists('auragold_copy_master_rows_preserve_id_branch')) {
+            auragold_copy_master_rows_preserve_id_branch($conn, 'tbl_carat', $mainBranchId, $subBranchId);
+        } else {
+            auragold_copy_master_rows_simple_branch($conn, 'tbl_carat', $mainBranchId, $subBranchId);
+        }
     }
 }
 

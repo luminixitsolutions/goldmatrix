@@ -80,6 +80,10 @@ if (!function_exists('gas_tbl_exists')) {
 }
 
 $tab = 'main';
+/** '' = all pc categories on metal; 'diamond_stone_only' = exclude Jewellery (Add Diamond modal). */
+if (!isset($gas_diamond_stock_pc_scope)) {
+    $gas_diamond_stock_pc_scope = '';
+}
 $branch_filter = 0;
 $eff_branch = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
 if ($eff_branch > 0) {
@@ -152,6 +156,14 @@ $inner_where = [
 $gas_br_pred = gas_tbl_stock_branch_predicate($conn, $branch_filter, 's');
 if ($gas_br_pred !== '') {
     $inner_where[] = $gas_br_pred;
+}
+if ($gas_diamond_stock_pc_scope === 'diamond_stone_only') {
+    if (!function_exists('auragold_sql_pc_diamond_and_stone_stock_filter')) {
+        require_once __DIR__ . '/auragold_product_metal_tab_match.php';
+    }
+    if (function_exists('auragold_sql_pc_diamond_and_stone_stock_filter')) {
+        $inner_where[] = ltrim(auragold_sql_pc_diamond_and_stone_stock_filter(), ' AND ');
+    }
 }
 $inner_sql = implode(' AND ', $inner_where);
 
