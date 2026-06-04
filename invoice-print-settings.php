@@ -523,6 +523,23 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
                                 </div>
 
                                 <div class="ips-cards-row">
+                                <div class="ips-card ips-card-full">
+                                    <div class="ips-card-header">Template 7 (GEM Shop Export) — used when Invoice layout = Template 7</div>
+                                    <div class="ips-card-body scroll-card">
+                                        <p class="ips-hint" style="margin-bottom: 10px;">Export/manufacturer invoice with BILL TO / SHIP TO, HSN table, SGST/CGST totals, and bank footer. Leave bank fields empty to use branch profile bank details.</p>
+                                        <div class="ips-form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                            <div class="ips-field"><label>Company tagline (under logo)</label><input type="text" name="t7_company_tagline" id="ipsT7Tagline" placeholder="e.g. MANUFACTURERS &amp; EXPORTER" value="<?php echo htmlspecialchars($settings['t7_company_tagline'] ?? ''); ?>" maxlength="120"></div>
+                                            <div class="ips-field"><label>Minimum item rows (blank padding)</label><input type="number" name="t7_min_item_rows" id="ipsT7MinRows" min="1" max="40" value="<?php echo htmlspecialchars($settings['t7_min_item_rows'] ?? '15'); ?>"></div>
+                                            <div class="ips-field"><label>Bank name</label><input type="text" name="t7_bank_name" id="ipsT7BankName" placeholder="BANK OF BARODA" value="<?php echo htmlspecialchars($settings['t7_bank_name'] ?? ''); ?>" maxlength="150"></div>
+                                            <div class="ips-field"><label>Account name</label><input type="text" name="t7_bank_account_name" id="ipsT7AcctName" placeholder="Account holder name" value="<?php echo htmlspecialchars($settings['t7_bank_account_name'] ?? ''); ?>" maxlength="150"></div>
+                                            <div class="ips-field"><label>Account number</label><input type="text" name="t7_bank_account_no" id="ipsT7AcctNo" placeholder="01140500000082" value="<?php echo htmlspecialchars($settings['t7_bank_account_no'] ?? ''); ?>" maxlength="64"></div>
+                                            <div class="ips-field"><label>IFSC</label><input type="text" name="t7_bank_ifsc" id="ipsT7Ifsc" placeholder="BARB0POWERH" value="<?php echo htmlspecialchars($settings['t7_bank_ifsc'] ?? ''); ?>" maxlength="20"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                </div>
+
+                                <div class="ips-cards-row">
                                 <div class="ips-card">
                                     <div class="ips-card-header">Languages</div>
                                     <div class="ips-card-body">
@@ -677,6 +694,12 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
             if (k && inp.value.trim() !== '') t6cols[k] = inp.value.trim();
         });
         fd.append('t6_column_labels', JSON.stringify(t6cols));
+        fd.append('t7_company_tagline', document.getElementById('ipsT7Tagline') ? document.getElementById('ipsT7Tagline').value : '');
+        fd.append('t7_min_item_rows', document.getElementById('ipsT7MinRows') ? document.getElementById('ipsT7MinRows').value : '15');
+        fd.append('t7_bank_name', document.getElementById('ipsT7BankName') ? document.getElementById('ipsT7BankName').value : '');
+        fd.append('t7_bank_account_name', document.getElementById('ipsT7AcctName') ? document.getElementById('ipsT7AcctName').value : '');
+        fd.append('t7_bank_account_no', document.getElementById('ipsT7AcctNo') ? document.getElementById('ipsT7AcctNo').value : '');
+        fd.append('t7_bank_ifsc', document.getElementById('ipsT7Ifsc') ? document.getElementById('ipsT7Ifsc').value : '');
         fd.append('custom_print_css', document.getElementById('ipsCustomPrintCss') ? document.getElementById('ipsCustomPrintCss').value : '');
         var logoFile = document.getElementById('ipsLogoFile');
         if (logoFile && logoFile.files && logoFile.files[0]) fd.append('company_logo', logoFile.files[0]);

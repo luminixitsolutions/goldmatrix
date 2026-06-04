@@ -159,6 +159,41 @@
             || document.querySelector('#productSelectionModal .category-tab-btn.active');
         return (activeTabBtn && activeTabBtn.getAttribute('data-metal-name')) || (typeof currentMetalName !== 'undefined' ? currentMetalName : '');
     }
+    window.getActiveProductModalMetalName = getActiveProductModalMetalName;
+
+    function isGoldOrSilverMetalTab() {
+        var n = (getActiveProductModalMetalName() || '').toLowerCase().trim();
+        return n === 'gold' || n === 'silver';
+    }
+    window.isGoldOrSilverMetalTab = isGoldOrSilverMetalTab;
+
+    function syncModalGroupSingleItemCheckboxForActiveTab() {
+        var wrap = document.getElementById('modalGroupSingleItemWrap');
+        if (!wrap) return;
+        wrap.style.display = isGoldOrSilverMetalTab() ? '' : 'none';
+    }
+    window.syncModalGroupSingleItemCheckboxForActiveTab = syncModalGroupSingleItemCheckboxForActiveTab;
+
+    function shouldGroupModalItemsAsSingleRow() {
+        if (!isGoldOrSilverMetalTab()) return true;
+        var el = document.getElementById('modalGroupSingleItem');
+        return el ? el.checked : true;
+    }
+    window.shouldGroupModalItemsAsSingleRow = shouldGroupModalItemsAsSingleRow;
+
+    /** Gold/Silver: merge or add separate rows based on "Group Single Item" checkbox; other tabs always merge. */
+    function auragoldAddModalRowsToProductTable(modalRowsData, metalId, loadOpts) {
+        if (!modalRowsData || modalRowsData.length === 0) return;
+        var groupAsSingle = shouldGroupModalItemsAsSingleRow();
+        if (groupAsSingle && typeof addMergedProductsToTable === 'function') {
+            addMergedProductsToTable(modalRowsData, metalId, loadOpts);
+        } else if (typeof addProductToTableFromModalRow === 'function') {
+            modalRowsData.forEach(function(rowData) {
+                addProductToTableFromModalRow(rowData, metalId, loadOpts);
+            });
+        }
+    }
+    window.auragoldAddModalRowsToProductTable = auragoldAddModalRowsToProductTable;
 
     function isLooseDiamondTabActive() {
         var name = getActiveProductModalMetalName();
@@ -3816,6 +3851,7 @@
                 if (!btn || !modal.contains(btn)) return;
                 setTimeout(function() {
                     syncModalDiamondCategoryFilterForActiveTab();
+                    syncModalGroupSingleItemCheckboxForActiveTab();
                     var tbody = document.getElementById('productListBody');
                     if (!tbody || typeof populateCategorySelectForModal !== 'function') return;
                     var diamondTab = typeof isDiamondTabActive === 'function' && isDiamondTabActive();
@@ -3833,6 +3869,10 @@
                 }, 0);
             });
             syncModalDiamondCategoryFilterForActiveTab();
+            syncModalGroupSingleItemCheckboxForActiveTab();
+            modal.addEventListener('shown.bs.modal', function() {
+                syncModalGroupSingleItemCheckboxForActiveTab();
+            });
         });
     }
 

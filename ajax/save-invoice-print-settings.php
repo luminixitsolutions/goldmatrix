@@ -280,6 +280,38 @@ saveInvoicePrintSetting('t6_label_last_balance', $t6_label_last_balance, $settin
 saveInvoicePrintSetting('t6_label_current_balance', $t6_label_current_balance, $setting_type);
 saveInvoicePrintSetting('t6_balance_suffix', $t6_balance_suffix, $setting_type);
 saveInvoicePrintSetting('t6_column_labels', $t6_column_labels, $setting_type);
+
+$t7_label_trim = static function ($v, $max = 160) {
+    $t = trim((string) $v);
+    if (strlen($t) > $max) {
+        $t = substr($t, 0, $max);
+    }
+    return $t;
+};
+$t7_company_tagline = $t7_label_trim($input['t7_company_tagline'] ?? '', 120);
+$t7_bank_name = $t7_label_trim($input['t7_bank_name'] ?? '', 150);
+$t7_bank_account_name = $t7_label_trim($input['t7_bank_account_name'] ?? '', 150);
+$t7_bank_account_no = $t7_label_trim($input['t7_bank_account_no'] ?? '', 64);
+$t7_bank_ifsc = $t7_label_trim($input['t7_bank_ifsc'] ?? '', 20);
+$t7_min_item_rows = isset($input['t7_min_item_rows']) ? trim((string) $input['t7_min_item_rows']) : '15';
+if (!is_numeric($t7_min_item_rows)) {
+    $t7_min_item_rows = '15';
+} else {
+    $mr7 = (int) $t7_min_item_rows;
+    if ($mr7 < 1) {
+        $mr7 = 1;
+    }
+    if ($mr7 > 40) {
+        $mr7 = 40;
+    }
+    $t7_min_item_rows = (string) $mr7;
+}
+saveInvoicePrintSetting('t7_company_tagline', $t7_company_tagline, $setting_type);
+saveInvoicePrintSetting('t7_min_item_rows', $t7_min_item_rows, $setting_type);
+saveInvoicePrintSetting('t7_bank_name', $t7_bank_name, $setting_type);
+saveInvoicePrintSetting('t7_bank_account_name', $t7_bank_account_name, $setting_type);
+saveInvoicePrintSetting('t7_bank_account_no', $t7_bank_account_no, $setting_type);
+saveInvoicePrintSetting('t7_bank_ifsc', $t7_bank_ifsc, $setting_type);
 saveInvoicePrintSetting('custom_print_css', $custom_print_css, $setting_type);
 
 echo json_encode(['success' => true, 'message' => 'Settings saved successfully.', 'company_logo_path' => $company_logo_path, 'advertise_banner_path' => $advertise_banner_path]);

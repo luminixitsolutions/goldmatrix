@@ -3269,6 +3269,7 @@ text-transform: uppercase;
     </div>
 </div>
 
+<?php $common_modal_show_group_single_item_checkbox = true; ?>
 <?php include 'includes/common-modal.php'; ?>
 <?php auragold_echo_party_select2_styles(); ?>
 <?php include 'footer-script.php';?>
@@ -8588,7 +8589,11 @@ window.PB_PAGE_CONFIG = {
                     rows.forEach(function(r) {
                         modalRowsData.push(getModalRowDataFromRow(r, false));
                     });
-                    if (modalRowsData.length > 0) addMergedProductsToTable(modalRowsData, metalId);
+                    if (typeof auragoldAddModalRowsToProductTable === 'function') {
+                        auragoldAddModalRowsToProductTable(modalRowsData, metalId);
+                    } else if (modalRowsData.length > 0 && typeof addMergedProductsToTable === 'function') {
+                        addMergedProductsToTable(modalRowsData, metalId);
+                    }
                 });
             } finally {
                 // Always clear modal product list after add so user can add more products (modal stays open)
@@ -8842,6 +8847,7 @@ window.PB_PAGE_CONFIG = {
             'modalProductQty': '1',
             'modalMetalUnfix': false,
             'modalUnfix': false,
+            'modalGroupSingleItem': true,
             'modalGroupName': '',
             'modalComment': ''
         };

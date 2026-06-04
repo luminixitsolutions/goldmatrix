@@ -19,6 +19,7 @@ if (empty($GLOBALS['auragold_common_modal_spec_masters_loaded'])) {
  *   $common_modal_show_excel_import — show Import dropdown (Import + Sample) beside Add Product (only honored on sale-order.php and purchase-invoice.php)
  *   $common_modal_excel_sample_href — download URL for Sample menu item
  *   $common_modal_excel_import_file_id, $common_modal_excel_import_trigger_class — optional element ids/classes
+ *   $common_modal_show_group_single_item_checkbox — show "Group Single Item" beside UnFix (sale invoice Gold/Silver)
  */
 if (!isset($common_modal_show_images_column)) {
     $common_modal_show_images_column = false;
@@ -86,6 +87,9 @@ if (!isset($common_modal_excel_import_file_id)) {
 }
 if (!isset($common_modal_excel_import_trigger_class)) {
     $common_modal_excel_import_trigger_class = 'js-product-modal-excel-import-trigger';
+}
+if (!isset($common_modal_show_group_single_item_checkbox)) {
+    $common_modal_show_group_single_item_checkbox = false;
 }
 $common_modal_empty_row_colspan = !empty($common_modal_show_images_column) ? 104 : 103;
 if (empty($common_modal_show_checkbox_column)) {
@@ -184,10 +188,10 @@ if (empty($common_modal_show_checkbox_column)) {
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <div class="<?php echo !empty($common_modal_show_group_single_item_checkbox) ? 'col-md-3' : 'col-md-2'; ?>">
                         <div class="form-group mb-2">
                             <label>&nbsp;</label>
-                            <div class="d-flex" style="gap: 0.5rem; align-items: center;">
+                            <div class="d-flex flex-wrap" style="gap: 0.5rem; align-items: center;">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="modalMetalUnfix">
                                     <label class="form-check-label" for="modalMetalUnfix" style="font-size: 0.75rem;">Metal Unfix</label>
@@ -196,6 +200,12 @@ if (empty($common_modal_show_checkbox_column)) {
                                     <input class="form-check-input" type="checkbox" id="modalUnfix">
                                     <label class="form-check-label" for="modalUnfix" style="font-size: 0.75rem;">UnFix</label>
                                 </div>
+                                <?php if (!empty($common_modal_show_group_single_item_checkbox)): ?>
+                                <div class="form-check" id="modalGroupSingleItemWrap" style="display: none;">
+                                    <input class="form-check-input" type="checkbox" id="modalGroupSingleItem" checked>
+                                    <label class="form-check-label" for="modalGroupSingleItem" style="font-size: 0.75rem;">Group Single Item</label>
+                                </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>

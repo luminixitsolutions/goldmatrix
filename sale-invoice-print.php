@@ -499,6 +499,9 @@ if (!empty($GLOBALS['AURAGOLD_SALE_INVOICE_MAIL_CAPTURE'])) {
     if (($template ?? '') === 'template_6' && ($design_template ?? '') !== 'template_6') {
         echo '<style>' . getInvoicePrintTemplateCss('template_6') . '</style>';
     }
+    if (($template ?? '') === 'template_7' && ($design_template ?? '') !== 'template_7') {
+        echo '<style>' . getInvoicePrintTemplateCss('template_7') . '</style>';
+    }
     ?>
   <?php endif; ?>
   <?php if (function_exists('invoicePrintEmitCustomCss')) {

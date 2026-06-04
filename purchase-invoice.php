@@ -3211,6 +3211,7 @@ text-transform: uppercase;
 <?php
 $common_modal_show_excel_import = true;
 $common_modal_excel_sample_href = 'ajax/download-stock-journal-excel-sample.php?voucher=sale_order';
+$common_modal_show_group_single_item_checkbox = true;
 include 'includes/common-modal.php';
 ?>
 <?php auragold_echo_party_select2_styles(); ?>
@@ -8660,7 +8661,11 @@ window.PB_PAGE_CONFIG = {
                     });
                     if (modalRowsData.length === 0) return;
                     var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
-                    addMergedProductsToTable(modalRowsData, metalId);
+                    if (typeof auragoldAddModalRowsToProductTable === 'function') {
+                        auragoldAddModalRowsToProductTable(modalRowsData, metalId);
+                    } else if (typeof addMergedProductsToTable === 'function') {
+                        addMergedProductsToTable(modalRowsData, metalId);
+                    }
                     mainRowsAdded++;
                     if (forceNewBarcodes) {
                         var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
@@ -8971,6 +8976,7 @@ window.PB_PAGE_CONFIG = {
             'modalProductQty': '1',
             'modalMetalUnfix': false,
             'modalUnfix': false,
+            'modalGroupSingleItem': true,
             'modalGroupName': '',
             'modalComment': ''
         };

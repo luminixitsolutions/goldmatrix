@@ -3877,6 +3877,12 @@ function getInvoicePrintSettingsDefaults() {
         't6_label_current_balance' => 'Current Amount Balance',
         't6_balance_suffix' => ' Dr',
         't6_column_labels' => [],
+        't7_company_tagline' => '',
+        't7_min_item_rows' => '15',
+        't7_bank_name' => '',
+        't7_bank_account_name' => '',
+        't7_bank_account_no' => '',
+        't7_bank_ifsc' => '',
         'custom_print_css' => '',
     ];
 }
@@ -4147,6 +4153,7 @@ function getInvoicePrintStructureTemplates() {
         'template_thermal'    => 'Template 4 – Thermal Minimal Layout',
         'template_premium'    => 'Template 5 – Premium Retail Layout',
         'template_6'          => 'Template 6 – Formal B&W Retail Layout',
+        'template_7'          => 'Template 7 – Export / Manufacturer (GEM Shop)',
     ];
 }
 
@@ -4175,6 +4182,7 @@ function getInvoicePrintDesignTemplates() {
         [ 'id' => 'template_4', 'name' => 'Minimal Light', 'desc' => 'Soft grey, clean lines', 'header_bg' => 'linear-gradient(135deg, #4a5568 0%, #718096 100%)', 'accent' => '#cbd5e0', 'badge_bg' => 'linear-gradient(135deg, #cbd5e0 0%, #94a3b8 100%)', 'table_bg' => 'linear-gradient(135deg, #64748b 0%, #475569 100%)' ],
         [ 'id' => 'template_5', 'name' => 'Gold Luxury', 'desc' => 'Amber & gold premium', 'header_bg' => 'linear-gradient(135deg, #78350f 0%, #b45309 100%)', 'accent' => '#fcd34d', 'badge_bg' => 'linear-gradient(135deg, #fcd34d 0%, #d4af37 100%)', 'table_bg' => 'linear-gradient(135deg, #b45309 0%, #92400e 100%)' ],
         [ 'id' => 'template_6', 'name' => 'Jewellery B&W Formal', 'desc' => 'Black border, plain grid table, Naveen-style retail invoice', 'header_bg' => 'linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%)', 'accent' => '#000000', 'badge_bg' => '#ffffff', 'table_bg' => 'linear-gradient(180deg, #f5f5f5 0%, #e0e0e0 100%)' ],
+        [ 'id' => 'template_7', 'name' => 'GEM Shop Export', 'desc' => 'Light blue headers, orange title, BILL TO / SHIP TO export invoice', 'header_bg' => 'linear-gradient(180deg, #D9E1F2 0%, #b8c9e8 100%)', 'accent' => '#F79646', 'badge_bg' => '#F79646', 'table_bg' => 'linear-gradient(180deg, #D9E1F2 0%, #c5d4ef 100%)' ],
     ];
 }
 
@@ -4275,6 +4283,18 @@ function getInvoicePrintTemplateCss($template_id) {
                 . '.invoice.inv-naveen .small { font-size: 12px; } '
                 . '.invoice.inv-naveen .terms { font-size: 12px; line-height: 18px; color: #000 !important; display: block !important; visibility: visible !important; margin-top: 10px; margin-bottom: 10px; } '
                 . '@media print { .invoice.inv-naveen .bill-container { box-shadow: none !important; } } ',
+        ],
+        'template_7' => [
+            'header' => '#D9E1F2',
+            'badge' => '#F79646',
+            'badge_color' => '#000000',
+            'th' => '#D9E1F2',
+            'highlight' => '#D9E1F2',
+            'signature' => '#000000',
+            'gold_rates' => '#ffffff',
+            'customer_border' => '#000000',
+            'extra' => '.invoice.inv-gemshop { font-family: Arial, sans-serif !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; padding: 0 !important; } '
+                . '.invoice.inv-gemshop th, .invoice.inv-gemshop .gs-box-header, .invoice.inv-gemshop .gs-meta-table .gs-meta-full { color: #000 !important; } ',
         ],
     ];
     $t = $templates[$template_id] ?? $templates['template_1'];

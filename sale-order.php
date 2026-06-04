@@ -3461,6 +3461,7 @@ text-transform: uppercase;
 <?php
 $common_modal_show_excel_import = true;
 $common_modal_excel_sample_href = 'ajax/download-stock-journal-excel-sample.php?voucher=sale_order';
+$common_modal_show_group_single_item_checkbox = true;
 include 'includes/common-modal.php';
 include 'includes/sale-order-diamond-stock-modal.php';
 include 'includes/sale-order-stone-stock-modal.php';
@@ -9402,7 +9403,11 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                     });
                     if (modalRowsData.length === 0) return;
                     var nBefore = document.querySelectorAll('#productTableBody tr:not(.no-drag)').length;
-                    addMergedProductsToTable(modalRowsData, metalId);
+                    if (typeof auragoldAddModalRowsToProductTable === 'function') {
+                        auragoldAddModalRowsToProductTable(modalRowsData, metalId);
+                    } else if (typeof addMergedProductsToTable === 'function') {
+                        addMergedProductsToTable(modalRowsData, metalId);
+                    }
                     mainRowsAdded++;
                     if (forceNewBarcodes) {
                         var afterRows = document.querySelectorAll('#productTableBody tr:not(.no-drag)');
@@ -9687,6 +9692,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             'modalProductQty': '1',
             'modalMetalUnfix': false,
             'modalUnfix': false,
+            'modalGroupSingleItem': true,
             'modalGroupName': '',
             'modalComment': ''
         };
