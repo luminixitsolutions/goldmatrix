@@ -580,6 +580,68 @@ if (!function_exists('auragold_sj_excel_collect_drawings_by_row')) {
     }
 }
 
+if (!function_exists('auragold_sj_excel_sql_pc_metal_from_display_name')) {
+    /**
+     * SQL filter for pc.metal_id from an Excel/display label (exact or prefix — handles truncated cells like "SILV").
+     */
+    function auragold_sj_excel_sql_pc_metal_from_display_name(string $metalPart): string
+    {
+        $metalPart = trim($metalPart);
+        if ($metalPart === '') {
+            return '';
+        }
+        $metalPartEsc = esc($metalPart);
+
+        return " AND pc.metal_id IN (
+            SELECT id FROM tbl_metal
+            WHERE status = 1 AND (
+                LOWER(TRIM(display_name)) = LOWER(TRIM('$metalPartEsc'))
+                OR LOWER(TRIM(display_name)) LIKE CONCAT(LOWER(TRIM('$metalPartEsc')), '%')
+            )
+        )";
+    }
+}
+
+if (!function_exists('auragold_sj_excel_lookup_pc_by_product_name')) {
+    /**
+     * @return array{product_id:int,characteristic_id:int}|null
+     */
+    function auragold_sj_excel_lookup_pc_by_product_name(string $namePart, string $metalSql): ?array
+    {
+        $namePart = trim($namePart);
+        if ($namePart === '') {
+            return null;
+        }
+        $nameEsc = esc($namePart);
+        $baseSql = "SELECT pc.product_id, pc.id AS characteristic_id
+             FROM tbl_product_characteristics pc
+             INNER JOIN tbl_products p ON p.id = pc.product_id
+             WHERE p.status = 1 AND pc.status = 1";
+        $pcByName = getRecord(
+            $baseSql . " AND TRIM(p.name) = TRIM('$nameEsc')" . $metalSql . '
+             ORDER BY pc.id ASC LIMIT 1'
+        );
+        if ($pcByName) {
+            return [
+                'product_id' => (int) ($pcByName['product_id'] ?? 0),
+                'characteristic_id' => (int) ($pcByName['characteristic_id'] ?? 0),
+            ];
+        }
+        $pcByPrefix = getRecord(
+            $baseSql . " AND TRIM(p.name) LIKE CONCAT(TRIM('$nameEsc'), '%')" . $metalSql . '
+             ORDER BY CHAR_LENGTH(p.name) ASC, pc.id ASC LIMIT 1'
+        );
+        if ($pcByPrefix) {
+            return [
+                'product_id' => (int) ($pcByPrefix['product_id'] ?? 0),
+                'characteristic_id' => (int) ($pcByPrefix['characteristic_id'] ?? 0),
+            ];
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('auragold_sj_excel_resolve_sale_order_product_ids')) {
     /**
      * Resolve product_id + characteristic_id for voucher Excel rows (sale order / invoice import).
@@ -617,21 +679,33 @@ if (!function_exists('auragold_sj_excel_resolve_sale_order_product_ids')) {
                 }
                 if ($namePart !== '') {
                     require_once __DIR__ . '/auragold_product_metal_tab_match.php';
-                    $metalSql = $metal_id > 0 ? auragold_sql_pc_metal_matches_tab_metal($metal_id) : '';
-                    if ($metalPart !== '' && $metalSql === '') {
-                        $metalPartEsc = esc($metalPart);
-                        $metalSql = " AND pc.metal_id IN (SELECT id FROM tbl_metal WHERE status = 1 AND LOWER(TRIM(display_name)) = LOWER(TRIM('$metalPartEsc')))";
+                    // Prefer metal written in the Product cell (e.g. "RING - SILVER") over the active modal tab.
+                    $metalSql = '';
+                    if ($metalPart !== '') {
+                        $metalSql = auragold_sj_excel_sql_pc_metal_from_display_name($metalPart);
+                    } elseif ($metal_id > 0) {
+                        $metalSql = auragold_sql_pc_metal_matches_tab_metal($metal_id);
                     }
-                    $nameEsc = esc($namePart);
-                    $pcByName = getRecord(
-                        "SELECT pc.product_id, pc.id AS characteristic_id
-                         FROM tbl_product_characteristics pc
-                         INNER JOIN tbl_products p ON p.id = pc.product_id
-                         WHERE p.status = 1 AND pc.status = 1 AND TRIM(p.name) = TRIM('$nameEsc')" . $metalSql . '
-                         ORDER BY pc.id ASC LIMIT 1'
-                    );
-                    if ($pcByName) {
-                        return [(int) ($pcByName['product_id'] ?? 0), (int) ($pcByName['characteristic_id'] ?? 0)];
+                    $pcMatch = auragold_sj_excel_lookup_pc_by_product_name($namePart, $metalSql);
+                    if ($pcMatch && $pcMatch['product_id'] > 0 && $pcMatch['characteristic_id'] > 0) {
+                        return [$pcMatch['product_id'], $pcMatch['characteristic_id']];
+                    }
+                    // Tab filter may block rows (e.g. Gold tab + Silver products) — retry using label metal only.
+                    if ($metalPart !== '' && $metal_id > 0) {
+                        $metalSqlLabelOnly = auragold_sj_excel_sql_pc_metal_from_display_name($metalPart);
+                        if ($metalSqlLabelOnly !== $metalSql) {
+                            $pcMatch = auragold_sj_excel_lookup_pc_by_product_name($namePart, $metalSqlLabelOnly);
+                            if ($pcMatch && $pcMatch['product_id'] > 0 && $pcMatch['characteristic_id'] > 0) {
+                                return [$pcMatch['product_id'], $pcMatch['characteristic_id']];
+                            }
+                        }
+                    }
+                    // Last resort: match by product name without metal filter.
+                    if ($metalSql !== '') {
+                        $pcMatch = auragold_sj_excel_lookup_pc_by_product_name($namePart, '');
+                        if ($pcMatch && $pcMatch['product_id'] > 0 && $pcMatch['characteristic_id'] > 0) {
+                            return [$pcMatch['product_id'], $pcMatch['characteristic_id']];
+                        }
                     }
                 }
             }

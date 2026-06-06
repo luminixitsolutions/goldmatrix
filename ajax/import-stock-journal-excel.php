@@ -242,6 +242,8 @@ if ($voucher === 'purchase_invoice') {
 $products = [];
 $imageFilesByRow = []; // 0-based index in $products => array of temp paths for CURL
 $drawingTempFiles = [];
+$importSkippedNoQtyWeight = 0;
+$importSkippedNoProduct = 0;
 
 $sjF = static function (array $colMap, string $key, $sheet, int $row): float {
     if (empty($colMap[$key])) {
@@ -277,6 +279,7 @@ for ($r = 2; $r <= $highestRow; $r++) {
         $qty = 0.0;
     }
     if ($qty <= 0 && $gw <= 0) {
+        $importSkippedNoQtyWeight++;
         continue;
     }
     if ($qty <= 0) {
@@ -333,6 +336,7 @@ for ($r = 2; $r <= $highestRow; $r++) {
             $metal_id_sample
         );
         if ($rowPid <= 0 || $rowCid <= 0) {
+            $importSkippedNoProduct++;
             continue;
         }
         if ($pname === '' && $rowPid > 0) {
@@ -535,9 +539,19 @@ for ($r = 2; $r <= $highestRow; $r++) {
 }
 
 if (empty($products)) {
+    $emptyMsg = 'No rows to import: each data row needs Metal Qty and/or Weight (or Gross Wt.) greater than zero. Images or RFID alone are not enough.';
+    if ($importSkippedNoProduct > 0 && $importSkippedNoQtyWeight === 0) {
+        $emptyMsg = 'No rows to import: could not match Product / Barcode / Product ID + Characteristic ID on any row. '
+            . 'Use the exact Product name from Sample download (e.g. "RING - SILVER"), or fill Product ID and Characteristic ID columns. '
+            . 'If products are for another metal (e.g. Silver rows while Gold tab is open), the metal suffix in the Product column is used automatically.';
+    } elseif ($importSkippedNoProduct > 0 && $importSkippedNoQtyWeight > 0) {
+        $emptyMsg = 'No rows to import. '
+            . $importSkippedNoQtyWeight . ' row(s) had no Metal Qty / Weight / Gross Wt., and '
+            . $importSkippedNoProduct . ' row(s) could not be matched to a product.';
+    }
     echo json_encode([
         'status' => 'error',
-        'message' => 'No rows to import: each data row needs Metal Qty and/or Weight (or Gross Wt.) greater than zero. Images or RFID alone are not enough.',
+        'message' => $emptyMsg,
     ]);
     exit;
 }

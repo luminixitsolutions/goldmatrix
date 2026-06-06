@@ -498,6 +498,27 @@ html, body{
 .left-panel .btn-sm {
     font-size: 0.8rem;
     padding: 6px 12px;
+    white-space: nowrap;
+}
+
+.po-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.po-toolbar .dropdown,
+.po-toolbar > a.btn {
+    flex: 0 0 auto;
+}
+
+.po-toolbar .btn-sm {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .left-panel label {
@@ -803,15 +824,13 @@ html, body{
     .product-wrapper .card-box {
         padding: 12px 14px;
     }
-    .left-panel > .d-flex.justify-content-between {
-        flex-direction: column;
-        align-items: stretch;
+    .left-panel .po-toolbar {
+        flex-direction: row;
+        align-items: center;
     }
-    .left-panel > .d-flex.justify-content-between > .btn,
-    .left-panel > .d-flex.justify-content-between > a.btn {
-        width: 100%;
-        text-align: center;
-        justify-content: center;
+    .left-panel .po-toolbar .btn,
+    .left-panel .po-toolbar > a.btn {
+        width: auto;
     }
     .pagination-wrapper {
         flex-direction: column;
@@ -1723,9 +1742,22 @@ html, body{
 <!-- ================= LEFT PANEL ================= -->
 <div class="card-box left-panel">
 
-<div class="d-flex justify-content-between align-items-center flex-wrap mb-2" style="gap: 8px;">
-    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button">Export</button>
-    <a href="product-opening.php" class="btn btn-primary btn-sm">+ New Product</a>
+<div class="po-toolbar">
+    <div class="dropdown po-excel-export-wrap">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="poExcelExportBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Export</button>
+        <div class="dropdown-menu">
+            <a class="dropdown-item js-po-excel-export-all" href="ajax/export-product-opening-excel.php">Export All Products</a>
+        </div>
+    </div>
+    <div class="dropdown po-excel-import-wrap">
+        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" id="poExcelImportBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Import</button>
+        <div class="dropdown-menu">
+            <a class="dropdown-item js-po-excel-import-trigger" href="#">Import Excel</a>
+            <a class="dropdown-item js-po-excel-sample-download" href="ajax/download-product-opening-excel-sample.php">Download Sample</a>
+        </div>
+    </div>
+    <input type="file" id="poExcelImportFile" accept=".xlsx,.xls" style="display:none;">
+    <a href="product-opening.php" class="btn btn-primary btn-sm">+New</a>
 </div>
 
 <label>Product</label>
@@ -2364,6 +2396,7 @@ endforeach;
 
 <!-- Core scripts -->
 <?php include 'footer-script.php';?>
+<script src="assets/js/product-opening-excel-import.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-opening-excel-import.js'); ?>"></script>
 
 <!-- Sortable.js for column drag and drop -->
 <script src="assets/libs/sortablejs/sortable.js"></script>
