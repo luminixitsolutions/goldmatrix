@@ -135,7 +135,7 @@ if (!function_exists('auragold_branch_delete_sub_branch_core')) {
             return ['ok' => false, 'message' => 'Invalid branch id'];
         }
         $target = getRecordMaster(
-            'SELECT id, name, main_branch_id, db_name FROM tbl_branches WHERE id = ' . $branchId . ' LIMIT 1'
+            'SELECT id, name, main_branch_id, db_name, db_users, db_password FROM tbl_branches WHERE id = ' . $branchId . ' LIMIT 1'
         );
         if (!$target) {
             return ['ok' => false, 'message' => 'Branch not found'];
@@ -177,7 +177,14 @@ if (!function_exists('auragold_branch_delete_sub_branch_core')) {
         if (!function_exists('auragold_drop_branch_database_if_configured')) {
             require_once __DIR__ . '/branch_db_auto_credentials.php';
         }
-        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, $dbNameRaw !== '' ? $dbNameRaw : null);
+        $branchDbUser = trim((string) ($target['db_users'] ?? ''));
+        $branchDbPass = (string) ($target['db_password'] ?? '');
+        $dbDrop = auragold_drop_branch_database_if_configured(
+            $conn_master,
+            $dbNameRaw !== '' ? $dbNameRaw : null,
+            $branchDbUser !== '' ? $branchDbUser : null,
+            $branchDbPass
+        );
         if ($usesDedicatedDb && is_array($dbDrop) && empty($dbDrop['ok'])) {
             return [
                 'ok'      => false,
@@ -222,7 +229,7 @@ if (!function_exists('auragold_branch_delete_main_branch_cascade')) {
             return ['ok' => false, 'message' => 'Invalid main branch id'];
         }
         $mainRow = getRecordMaster(
-            'SELECT id, db_name FROM tbl_branches WHERE id = ' . $mainId . ' AND IFNULL(main_branch_id, 0) = 0 LIMIT 1'
+            'SELECT id, db_name, db_users, db_password FROM tbl_branches WHERE id = ' . $mainId . ' AND IFNULL(main_branch_id, 0) = 0 LIMIT 1'
         );
         if (!$mainRow) {
             return ['ok' => false, 'message' => 'Main branch not found'];
@@ -286,7 +293,14 @@ if (!function_exists('auragold_branch_delete_main_branch_cascade')) {
         if (!function_exists('auragold_drop_branch_database_if_configured')) {
             require_once __DIR__ . '/branch_db_auto_credentials.php';
         }
-        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, $mainDbName);
+        $mainDbUser = trim((string) ($mainRow['db_users'] ?? ''));
+        $mainDbPass = (string) ($mainRow['db_password'] ?? '');
+        $dbDrop = auragold_drop_branch_database_if_configured(
+            $conn_master,
+            $mainDbName,
+            $mainDbUser !== '' ? $mainDbUser : null,
+            $mainDbPass
+        );
         if ($mainUsesDedicatedDb && is_array($dbDrop) && empty($dbDrop['ok'])) {
             return [
                 'ok'      => false,

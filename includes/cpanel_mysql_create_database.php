@@ -697,3 +697,124 @@ if (!function_exists('auragold_cpanel_uapi_mysql_set_privileges_for_app_user')) 
         return auragold_cpanel_uapi_mysql_set_privileges_on_database_for_user($dbName, (string) DB_USER, 'app_DB_USER');
     }
 }
+
+if (!function_exists('auragold_cpanel_uapi_mysql_delete_database')) {
+    /**
+     * cPanel Mysql::delete_database — removes a branch schema (cPanel account scope).
+     *
+     * @return array{ok:bool,message:string,skipped?:bool,method?:string}
+     */
+    function auragold_cpanel_uapi_mysql_delete_database(string $dbName): array {
+        $nameRawRequested = trim($dbName);
+        if ($nameRawRequested === '') {
+            return ['ok' => false, 'message' => 'Empty database name.'];
+        }
+        if (!defined('AURAGOLD_PROJECT') || AURAGOLD_PROJECT !== 'prod') {
+            return ['ok' => true, 'skipped' => true, 'message' => ''];
+        }
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'message' => 'PHP cURL is required for cPanel database deletion on production.'];
+        }
+        $user = isset($GLOBALS['cpanelUser']) ? trim((string) $GLOBALS['cpanelUser']) : '';
+        $tok  = isset($GLOBALS['apiToken']) ? trim((string) $GLOBALS['apiToken']) : '';
+        $dom  = isset($GLOBALS['domain']) ? trim((string) $GLOBALS['domain']) : '';
+        if ($user === '' || $tok === '' || $dom === '') {
+            return [
+                'ok'      => false,
+                'message' => 'Production cPanel API is not configured (set $cpanelUser, $apiToken, $domain in config.php for prod).',
+            ];
+        }
+        if (!function_exists('auragold_cpanel_auragold_db_prefix_string')) {
+            return ['ok' => false, 'message' => 'cPanel prefix helper is not available.'];
+        }
+        $apPrefix  = auragold_cpanel_auragold_db_prefix_string();
+        $forCpanel = auragoldEnsureCpanelPrefix($nameRawRequested, $apPrefix);
+        if ($forCpanel === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $forCpanel)) {
+            return ['ok' => false, 'message' => 'Invalid database name after cPanel prefix normalization.'];
+        }
+        $url  = 'https://' . $dom . ':2083/execute/Mysql/delete_database?name=' . rawurlencode($forCpanel);
+        $exec = auragold_cpanel_uapi_mysql_authorized_curl_get($url, $user, $tok);
+        $raw  = (string) ($exec['response'] ?? '');
+        $code = (int) ($exec['http_code'] ?? 0);
+        $cerr = trim((string) ($exec['curl_error'] ?? ''));
+        error_log('Auragold cPanel [prod] delete_database: name=' . $forCpanel . ' HTTP=' . $code . ' body=' . substr($raw, 0, 1500));
+
+        if ($raw === '' && ($cerr !== '' || $code > 0)) {
+            return [
+                'ok'      => false,
+                'message' => 'cPanel delete_database request failed' . ($cerr !== '' ? ': ' . $cerr : '') . ' (HTTP ' . $code . ').',
+                'method'  => 'cpanel_uapi',
+            ];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [
+                'ok'      => false,
+                'message' => 'cPanel delete_database returned non-JSON (HTTP ' . $code . '): ' . substr($raw, 0, 500),
+                'method'  => 'cpanel_uapi',
+            ];
+        }
+        if (auragold_cpanel_uapi_is_success($decoded)) {
+            return [
+                'ok'      => true,
+                'message' => 'Database `' . $forCpanel . '` deleted via cPanel.',
+                'method'  => 'cpanel_uapi',
+            ];
+        }
+        $detail = auragold_cpanel_uapi_failure_message('cPanel delete_database failed.', $decoded, $raw);
+        if (preg_match('/does not exist|not found|cannot find|unknown database/i', $detail)) {
+            return [
+                'ok'      => true,
+                'message' => 'Database `' . $forCpanel . '` was already removed.',
+                'method'  => 'cpanel_uapi',
+            ];
+        }
+        return ['ok' => false, 'message' => $detail, 'method' => 'cpanel_uapi'];
+    }
+}
+
+if (!function_exists('auragold_cpanel_uapi_mysql_delete_user')) {
+    /**
+     * cPanel Mysql::delete_user — optional cleanup after branch DB drop.
+     *
+     * @return array{ok:bool,message:string,skipped?:bool}
+     */
+    function auragold_cpanel_uapi_mysql_delete_user(string $mysqlUser): array {
+        $uRaw = trim($mysqlUser);
+        if ($uRaw === '') {
+            return ['ok' => true, 'skipped' => true, 'message' => ''];
+        }
+        if (!defined('AURAGOLD_PROJECT') || AURAGOLD_PROJECT !== 'prod') {
+            return ['ok' => true, 'skipped' => true, 'message' => ''];
+        }
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'message' => 'PHP cURL is required for cPanel user deletion on production.'];
+        }
+        $user = isset($GLOBALS['cpanelUser']) ? trim((string) $GLOBALS['cpanelUser']) : '';
+        $tok  = isset($GLOBALS['apiToken']) ? trim((string) $GLOBALS['apiToken']) : '';
+        $dom  = isset($GLOBALS['domain']) ? trim((string) $GLOBALS['domain']) : '';
+        if ($user === '' || $tok === '' || $dom === '') {
+            return ['ok' => true, 'skipped' => true, 'message' => 'cPanel API not configured; skipped MySQL user cleanup.'];
+        }
+        $apPrefix  = auragold_cpanel_auragold_db_prefix_string();
+        $userFull  = auragoldEnsureCpanelPrefix($uRaw, $apPrefix);
+        if ($userFull === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $userFull)) {
+            return ['ok' => false, 'message' => 'Invalid MySQL username for cPanel delete_user.'];
+        }
+        $url  = 'https://' . $dom . ':2083/execute/Mysql/delete_user?name=' . rawurlencode($userFull);
+        $exec = auragold_cpanel_uapi_mysql_authorized_curl_get($url, $user, $tok);
+        $raw  = (string) ($exec['response'] ?? '');
+        error_log('Auragold cPanel [prod] delete_user: name=' . $userFull . ' body=' . substr($raw, 0, 800));
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded) && auragold_cpanel_uapi_is_success($decoded)) {
+            return ['ok' => true, 'message' => 'MySQL user `' . $userFull . '` deleted via cPanel.'];
+        }
+        $detail = is_array($decoded)
+            ? auragold_cpanel_uapi_failure_message('cPanel delete_user failed.', $decoded, $raw)
+            : 'cPanel delete_user returned non-JSON.';
+        if (preg_match('/does not exist|not found|cannot find/i', $detail)) {
+            return ['ok' => true, 'message' => 'MySQL user `' . $userFull . '` was already removed.'];
+        }
+        return ['ok' => false, 'message' => $detail];
+    }
+}
