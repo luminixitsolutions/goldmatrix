@@ -4,6 +4,8 @@ require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
+require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
 if (is_file(__DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php')) {
     require_once __DIR__ . '/../includes/auragold_sale_order_jobwork_lock.php';
 }
@@ -567,6 +569,9 @@ try {
                 if ($oi_location_id) { $item_cols .= ", location_id"; $item_vals .= ", " . ($location_id ? $location_id : "NULL"); }
                 if ($oi_metal_qty) { $item_cols .= ", metal_qty"; $item_vals .= ", $metal_qty"; }
                 if ($oi_metal_weight) { $item_cols .= ", metal_weight"; $item_vals .= ", $metal_weight"; }
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_sale_order_items', $item);
+                $item_cols .= $ef_parts['columns'];
+                $item_vals .= $ef_parts['values'];
                 $item_sql = "INSERT INTO tbl_sale_order_items ($item_cols) VALUES ($item_vals)";
                 
                 if (!mysqli_query($conn, $item_sql)) {
@@ -1013,8 +1018,10 @@ try {
             $total_payment_amount = (float)($payment['amount'] ?? 0);
             $previous_balance_amount = (float)($payment['previous_balance_amount'] ?? 0);
             $current_order_amount = (float)($payment['current_order_amount'] ?? ($total_payment_amount - $previous_balance_amount));
+            $pay_type_raw = strtolower(trim((string) ($payment['payment_type'] ?? '')));
             $deposit_into = esc($payment['deposit_into'] ?? '');
             $payment_type = esc($payment['payment_type'] ?? '');
+            $is_cheque_payment = auragold_payment_is_cheque_type($pay_type_raw);
             
             // Process previous balance payment first (if any)
             if ($previous_balance_amount > 0) {
@@ -1056,7 +1063,7 @@ try {
                         $prev_bal_gold,
                         $prev_bal_silver,
                         'Payment for Previous Balance - Sale Order: $order_no',
-                        '$deposit_into',
+                        '" . ($is_cheque_payment ? mysqli_real_escape_string($conn, auragold_cheque_payment_against_label($previous_balance_amount, 'receivable')) : $deposit_into) . "',
                         'Previous Balance',
                         1,
                         $user_id,
@@ -1111,7 +1118,7 @@ try {
                         $last_balance_gold,
                         $last_balance_silver,
                         'Payment for Sale Order: $order_no',
-                        '$deposit_into',
+                        '" . ($is_cheque_payment ? mysqli_real_escape_string($conn, auragold_cheque_payment_against_label($current_order_amount, 'receivable')) : $deposit_into) . "',
                         '$order_no',
                         1,
                         $user_id,
@@ -1124,7 +1131,7 @@ try {
                 }
                 
                 // 2. Create Cash/Payment Account ledger entry (debit entry for Cash/Bank)
-                if (!empty($deposit_into)) {
+                if (!empty($deposit_into) && auragold_payment_should_post_deposit_ledger($pay_type_raw)) {
                     // Get Cash/Bank account balance
                     $cash_balance_record = getRecord("
                         SELECT balance_amount 
@@ -1327,6 +1334,20 @@ try {
         if (!$s_tx_ok) {
             throw new Exception($s_tx_err !== '' ? $s_tx_err : 'Stone stock allocation failed.');
         }
+    }
+
+    require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
+    if (function_exists('auragold_sync_voucher_cheque_entries')) {
+        auragold_sync_voucher_cheque_entries($conn, [
+            'voucher_no' => $order_no,
+            'voucher_type' => 'Sale Order',
+            'voucher_date' => $order_date,
+            'account_ledger' => $customer_name,
+            'transaction_id' => (int) $order_id,
+            'user_id' => (int) $user_id,
+            'payments' => isset($payments) && is_array($payments) ? $payments : [],
+            'pdc_direction' => 'receivable',
+        ]);
     }
 
     mysqli_commit($conn);

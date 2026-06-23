@@ -33,7 +33,7 @@ function openProductSearchModal(row) {
             right: 0;
             bottom: 0;
             background: rgba(0,0,0,0.5);
-            z-index: 10000;
+            z-index: 10700;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -198,6 +198,9 @@ function selectProductFromSearch(product) {
     function applyFullProduct(full) {
         populateRowWithProduct(row, full);
         closeProductSearchModal();
+        if (typeof window.refreshMobileInlineProductFormIfOpen === 'function') {
+            window.refreshMobileInlineProductFormIfOpen(row);
+        }
         setTimeout(function() {
             const locationSelect = row.querySelector('[data-column="location"] select, .location-select');
             if (locationSelect) locationSelect.focus();
@@ -453,9 +456,17 @@ function populateRowWithProduct(row, product, opts) {
     const fromBarcode = !!opts.fromBarcode;
     // Update product name
     const productInput = row.querySelector('[data-column="product"] input');
+    var pName = String(product.name || product.product_name || product.alternate_name || '').trim();
+    var metalSuffix = product.metal_name ? (' - ' + product.metal_name) : '';
+    const productName = pName ? (pName + metalSuffix) : String(metalSuffix).replace(/^\s*-\s*/, '').trim();
     if (productInput) {
-        const productName = product.name + (product.metal_name ? ' - ' + product.metal_name : '');
         productInput.value = productName;
+        productInput.readOnly = true;
+    }
+    if (productName) {
+        row.setAttribute('data-product-name', productName);
+    } else {
+        row.removeAttribute('data-product-name');
     }
     
     // Update row data attributes

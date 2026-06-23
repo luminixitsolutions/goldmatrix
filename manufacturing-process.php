@@ -1528,6 +1528,111 @@ html, body {
     letter-spacing: 0.02em;
 }
 
+.mp-job-card-select-wrap {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    margin: 0;
+    cursor: pointer;
+}
+.mp-job-card-select-wrap input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--gm-gold);
+}
+.mp-job-card.is-bulk-selected {
+    border-color: var(--gm-gold);
+    box-shadow: 0 0 0 2px rgba(197, 168, 100, 0.35);
+}
+.mp-bulk-select-all-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gm-navy);
+    margin-right: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+.mp-bulk-select-all-wrap input { accent-color: var(--gm-gold); cursor: pointer; }
+#mpBulkTransferBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+.mp-bulk-transfer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 10950;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+.mp-bulk-transfer-overlay.is-open { display: flex; }
+.mp-bulk-transfer-dialog {
+    background: #fff;
+    border-radius: 10px;
+    width: min(520px, 96vw);
+    max-height: 88vh;
+    overflow: auto;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+    padding: 20px;
+}
+.mp-bulk-transfer-dialog h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+    color: #11294b;
+    font-weight: 700;
+}
+.mp-bulk-transfer-summary {
+    margin: 0 0 12px;
+    font-size: 0.88rem;
+    color: #64748b;
+}
+.mp-bulk-transfer-list {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.mp-bulk-transfer-list li {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: #1e293b;
+    border-bottom: 1px solid #e2e8f0;
+}
+.mp-bulk-transfer-list li:last-child { border-bottom: none; }
+.mp-bulk-transfer-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.mp-bulk-transfer-fields label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 4px;
+}
+.mp-bulk-transfer-fields select {
+    width: 100%;
+    font-size: 0.85rem;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+}
+.mp-bulk-transfer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 .mp-job-card .card-visual-wrap {
     position: relative;
     background: #eef1f7;
@@ -3177,6 +3282,11 @@ html, body {
                             </div>
                             <div class="mp-toolbar-actions">
                                 <button type="button" class="btn-mini btn-pink" id="mpToolbarJobworkQueueBtn">JobWork Queue</button>
+                                <label class="mp-bulk-select-all-wrap" title="Select all visible job cards">
+                                    <input type="checkbox" id="mpBulkSelectAllVisible" aria-label="Select all visible">
+                                    <span>Select</span>
+                                </label>
+                                <button type="button" class="btn-mini" id="mpBulkTransferBtn" disabled title="Open Jobwork Queue for selected orders">Jobwork Queue (<span id="mpBulkSelCount">0</span>)</button>
                                 <input type="search" class="mp-tag-search" id="mpTagSearch" placeholder="Tag No" title="Search by tag number" autocomplete="off">
                                 <button type="button" class="btn-icon-mini" title="Filter" id="processFilterBtn"><i class="feather icon-filter"></i></button>
                                 <button type="button" class="btn-icon-mini" title="Refresh"><i class="feather icon-refresh-cw"></i></button>
@@ -3279,6 +3389,9 @@ html, body {
                                 <div class="mp-job-card-grid-item">
                                 <article class="mp-job-card" data-jwo-id="<?php echo $jid; ?>" data-dept-id="<?php echo $dept_id_attr; ?>" data-user-id="<?php echo $du_id_attr; ?>" data-floor-transfer="<?php echo $jwo_has_floor_transfer > 0 ? '1' : '0'; ?>" data-manufacturing-seconds="<?php echo $mfg_sec; ?>" data-tag-no="<?php echo htmlspecialchars($first_item_barcode, ENT_QUOTES, 'UTF-8'); ?>" data-order-date="<?php echo htmlspecialchars($od_iso, ENT_QUOTES, 'UTF-8'); ?>" data-due-date="<?php echo htmlspecialchars($dd_iso, ENT_QUOTES, 'UTF-8'); ?>" data-jobwork-no="<?php echo htmlspecialchars($jw_no_cmp, ENT_QUOTES, 'UTF-8'); ?>" data-sale-order-no="<?php echo htmlspecialchars($so_cmp, ENT_QUOTES, 'UTF-8'); ?>" data-priority="<?php echo htmlspecialchars($pri_cmp, ENT_QUOTES, 'UTF-8'); ?>" data-product-id="<?php echo $line_pid; ?>" data-metal-id="<?php echo $line_mid; ?>" data-branch-id="<?php echo $sale_bid; ?>" data-customer-name="<?php echo htmlspecialchars($cust, ENT_QUOTES, 'UTF-8'); ?>" data-line-desc="<?php echo htmlspecialchars($first_p, ENT_QUOTES, 'UTF-8'); ?>">
                                     <div class="card-visual-wrap">
+                                        <label class="mp-job-card-select-wrap" title="Select for bulk transfer">
+                                            <input type="checkbox" class="mp-job-card-select" data-jwo-id="<?php echo $jid; ?>" aria-label="Select <?php echo htmlspecialchars($jw_no !== '' ? $jw_no : 'JWO #' . $jid, ENT_QUOTES, 'UTF-8'); ?>">
+                                        </label>
                                         <span class="status-pill"><?php echo htmlspecialchars($st_disp); ?></span>
                                         <div class="ph-inner<?php echo $card_img_url !== '' ? ' ph-inner--photo' : ''; ?>">
                                             <?php if ($card_img_url !== ''): ?>
@@ -3726,6 +3839,28 @@ html, body {
 
 <?php include __DIR__ . '/includes/jwq-queue-modal.php'; ?>
 <?php include __DIR__ . '/includes/mp-add-image-modal.php'; ?>
+
+<div id="mpBulkTransferOverlay" class="mp-bulk-transfer-overlay" aria-hidden="true">
+    <div class="mp-bulk-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="mpBulkTransferTitle">
+        <h3 id="mpBulkTransferTitle">Bulk department transfer</h3>
+        <p class="mp-bulk-transfer-summary" id="mpBulkTransferSummary">0 orders selected</p>
+        <ul class="mp-bulk-transfer-list" id="mpBulkTransferList"></ul>
+        <div class="mp-bulk-transfer-fields">
+            <div>
+                <label for="mpBulkToDept">To Dept (destination)</label>
+                <select id="mpBulkToDept"></select>
+            </div>
+            <div>
+                <label for="mpBulkToUser">To User (destination)</label>
+                <select id="mpBulkToUser"></select>
+            </div>
+        </div>
+        <div class="mp-bulk-transfer-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="mpBulkTransferCancel">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" id="mpBulkTransferConfirm" style="background:#11294b;border-color:#11294b;">Transfer all</button>
+        </div>
+    </div>
+</div>
 
 <!-- Inward Stock details (folder icon on From/To user rows): compact modal + toolbar -->
 <div class="modal fade" id="jwqInwardStockModal" tabindex="-1" role="dialog" aria-labelledby="jwqInwardStockModalTitle" aria-hidden="true" data-backdrop="true">
@@ -4725,6 +4860,7 @@ document.addEventListener('DOMContentLoaded', function () {
     initMpTagSearchFilter();
     initJwqDecimalInputGuards();
     initJobworkQueueModal();
+    initMpBulkTransfer();
     mpInitStockGrandTotalScrollSync();
     if (typeof mpSyncAllStockGrandTotalWidths === 'function') {
         window.addEventListener('resize', mpSyncAllStockGrandTotalWidths);
@@ -5060,6 +5196,9 @@ function filterByDepartmentAndUser() {
     /* Keep currently selected view tab; only refresh filtered content. */
     if (typeof mpRenderManufacturingQueueTablesFromCache === 'function' && window.__mpMfgQueueRowsRaw != null && Array.isArray(window.__mpMfgQueueRowsRaw)) {
         mpRenderManufacturingQueueTablesFromCache();
+    }
+    if (typeof mpUpdateBulkSelectAllState === 'function') {
+        mpUpdateBulkSelectAllState();
     }
 }
 
@@ -8084,13 +8223,20 @@ function jwqDebugLogQueueLinesBeforeSave() {
     });
 }
 
-function jwqCollectQueueLinePayload() {
+function jwqCollectQueueLinePayload(jwoIdFilter) {
     var tbody = document.getElementById('jwqOrderLinesBody');
     if (!tbody) {
         return [];
     }
+    var filterJwo = parseInt(jwoIdFilter != null ? jwoIdFilter : 0, 10) || 0;
     var out = [];
     tbody.querySelectorAll('tr[data-item-id]').forEach(function (tr) {
+        if (filterJwo > 0) {
+            var rowJwo = parseInt(tr.getAttribute('data-jwo-id') || '0', 10) || 0;
+            if (rowJwo !== filterJwo) {
+                return;
+            }
+        }
         var id = parseInt(tr.getAttribute('data-item-id'), 10);
         if (!id) {
             return;
@@ -8379,12 +8525,16 @@ function jwqLoadSavedDiamondRowsForModal(jobworkOrderId) {
         .catch(function () {});
 }
 
-function jwqBuildLineRowHtml(it, orderRef) {
+function jwqBuildLineRowHtml(it, orderRef, jwoId) {
     var keys = window.JWQ_ORDER_LINE_COL_KEYS || [];
     var trAttrs = '';
     var iid = 0;
     if (it) {
         iid = parseInt(it.id != null ? it.id : (it.item_id != null ? it.item_id : 0), 10) || 0;
+    }
+    var jwoNum = parseInt(jwoId != null ? jwoId : 0, 10) || 0;
+    if (jwoNum > 0) {
+        trAttrs += ' data-jwo-id="' + jwoNum + '"';
     }
     if (iid > 0) {
         var owAuto = jwqLineAutoLossBaselineWt(it);
@@ -8496,8 +8646,291 @@ function jwqSetNowDateTime() {
     }
 }
 
+function jwqClearBulkModalState() {
+    window.__jwqBulkMode = false;
+    window.__jwqBulkJwoIds = null;
+}
+
+function jwqFilterOrderItemsForCard(items, card) {
+    items = items || [];
+    if (!card || !items.length) {
+        return items;
+    }
+    var selectedBarcode = (card.getAttribute('data-tag-no') || '').trim().toLowerCase();
+    var selectedProduct = (card.getAttribute('data-line-desc') || '').trim().toLowerCase();
+    if (selectedBarcode === '' && selectedProduct === '') {
+        return items;
+    }
+    return items.filter(function (it) {
+        var rowBarcode = String(it && it.barcode != null ? it.barcode : '').trim().toLowerCase();
+        var rowProduct = String(it && it.product_name != null ? it.product_name : '').trim().toLowerCase();
+        if (selectedBarcode !== '' && rowBarcode !== '' && rowBarcode === selectedBarcode) return true;
+        if (selectedProduct !== '' && rowProduct !== '' && rowProduct === selectedProduct) return true;
+        return false;
+    });
+}
+
+function mpCreateJwqTriggerFromJwoId(jwoId) {
+    var card = mpGetFirstCardForJwo(jwoId);
+    if (!card) return null;
+    return card.querySelector('.mp-jwq-open-btn') || card;
+}
+
+function jwqOpenModalForMultipleOrders(jwoIds) {
+    jwoIds = (jwoIds || []).map(function (id) { return parseInt(id, 10) || 0; }).filter(function (id) { return id > 0; });
+    if (!jwoIds.length) {
+        alert('Select one or more job work orders first.');
+        return;
+    }
+    if (typeof setMpViewMode === 'function') {
+        setMpViewMode('cards');
+    }
+    if (jwoIds.length === 1) {
+        jwqClearBulkModalState();
+        var singleBtn = mpCreateJwqTriggerFromJwoId(jwoIds[0]);
+        if (singleBtn) {
+            jwqOpenModal(singleBtn, {});
+        }
+        return;
+    }
+
+    var deptSet = {};
+    jwoIds.forEach(function (id) {
+        var c = mpGetFirstCardForJwo(id);
+        var d = c ? parseInt(c.getAttribute('data-dept-id') || '0', 10) : 0;
+        deptSet[d] = true;
+    });
+    if (Object.keys(deptSet).length > 1) {
+        if (!confirm('Selected orders are from different departments. From Dept will start from the first order — you can adjust before Save. Continue?')) {
+            return;
+        }
+    }
+
+    var firstBtn = mpCreateJwqTriggerFromJwoId(jwoIds[0]);
+    if (!firstBtn) {
+        alert('Could not open Jobwork Queue for selected orders.');
+        return;
+    }
+
+    window.__jwqBulkMode = true;
+    window.__jwqBulkJwoIds = jwoIds.slice();
+
+    var overlay = document.getElementById('jwqModalOverlay');
+    if (!overlay) return;
+
+    var jwoId = jwoIds[0];
+    window.__jwqCurrentJwoId = jwoId;
+    window.__jwqPrefillLineWeights = false;
+    window.jwqRemovedDiamondIssues = [];
+
+    var titleWrap = document.getElementById('jwqModalTitle');
+    var queueEl = document.getElementById('jwqModalQueueNo');
+    var queueHid = document.getElementById('jwqJobworkQueueNo');
+    if (titleWrap) {
+        titleWrap.innerHTML = 'Jobwork Queue — <strong id="jwqModalQueueNo">' + jwoIds.length + ' orders</strong>';
+        queueEl = document.getElementById('jwqModalQueueNo');
+    }
+    if (queueEl) queueEl.textContent = jwoIds.length + ' orders';
+    if (queueHid) queueHid.value = '';
+
+    var hid = document.getElementById('jwqCurrentJwoId');
+    if (hid) hid.value = String(jwoId);
+
+    var currentDept = parseInt(firstBtn.getAttribute('data-dept-id') || '0', 10);
+    var currentUser = parseInt(firstBtn.getAttribute('data-user-id') || '0', 10);
+    var fromDept = document.getElementById('jwqFromDept');
+    var fromUser = document.getElementById('jwqFromUser');
+    var toDeptSel = document.getElementById('jwqToDept');
+    var toUserSel = document.getElementById('jwqToUser');
+    jwqFillDeptSelect(fromDept);
+    jwqFillDeptSelect(toDeptSel);
+    if (fromDept) fromDept.value = currentDept > 0 ? String(currentDept) : '';
+    jwqFillUserSelectForDept(fromUser, currentDept);
+    if (fromUser) fromUser.value = currentUser > 0 ? String(currentUser) : '';
+    if (toDeptSel) toDeptSel.value = '';
+    jwqFillUserSelectForDept(toUserSel, 0);
+    if (toUserSel) toUserSel.value = '';
+
+    jwqSetNowDateTime();
+    var timerDisp = document.getElementById('jwqTotalTimeDisplay');
+    if (timerDisp) timerDisp.textContent = '00:00:00';
+
+    var tbody = document.getElementById('jwqOrderLinesBody');
+    var colCount = (window.JWQ_ORDER_LINE_COL_KEYS && window.JWQ_ORDER_LINE_COL_KEYS.length) ? window.JWQ_ORDER_LINE_COL_KEYS.length : 21;
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;color:#94a3b8;padding:16px;">Loading ' + jwoIds.length + ' orders…</td></tr>';
+    }
+
+    var matBody = jwqGetJobworkMaterialBody();
+    if (matBody) matBody.innerHTML = '<tr><td colspan="8" class="jwq-mat-empty">No Rows To Show</td></tr>';
+    var matTot = document.getElementById('jwqMatTotalWt');
+    if (matTot) matTot.textContent = '0.00';
+
+    if (typeof window.jwqToggleWeightStrip === 'function') {
+        window.jwqToggleWeightStrip(false);
+    }
+
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+
+    Promise.all(jwoIds.map(function (id) {
+        return fetch('ajax/mp-jobwork-order-items.php?id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var card = mpGetFirstCardForJwo(id);
+                var orderRef = card ? (card.getAttribute('data-jobwork-no') || ('JWO-' + id)) : ('JWO-' + id);
+                var rows = (data && data.ok && data.items) ? data.items : [];
+                rows = jwqFilterOrderItemsForCard(rows, card);
+                return { jwoId: id, orderRef: orderRef, rows: rows, card: card };
+            })
+            .catch(function () {
+                return { jwoId: id, orderRef: 'JWO-' + id, rows: [], card: null };
+            });
+    })).then(function (results) {
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        var totalLines = 0;
+        results.forEach(function (res) {
+            if (res.rows.length) {
+                res.rows.forEach(function (it) {
+                    tbody.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(it, res.orderRef, res.jwoId));
+                    totalLines++;
+                });
+            } else {
+                var firstProduct = res.card ? (res.card.getAttribute('data-line-desc') || '—') : '—';
+                var ph = {
+                    design_no: '—',
+                    barcode: res.card ? (res.card.getAttribute('data-tag-no') || '—') : '—',
+                    product_name: firstProduct,
+                    carat: '—',
+                    final_weight: 0,
+                    net_weight: 0,
+                    purity: 0,
+                    quantity: 0,
+                    rate: null,
+                    less_weight: 0,
+                    diamond_weight: 0,
+                    gross_weight: 0
+                };
+                tbody.insertAdjacentHTML('beforeend', jwqBuildLineRowHtml(ph, res.orderRef, res.jwoId));
+                totalLines++;
+            }
+        });
+        if (!totalLines) {
+            tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;color:#dc2626;padding:12px;">No lines loaded for selected orders</td></tr>';
+        } else {
+            jwqApplyStoredLineColumnVisibility();
+            if (typeof jwqReconcileLineLossFromWeights === 'function') {
+                jwqReconcileLineLossFromWeights();
+            }
+            jwqRefreshAutoLossAllRows();
+        }
+    });
+}
+
+function jwqSaveBulkJobworkQueue() {
+    var jwoIds = window.__jwqBulkJwoIds ? window.__jwqBulkJwoIds.slice() : [];
+    if (!jwoIds.length) {
+        alert('No job work orders selected.');
+        return;
+    }
+    var toD = document.getElementById('jwqToDept');
+    var toU = document.getElementById('jwqToUser');
+    var toDeptId = toD ? parseInt(toD.value || '0', 10) : 0;
+    if (toDeptId < 1) {
+        alert('Please select destination department (To Dept.). All selected orders will move to that department after save.');
+        return;
+    }
+    var toUserId = toU && toU.value ? parseInt(toU.value, 10) : 0;
+    var fromD = document.getElementById('jwqFromDept');
+    var fromU = document.getElementById('jwqFromUser');
+    var fromDeptId = fromD ? parseInt(fromD.value || '0', 10) : 0;
+    var fromUserId = fromU && fromU.value ? parseInt(fromU.value, 10) : 0;
+
+    var btnSave = document.getElementById('jwqBtnSave');
+    if (btnSave) {
+        btnSave.disabled = true;
+    }
+
+    var ok = 0;
+    var failed = [];
+
+    function saveOne(jwoId) {
+        if (typeof jwqSyncOrderLineDiamondWtFromMaterialTable === 'function') {
+            jwqSyncOrderLineDiamondWtFromMaterialTable();
+        }
+        var lines = typeof jwqCollectQueueLinePayload === 'function' ? jwqCollectQueueLinePayload(jwoId) : [];
+        var fd = new FormData();
+        fd.append('jobwork_order_id', String(jwoId));
+        fd.append('to_dept_id', String(toDeptId));
+        if (toUserId > 0) fd.append('to_user_id', String(toUserId));
+        if (fromDeptId > 0) fd.append('from_dept_id', String(fromDeptId));
+        if (fromUserId > 0) fd.append('from_user_id', String(fromUserId));
+        fd.append('queue_lines', JSON.stringify(lines));
+        fd.append('jwq_diamond_stock_lines', '[]');
+        return fetch('ajax/mp-save-jobwork-queue.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function (r) {
+                return r.text().then(function (txt) {
+                    var data = null;
+                    try { data = JSON.parse(txt || '{}'); } catch (e) { data = null; }
+                    if (!data || !data.ok) {
+                        throw new Error((data && data.message) || 'Save failed');
+                    }
+                    if (typeof mpUpdateJobCardAfterTransfer === 'function') {
+                        mpUpdateJobCardAfterTransfer(jwoId, data);
+                    }
+                    return data;
+                });
+            });
+    }
+
+    function next(i) {
+        if (i >= jwoIds.length) {
+            if (btnSave) btnSave.disabled = false;
+            jwqClearBulkModalState();
+            jwoIds.forEach(function (id) {
+                if (typeof mpSyncBulkSelectCheckboxesForJwo === 'function') {
+                    mpSyncBulkSelectCheckboxesForJwo(id, false);
+                }
+            });
+            if (typeof mpUpdateBulkSelectAllState === 'function') {
+                mpUpdateBulkSelectAllState();
+            }
+            if (typeof mpReloadManufacturingQueueTable === 'function') {
+                mpReloadManufacturingQueueTable();
+            }
+            jwqCloseModal();
+            if (failed.length) {
+                alert('Saved ' + ok + ' of ' + jwoIds.length + ' order(s) to Jobwork Queue.\n\nFailed:\n' + failed.join('\n'));
+            } else {
+                alert('Successfully saved ' + ok + ' order' + (ok === 1 ? '' : 's') + ' to Jobwork Queue.');
+            }
+            return;
+        }
+        if (btnSave) {
+            btnSave.innerHTML = '<i class="feather icon-check"></i> Saving ' + (i + 1) + '/' + jwoIds.length + '…';
+        }
+        saveOne(jwoIds[i]).then(function () {
+            ok++;
+            next(i + 1);
+        }).catch(function (err) {
+            var card = mpGetFirstCardForJwo(jwoIds[i]);
+            var label = card ? (card.getAttribute('data-jobwork-no') || ('JWO #' + jwoIds[i])) : ('JWO #' + jwoIds[i]);
+            failed.push(label + ': ' + (err && err.message ? err.message : 'Error'));
+            next(i + 1);
+        });
+    }
+    next(0);
+}
+
 function jwqOpenModal(btn, opts) {
     opts = opts || {};
+    jwqClearBulkModalState();
+    var titleWrap = document.getElementById('jwqModalTitle');
+    if (titleWrap) {
+        titleWrap.innerHTML = 'Jobwork Queue No. : <strong id="jwqModalQueueNo">JWQ-</strong>';
+    }
     var overlay = document.getElementById('jwqModalOverlay');
     if (!overlay) return;
     var jwoId = parseInt(btn.getAttribute('data-jwo-id') || '0', 10);
@@ -8673,6 +9106,16 @@ function jwqOpenModal(btn, opts) {
 function jwqCloseModal() {
     var overlay = document.getElementById('jwqModalOverlay');
     if (!overlay) return;
+    jwqClearBulkModalState();
+    var btnSave = document.getElementById('jwqBtnSave');
+    if (btnSave) {
+        btnSave.disabled = false;
+        btnSave.innerHTML = '<i class="feather icon-check"></i> Save';
+    }
+    var titleWrap = document.getElementById('jwqModalTitle');
+    if (titleWrap) {
+        titleWrap.innerHTML = 'Jobwork Queue No. : <strong id="jwqModalQueueNo">JWQ-</strong>';
+    }
     if (typeof window.jwqToggleWeightStrip === 'function') {
         window.jwqToggleWeightStrip(false);
     }
@@ -9374,6 +9817,243 @@ function mpGetFirstVisibleJobCard() {
     return null;
 }
 
+function mpGetVisibleJobCards() {
+    var grid = document.getElementById('mpJobCardsGrid');
+    if (!grid) return [];
+    var out = [];
+    grid.querySelectorAll('.mp-job-card[data-jwo-id]').forEach(function (card) {
+        if (!mpJobCardIsFilteredHidden(card)) out.push(card);
+    });
+    return out;
+}
+
+function mpSyncBulkSelectCheckboxesForJwo(jwoId, checked) {
+    if (!jwoId) return;
+    document.querySelectorAll('.mp-job-card-select[data-jwo-id="' + jwoId + '"]').forEach(function (cb) {
+        cb.checked = !!checked;
+    });
+    document.querySelectorAll('.mp-job-card[data-jwo-id="' + jwoId + '"]').forEach(function (card) {
+        card.classList.toggle('is-bulk-selected', !!checked);
+    });
+}
+
+function mpGetSelectedBulkJwoIds() {
+    var seen = {};
+    document.querySelectorAll('#mpJobCardsGrid .mp-job-card-select:checked').forEach(function (cb) {
+        var id = parseInt(cb.getAttribute('data-jwo-id') || '0', 10);
+        if (id > 0) seen[id] = true;
+    });
+    return Object.keys(seen).map(function (k) { return parseInt(k, 10); });
+}
+
+function mpGetFirstCardForJwo(jwoId) {
+    var cards = document.querySelectorAll('.mp-job-card[data-jwo-id="' + jwoId + '"]');
+    var i;
+    for (i = 0; i < cards.length; i++) {
+        if (!mpJobCardIsFilteredHidden(cards[i])) return cards[i];
+    }
+    return cards.length ? cards[0] : null;
+}
+
+function mpUpdateBulkTransferToolbar() {
+    var ids = mpGetSelectedBulkJwoIds();
+    var cntEl = document.getElementById('mpBulkSelCount');
+    var btn = document.getElementById('mpBulkTransferBtn');
+    if (cntEl) cntEl.textContent = String(ids.length);
+    if (btn) btn.disabled = ids.length === 0;
+}
+
+function mpUpdateBulkSelectAllState() {
+    var selectAll = document.getElementById('mpBulkSelectAllVisible');
+    if (!selectAll) return;
+    var visibleJwo = {};
+    mpGetVisibleJobCards().forEach(function (card) {
+        var id = parseInt(card.getAttribute('data-jwo-id') || '0', 10);
+        if (id > 0) visibleJwo[id] = true;
+    });
+    var visibleIds = Object.keys(visibleJwo);
+    if (!visibleIds.length) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+        mpUpdateBulkTransferToolbar();
+        return;
+    }
+    var selected = mpGetSelectedBulkJwoIds();
+    var selVisible = selected.filter(function (id) { return visibleJwo[id]; });
+    selectAll.checked = selVisible.length === visibleIds.length;
+    selectAll.indeterminate = selVisible.length > 0 && selVisible.length < visibleIds.length;
+    mpUpdateBulkTransferToolbar();
+}
+
+function mpBulkTransferCloseModal() {
+    var overlay = document.getElementById('mpBulkTransferOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('is-open');
+    overlay.setAttribute('aria-hidden', 'true');
+}
+
+function mpBulkTransferOpenModal() {
+    jwqOpenModalForMultipleOrders(mpGetSelectedBulkJwoIds());
+}
+
+function mpBulkTransferSaveOne(jwoId, toDeptId, toUserId) {
+    var card = mpGetFirstCardForJwo(jwoId);
+    var fromDeptId = card ? parseInt(card.getAttribute('data-dept-id') || '0', 10) : 0;
+    var fromUserId = card ? parseInt(card.getAttribute('data-user-id') || '0', 10) : 0;
+    var fd = new FormData();
+    fd.append('jobwork_order_id', String(jwoId));
+    fd.append('to_dept_id', String(toDeptId));
+    if (toUserId > 0) fd.append('to_user_id', String(toUserId));
+    if (fromDeptId > 0) fd.append('from_dept_id', String(fromDeptId));
+    if (fromUserId > 0) fd.append('from_user_id', String(fromUserId));
+    fd.append('queue_lines', '[]');
+    fd.append('jwq_diamond_stock_lines', '[]');
+    return fetch('ajax/mp-save-jobwork-queue.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) {
+            return r.text().then(function (txt) {
+                var data = null;
+                try { data = JSON.parse(txt || '{}'); } catch (e) { data = null; }
+                if (!data || !data.ok) {
+                    throw new Error((data && data.message) || 'Transfer failed for order #' + jwoId);
+                }
+                if (typeof mpUpdateJobCardAfterTransfer === 'function') {
+                    mpUpdateJobCardAfterTransfer(jwoId, data);
+                }
+                return data;
+            });
+        });
+}
+
+function mpBulkTransferRun() {
+    var ids = mpGetSelectedBulkJwoIds();
+    if (!ids.length) {
+        alert('No orders selected.');
+        return;
+    }
+    var toDeptEl = document.getElementById('mpBulkToDept');
+    var toUserEl = document.getElementById('mpBulkToUser');
+    var confirmBtn = document.getElementById('mpBulkTransferConfirm');
+    var toDeptId = toDeptEl ? parseInt(toDeptEl.value || '0', 10) : 0;
+    if (toDeptId < 1) {
+        alert('Please select destination department (To Dept).');
+        return;
+    }
+    var toUserId = toUserEl ? parseInt(toUserEl.value || '0', 10) : 0;
+
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Transferring…';
+    }
+
+    var ok = 0;
+    var failed = [];
+
+    function next(i) {
+        if (i >= ids.length) {
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Transfer all';
+            }
+            mpBulkTransferCloseModal();
+            ids.forEach(function (id) { mpSyncBulkSelectCheckboxesForJwo(id, false); });
+            mpUpdateBulkSelectAllState();
+            if (typeof mpReloadManufacturingQueueTable === 'function') {
+                mpReloadManufacturingQueueTable();
+            }
+            if (failed.length) {
+                alert('Transferred ' + ok + ' of ' + ids.length + ' order(s).\n\nFailed:\n' + failed.join('\n'));
+            } else {
+                alert('Successfully transferred ' + ok + ' order' + (ok === 1 ? '' : 's') + '.');
+            }
+            return;
+        }
+        if (confirmBtn) {
+            confirmBtn.textContent = 'Transferring ' + (i + 1) + '/' + ids.length + '…';
+        }
+        mpBulkTransferSaveOne(ids[i], toDeptId, toUserId).then(function () {
+            ok++;
+            next(i + 1);
+        }).catch(function (err) {
+            var card = mpGetFirstCardForJwo(ids[i]);
+            var label = card ? (card.getAttribute('data-jobwork-no') || ('JWO #' + ids[i])) : ('JWO #' + ids[i]);
+            failed.push(label + ': ' + (err && err.message ? err.message : 'Error'));
+            next(i + 1);
+        });
+    }
+    next(0);
+}
+
+function initMpBulkTransfer() {
+    var grid = document.getElementById('mpJobCardsGrid');
+    if (!grid || grid._mpBulkBound) return;
+    grid._mpBulkBound = true;
+
+    grid.addEventListener('change', function (e) {
+        var cb = e.target && e.target.classList && e.target.classList.contains('mp-job-card-select') ? e.target : null;
+        if (!cb || !grid.contains(cb)) return;
+        var jwoId = parseInt(cb.getAttribute('data-jwo-id') || '0', 10);
+        mpSyncBulkSelectCheckboxesForJwo(jwoId, cb.checked);
+        mpUpdateBulkSelectAllState();
+    });
+
+    grid.addEventListener('click', function (e) {
+        if (e.target.closest('.mp-job-card-select-wrap')) {
+            e.stopPropagation();
+        }
+    });
+
+    var selectAll = document.getElementById('mpBulkSelectAllVisible');
+    if (selectAll) {
+        selectAll.addEventListener('change', function () {
+            var checked = !!selectAll.checked;
+            var visibleJwo = {};
+            mpGetVisibleJobCards().forEach(function (card) {
+                var id = parseInt(card.getAttribute('data-jwo-id') || '0', 10);
+                if (id > 0) visibleJwo[id] = true;
+            });
+            Object.keys(visibleJwo).forEach(function (k) {
+                mpSyncBulkSelectCheckboxesForJwo(parseInt(k, 10), checked);
+            });
+            mpUpdateBulkSelectAllState();
+        });
+    }
+
+    var transferBtn = document.getElementById('mpBulkTransferBtn');
+    if (transferBtn) {
+        transferBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            mpBulkTransferOpenModal();
+        });
+    }
+
+    var overlay = document.getElementById('mpBulkTransferOverlay');
+    if (overlay && !overlay._mpBulkBound) {
+        overlay._mpBulkBound = true;
+        var cancelBtn = document.getElementById('mpBulkTransferCancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', mpBulkTransferCloseModal);
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) mpBulkTransferCloseModal();
+        });
+        var toDept = document.getElementById('mpBulkToDept');
+        var toUser = document.getElementById('mpBulkToUser');
+        if (toDept && toUser) {
+            toDept.addEventListener('change', function () {
+                var id = parseInt(toDept.value || '0', 10);
+                jwqFillUserSelectForDept(toUser, id);
+            });
+        }
+        var confirmBtn = document.getElementById('mpBulkTransferConfirm');
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                mpBulkTransferRun();
+            });
+        }
+    }
+
+    mpUpdateBulkSelectAllState();
+}
+
 function initJobworkQueueModal() {
     var grid = document.getElementById('mpJobCardsGrid');
     var overlay = document.getElementById('jwqModalOverlay');
@@ -9392,12 +10072,17 @@ function initJobworkQueueModal() {
     if (toolbarJwq) {
         toolbarJwq.addEventListener('click', function (e) {
             e.preventDefault();
+            var selected = typeof mpGetSelectedBulkJwoIds === 'function' ? mpGetSelectedBulkJwoIds() : [];
+            if (selected.length > 0) {
+                jwqOpenModalForMultipleOrders(selected);
+                return;
+            }
             if (typeof setMpViewMode === 'function') {
                 setMpViewMode('cards');
             }
             var card = mpGetFirstVisibleJobCard();
             if (!card) {
-                alert('No job work order is visible. Create a job from a sale order, or clear the department filter.');
+                alert('No job work order is visible. Select orders with checkboxes, or clear the department filter.');
                 return;
             }
             var btn = card.querySelector('.mp-jwq-open-btn');
@@ -9468,6 +10153,10 @@ function initJobworkQueueModal() {
     var btnSave = document.getElementById('jwqBtnSave');
     if (btnSave) {
         btnSave.addEventListener('click', function () {
+            if (window.__jwqBulkMode && window.__jwqBulkJwoIds && window.__jwqBulkJwoIds.length > 1) {
+                jwqSaveBulkJobworkQueue();
+                return;
+            }
             var jwo = document.getElementById('jwqCurrentJwoId');
             var id = jwo ? parseInt(jwo.value || '0', 10) : 0;
             if (id < 1) {

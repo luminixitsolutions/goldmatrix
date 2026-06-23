@@ -4,10 +4,77 @@
 (function () {
     'use strict';
 
+    if (window.__auragoldCatalogDesignNoAssetLoaded) {
+        return;
+    }
+    window.__auragoldCatalogDesignNoAssetLoaded = true;
+
     var designListLoaded = false;
     var designListLoading = false;
     var catalogFetchInFlight = false;
     var select2LoadPromise = null;
+    var catalogTemplate = null;
+    var qtyApplyInFlight = false;
+    /** Max catalogue copies per DOM batch — keeps the browser responsive. */
+    var MAX_BATCH_SIZE = 10;
+    var CATALOGUE_QTY_MAX = MAX_BATCH_SIZE;
+    var CATALOGUE_QTY_BUILD_CHUNK_MS = 0;
+    var BATCH_CONFIRM_MODAL_ID = 'catalogQtyBatchConfirmModal';
+
+    function yieldToBrowser() {
+        return new Promise(function (resolve) {
+            requestAnimationFrame(function () {
+                setTimeout(resolve, 0);
+            });
+        });
+    }
+
+    function updateCatalogLoadOverlaySub(text) {
+        var overlay = getTableOverlay();
+        if (!overlay) return;
+        var sub = overlay.querySelector('.catalog-design-load-overlay__sub');
+        if (sub) sub.textContent = String(text || '');
+    }
+
+    function updateCatalogLoadOverlayTitle(text) {
+        var overlay = getTableOverlay();
+        if (!overlay) return;
+        var titleEl = overlay.querySelector('.catalog-design-load-overlay__text');
+        if (titleEl) titleEl.textContent = String(text || 'Please wait…');
+    }
+
+    function getCatalogVoucherLabel() {
+        var path = String(window.location.pathname || '').toLowerCase();
+        if (path.indexOf('sale-order') !== -1) return 'Sale Order';
+        if (path.indexOf('sale-invoice') !== -1) return 'Sale Invoice';
+        if (path.indexOf('purchase-order') !== -1) return 'Purchase Order';
+        if (path.indexOf('purchase-invoice') !== -1) return 'Purchase Invoice';
+        return 'order';
+    }
+
+    function normalizeCatalogQty(raw) {
+        var s = String(raw == null ? '' : raw).trim();
+        if (s === '') return NaN;
+        var q = parseInt(s, 10);
+        if (isNaN(q) || q < 1) return NaN;
+        return q;
+    }
+
+    /**
+     * @returns {{ ok: boolean, qty: number, empty?: boolean }}
+     */
+    function parseCatalogQty(rawQty, opts) {
+        opts = opts || {};
+        var notify = opts.notify !== false;
+        var qty = normalizeCatalogQty(rawQty);
+        if (isNaN(qty)) {
+            if (notify) {
+                alert('Enter a valid quantity.');
+            }
+            return { ok: false, qty: NaN, empty: true };
+        }
+        return { ok: true, qty: qty };
+    }
 
     function getDesignSelect() {
         return document.getElementById('modalProductDesignNo');
@@ -24,6 +91,104 @@
     function getAddRowFn() {
         if (typeof window.addEmptyProductRow === 'function') return window.addEmptyProductRow;
         return null;
+    }
+
+    function ensureAutoAddToOrderChecked() {
+        var cb = document.getElementById('modalCatalogAutoAddToOrder');
+        if (cb) cb.checked = true;
+    }
+
+    function isAutoAddToOrderChecked() {
+        var cb = document.getElementById('modalCatalogAutoAddToOrder');
+        if (!cb) return true;
+        return !!cb.checked;
+    }
+
+    function maybeAutoCommitCatalogueToOrder(totalQty, numBatches) {
+        /* Items stay visible in the modal — user clicks Add (Shift + A) to commit. */
+        numBatches = numBatches || 1;
+        ensureCatalogueModalRowsVisible();
+    }
+
+    function setCatalogBatchUiDisabled(disabled) {
+        ['modalProductQty', 'modalProductQtyApplyBtn'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.disabled = !!disabled;
+        });
+        var addBtn = document.getElementById('modalAddBtn');
+        if (addBtn) addBtn.disabled = !!disabled;
+        setDesignSelectBusy(disabled);
+    }
+
+    function ensureBatchConfirmModal() {
+        if (document.getElementById(BATCH_CONFIRM_MODAL_ID)) return;
+        var html = ''
+            + '<div id="' + BATCH_CONFIRM_MODAL_ID + '" class="catalog-qty-batch-confirm" aria-hidden="true">'
+            + '  <div class="catalog-qty-batch-confirm__dialog" role="dialog" aria-modal="true">'
+            + '    <p class="catalog-qty-batch-confirm__message" id="catalogQtyBatchConfirmMessage"></p>'
+            + '    <div class="catalog-qty-batch-confirm__actions">'
+            + '      <button type="button" class="btn btn-secondary btn-sm" data-action="cancel">Cancel</button>'
+            + '      <button type="button" class="btn btn-primary btn-sm" data-action="continue" style="background:#11294b;border-color:#11294b;">Continue</button>'
+            + '    </div>'
+            + '  </div>'
+            + '</div>';
+        document.body.insertAdjacentHTML('beforeend', html);
+        if (!document.getElementById('catalog-qty-batch-confirm-css')) {
+            var css = document.createElement('style');
+            css.id = 'catalog-qty-batch-confirm-css';
+            css.textContent = ''
+                + '.catalog-qty-batch-confirm{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10900;display:none;align-items:center;justify-content:center;padding:16px;}'
+                + '.catalog-qty-batch-confirm.is-open{display:flex;}'
+                + '.catalog-qty-batch-confirm__dialog{background:#fff;border-radius:8px;padding:20px;max-width:420px;width:96%;box-shadow:0 16px 40px rgba(0,0,0,.25);}'
+                + '.catalog-qty-batch-confirm__message{margin:0 0 16px;font-size:0.9rem;color:#1e293b;line-height:1.5;white-space:pre-line;}'
+                + '.catalog-qty-batch-confirm__actions{display:flex;justify-content:flex-end;gap:8px;}';
+            document.head.appendChild(css);
+        }
+    }
+
+    function confirmCatalogBatchDialog(totalQty) {
+        ensureBatchConfirmModal();
+        var numBatches = Math.ceil(totalQty / MAX_BATCH_SIZE);
+        var modal = document.getElementById(BATCH_CONFIRM_MODAL_ID);
+        var msg = document.getElementById('catalogQtyBatchConfirmMessage');
+        if (msg) {
+            msg.textContent = ''
+                + 'You are adding ' + totalQty + ' items.\n\n'
+                + 'For performance reasons, items will be created in batches of ' + MAX_BATCH_SIZE + '.\n\n'
+                + totalQty + ' items = ' + numBatches + ' batch' + (numBatches === 1 ? '' : 'es') + '.\n\n'
+                + 'Continue?';
+        }
+        return new Promise(function (resolve) {
+            if (!modal) {
+                resolve(false);
+                return;
+            }
+            function cleanup(result) {
+                modal.classList.remove('is-open');
+                modal.setAttribute('aria-hidden', 'true');
+                modal.querySelector('[data-action="continue"]').removeEventListener('click', onContinue);
+                modal.querySelector('[data-action="cancel"]').removeEventListener('click', onCancel);
+                modal.removeEventListener('click', onBackdrop);
+                resolve(result);
+            }
+            function onContinue(e) {
+                e.preventDefault();
+                cleanup(true);
+            }
+            function onCancel(e) {
+                e.preventDefault();
+                cleanup(false);
+            }
+            function onBackdrop(e) {
+                if (e.target === modal) cleanup(false);
+            }
+            modal.querySelector('[data-action="continue"]').addEventListener('click', onContinue);
+            modal.querySelector('[data-action="cancel"]').addEventListener('click', onCancel);
+            modal.addEventListener('click', onBackdrop);
+            document.body.appendChild(modal);
+            modal.classList.add('is-open');
+            modal.setAttribute('aria-hidden', 'false');
+        });
     }
 
     function $designSelect() {
@@ -123,6 +288,7 @@
         if (overlay) {
             overlay.classList.add('is-visible');
             overlay.setAttribute('aria-hidden', 'false');
+            updateCatalogLoadOverlayTitle('Please wait…');
             var sub = overlay.querySelector('.catalog-design-load-overlay__sub');
             if (sub) {
                 sub.textContent = dn ? ('Loading design ' + dn + '…') : 'Loading catalogue items…';
@@ -223,12 +389,394 @@
             + '</tr>';
     }
 
+    function clearProductListBlank() {
+        var tbody = getProductListBody();
+        if (tbody) tbody.innerHTML = '';
+    }
+
+    function resetProductListToDefault() {
+        var tbody = getProductListBody();
+        if (!tbody) return;
+        tbody.innerHTML = ''
+            + '<tr>'
+            + '<td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td>'
+            + '</tr>';
+    }
+
     function resolveRowMetalId(md, catalogueMetalId) {
         if (md && md.metal_id != null && String(md.metal_id).trim() !== '' && String(md.metal_id) !== '0') {
             return String(md.metal_id);
         }
         if (catalogueMetalId) return String(catalogueMetalId);
         return '';
+    }
+
+    function getCatalogQty() {
+        var inp = document.getElementById('modalProductQty');
+        return normalizeCatalogQty(inp && inp.value);
+    }
+
+    function cloneCatalogueRowData(md) {
+        try {
+            return JSON.parse(JSON.stringify(md || {}));
+        } catch (e) {
+            var copy = {};
+            Object.keys(md || {}).forEach(function (k) { copy[k] = md[k]; });
+            return copy;
+        }
+    }
+
+    function setModalRowBarcode(row, barcode) {
+        if (!row) return;
+        var code = String(barcode || '').trim();
+        if (code) row.setAttribute('data-barcode', code);
+        else row.removeAttribute('data-barcode');
+        var inp = row.querySelector('[data-column="barcode"] input');
+        if (inp) inp.value = code;
+    }
+
+    function collectUsedBarcodesSeed() {
+        if (typeof window.collectUsedBarcodesForInvoiceRows === 'function') {
+            return window.collectUsedBarcodesForInvoiceRows(null) || [];
+        }
+        return [];
+    }
+
+    function appendOneCatalogueSet(template, copyIdx, totalQty, designNo, catalogueMetalId, addRowFn, tbody, metalsUsed) {
+        var setRows = [];
+        (template.rows || []).forEach(function (md) {
+            var rowData = cloneCatalogueRowData(md);
+            rowData.barcode = (totalQty > 1) ? '' : (md.barcode || '');
+            addRowFn();
+            var row = tbody.querySelector('.product-row:last-of-type');
+            if (!row) return;
+            var rowMetal = resolveRowMetalId(rowData, catalogueMetalId);
+            if (rowMetal) {
+                row.setAttribute('data-metal-id', rowMetal);
+                metalsUsed[rowMetal] = true;
+            }
+            if (designNo) row.setAttribute('data-catalogue-design', designNo);
+            row.setAttribute('data-catalogue-set-index', String(copyIdx));
+            window.applyModalRowDataToSelectionRow(row, rowData);
+            if (totalQty > 1) setModalRowBarcode(row, '');
+            setRows.push({ row: row, data: rowData });
+        });
+        return setRows;
+    }
+
+    /**
+     * @param {Object} [options]
+     * @param {boolean} [options.clearFirst=true]
+     * @param {number} [options.startCopyIdx=0]
+     * @param {number} [options.totalQty]
+     * @param {Object} [options.metalsUsed]
+     */
+    function buildCatalogueSetsAsync(template, qty, tbody, addRowFn, designNo, catalogueMetalId, options) {
+        options = options || {};
+        var clearFirst = options.clearFirst !== false;
+        var startCopyIdx = options.startCopyIdx || 0;
+        var totalQty = options.totalQty != null ? options.totalQty : qty;
+        var metalsUsed = options.metalsUsed || {};
+        var endCopyIdx = startCopyIdx + qty;
+
+        return new Promise(function (resolve, reject) {
+            if (clearFirst) tbody.innerHTML = '';
+            var allSetRowGroups = [];
+            var copyIdx = startCopyIdx;
+
+            function step() {
+                if (copyIdx >= endCopyIdx) {
+                    resolve({ allSetRowGroups: allSetRowGroups, metalsUsed: metalsUsed });
+                    return;
+                }
+                try {
+                    var setRows = appendOneCatalogueSet(
+                        template, copyIdx, totalQty, designNo, catalogueMetalId, addRowFn, tbody, metalsUsed
+                    );
+                    if (setRows.length) allSetRowGroups.push(setRows);
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+                copyIdx++;
+                setTimeout(step, CATALOGUE_QTY_BUILD_CHUNK_MS);
+            }
+
+            step();
+        });
+    }
+
+    function assignBarcodesToCatalogueSets(allSetRowGroups, usedSeed) {
+        return new Promise(function (resolve) {
+            if (!allSetRowGroups || !allSetRowGroups.length) {
+                resolve(usedSeed ? usedSeed.slice() : collectUsedBarcodesSeed());
+                return;
+            }
+            var used = usedSeed ? usedSeed.slice() : collectUsedBarcodesSeed();
+            var setIdx = 0;
+
+            function nextSet() {
+                if (setIdx >= allSetRowGroups.length) {
+                    if (typeof window.syncDiamondTabSharedBarcodes === 'function') {
+                        window.syncDiamondTabSharedBarcodes();
+                    }
+                    resolve(used);
+                    return;
+                }
+                var setRows = allSetRowGroups[setIdx];
+                if (!setRows || !setRows.length) {
+                    setIdx++;
+                    nextSet();
+                    return;
+                }
+                var md = setRows[0].data || {};
+                var existing = String(md.barcode || '').trim();
+                if (existing) {
+                    setRows.forEach(function (item) {
+                        item.data.barcode = existing;
+                        setModalRowBarcode(item.row, existing);
+                    });
+                    if (used.indexOf(existing) === -1) used.push(existing);
+                    setIdx++;
+                    nextSet();
+                    return;
+                }
+                if (typeof window.resolveBarcodePrefixDigitForModal !== 'function'
+                    || typeof window.getNextBarcodeFromServer !== 'function') {
+                    setIdx++;
+                    nextSet();
+                    return;
+                }
+                window.resolveBarcodePrefixDigitForModal(md, function (prefix, digit) {
+                    window.getNextBarcodeFromServer({ prefix: prefix, digit: digit, used: used.slice() }, function (barcode) {
+                        if (barcode) {
+                            used.push(barcode);
+                            setRows.forEach(function (item) {
+                                item.data.barcode = barcode;
+                                setModalRowBarcode(item.row, barcode);
+                            });
+                        }
+                        setIdx++;
+                        nextSet();
+                    });
+                });
+            }
+
+            nextSet();
+        });
+    }
+
+    function finalizeCatalogueRowsInModal(template, metalsUsed) {
+        var catalogueMetalId = template.metal_id || 0;
+        var firstMetal = Object.keys(metalsUsed || {})[0] || (catalogueMetalId ? String(catalogueMetalId) : '');
+        if (firstMetal) {
+            switchModalMetalTab(firstMetal);
+        } else if (typeof window.filterProductsByMetal === 'function') {
+            var active = document.querySelector('#productSelectionModal .category-tab-btn.active');
+            var mid = active ? active.getAttribute('data-metal-id') : '';
+            window.filterProductsByMetal(mid || '');
+        }
+        ensureCatalogueModalRowsVisible();
+        var gn = document.getElementById('modalGroupName');
+        if (gn && template.title) gn.value = template.title;
+    }
+
+    function ensureCatalogueModalRowsVisible() {
+        var tbody = getProductListBody();
+        if (!tbody) return;
+        tbody.querySelectorAll('.product-row').forEach(function (row) {
+            row.style.display = '';
+        });
+        tbody.querySelectorAll('.no-category-products-placeholder, .catalog-design-empty').forEach(function (tr) {
+            tr.remove();
+        });
+    }
+
+    function updateBatchProgressOverlay(designNo, batchNum, batchTotal, completedSets, totalQty) {
+        updateCatalogLoadOverlayTitle(
+            designNo ? ('Loading design ' + designNo + '…') : 'Creating items…'
+        );
+        updateCatalogLoadOverlaySub(
+            'Creating items…\n'
+            + 'Batch ' + batchNum + '/' + batchTotal + '\n'
+            + completedSets + ' / ' + totalQty + ' completed'
+        );
+    }
+
+    function runCatalogueMultiBatchApply(template, totalQty) {
+        if (!template || !template.rows || !template.rows.length) {
+            return Promise.resolve();
+        }
+        if (qtyApplyInFlight) return Promise.resolve();
+
+        var addRowFn = getAddRowFn();
+        var tbody = getProductListBody();
+        if (!addRowFn || !tbody || typeof window.applyModalRowDataToSelectionRow !== 'function') {
+            alert('Product modal is not ready. Please refresh the page.');
+            return Promise.resolve();
+        }
+
+        var designNo = String(template.design_no || '').trim();
+        var catalogueMetalId = template.metal_id || 0;
+        var numBatches = Math.ceil(totalQty / MAX_BATCH_SIZE);
+        var metalsUsed = {};
+        var usedBarcodes = collectUsedBarcodesSeed();
+
+        qtyApplyInFlight = true;
+        setCatalogBatchUiDisabled(true);
+        clearProductListBlank();
+        showPleaseWait(designNo || 'catalogue');
+        updateCatalogLoadOverlayTitle(designNo ? ('Loading design ' + designNo + '…') : 'Creating items…');
+        updateCatalogLoadOverlaySub('Creating items…\nBatch 1/' + numBatches + '\n0 / ' + totalQty + ' completed');
+
+        function processBatch(batchIndex) {
+            if (batchIndex >= numBatches) {
+                return Promise.resolve();
+            }
+            var start = batchIndex * MAX_BATCH_SIZE;
+            var batchQty = Math.min(MAX_BATCH_SIZE, totalQty - start);
+            var completedAfter = Math.min(start + batchQty, totalQty);
+
+            updateBatchProgressOverlay(designNo, batchIndex + 1, numBatches, completedAfter, totalQty);
+
+            return yieldToBrowser().then(function () {
+                return buildCatalogueSetsAsync(template, batchQty, tbody, addRowFn, designNo, catalogueMetalId, {
+                    clearFirst: false,
+                    startCopyIdx: start,
+                    totalQty: totalQty,
+                    metalsUsed: metalsUsed
+                });
+            }).then(function (built) {
+                updateCatalogLoadOverlaySub(
+                    'Assigning barcodes…\n'
+                    + 'Batch ' + (batchIndex + 1) + '/' + numBatches + '\n'
+                    + completedAfter + ' / ' + totalQty + ' completed'
+                );
+                return assignBarcodesToCatalogueSets(built.allSetRowGroups, usedBarcodes).then(function (updatedUsed) {
+                    usedBarcodes = updatedUsed || usedBarcodes;
+                });
+            }).then(function () {
+                return yieldToBrowser().then(function () {
+                    return processBatch(batchIndex + 1);
+                });
+            });
+        }
+
+        return processBatch(0).then(function () {
+            if (!tbody.querySelector('.product-row')) {
+                throw new Error('Catalogue rows could not be added to the product table.');
+            }
+            finalizeCatalogueRowsInModal(template, metalsUsed);
+            maybeAutoCommitCatalogueToOrder(totalQty, numBatches);
+        }).catch(function (err) {
+            var msg = (err && err.message) ? String(err.message) : 'Could not apply catalogue quantity.';
+            showCatalogEmptyMessage(msg);
+            alert(msg);
+        }).then(function () {
+            qtyApplyInFlight = false;
+            setCatalogBatchUiDisabled(false);
+            hidePleaseWait();
+        });
+    }
+
+    function applyCatalogueQtyToModal(template, qty) {
+        if (!template || !template.rows || !template.rows.length) {
+            return Promise.resolve();
+        }
+        if (qtyApplyInFlight) return Promise.resolve();
+
+        var addRowFn = getAddRowFn();
+        var tbody = getProductListBody();
+        if (!addRowFn || !tbody || typeof window.applyModalRowDataToSelectionRow !== 'function') {
+            alert('Product modal is not ready. Please refresh the page.');
+            return Promise.resolve();
+        }
+
+        var qtyCheck = parseCatalogQty(qty, { notify: false });
+        if (!qtyCheck.ok) {
+            return Promise.resolve();
+        }
+        qty = qtyCheck.qty;
+
+        var designNo = String(template.design_no || '').trim();
+        var catalogueMetalId = template.metal_id || 0;
+        qtyApplyInFlight = true;
+        setCatalogBatchUiDisabled(true);
+        showPleaseWait(designNo || 'catalogue');
+
+        return yieldToBrowser().then(function () {
+            return buildCatalogueSetsAsync(template, qty, tbody, addRowFn, designNo, catalogueMetalId, {
+                clearFirst: true,
+                startCopyIdx: 0,
+                totalQty: qty
+            });
+        }).then(function (built) {
+            var allSetRowGroups = built.allSetRowGroups;
+            var metalsUsed = built.metalsUsed;
+
+            if (!tbody.querySelector('.product-row')) {
+                throw new Error('Catalogue rows could not be added to the product table.');
+            }
+
+            updateCatalogLoadOverlaySub('Assigning barcodes…');
+
+            return assignBarcodesToCatalogueSets(allSetRowGroups).then(function () {
+                finalizeCatalogueRowsInModal(template, metalsUsed);
+                maybeAutoCommitCatalogueToOrder(qty, 1);
+            });
+        }).catch(function (err) {
+            var msg = (err && err.message) ? String(err.message) : 'Could not apply catalogue quantity.';
+            showCatalogEmptyMessage(msg);
+            alert(msg);
+        }).then(function () {
+            qtyApplyInFlight = false;
+            setCatalogBatchUiDisabled(false);
+            hidePleaseWait();
+        });
+    }
+
+    function onQtyApplyClick() {
+        if (qtyApplyInFlight) return;
+        if (catalogFetchInFlight) {
+            alert('Loading design catalogue, please wait…');
+            return;
+        }
+        if (!catalogTemplate || !catalogTemplate.rows || !catalogTemplate.rows.length) {
+            alert('Select a Design No. first, then enter Qty and press Enter.');
+            return;
+        }
+        var check = parseCatalogQty(getCatalogQty(), { notify: true });
+        if (!check.ok) return;
+
+        if (check.qty > MAX_BATCH_SIZE) {
+            confirmCatalogBatchDialog(check.qty).then(function (confirmed) {
+                if (confirmed) {
+                    runCatalogueMultiBatchApply(catalogTemplate, check.qty);
+                }
+            });
+            return;
+        }
+        applyCatalogueQtyToModal(catalogTemplate, check.qty);
+    }
+
+    function onQtyInputKeydown(e) {
+        if (!e || (e.key !== 'Enter' && e.keyCode !== 13)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onQtyApplyClick();
+    }
+
+    function bindQtyApplyButton() {
+        var btn = document.getElementById('modalProductQtyApplyBtn');
+        if (btn && !btn._catalogQtyBound) {
+            btn._catalogQtyBound = true;
+            btn.addEventListener('click', onQtyApplyClick);
+        }
+        var qtyInp = document.getElementById('modalProductQty');
+        if (qtyInp && !qtyInp._catalogQtyEnterBound) {
+            qtyInp._catalogQtyEnterBound = true;
+            qtyInp.addEventListener('keydown', onQtyInputKeydown);
+        }
     }
 
     function loadCatalogueIntoModal(designNo) {
@@ -244,81 +792,70 @@
         }
 
         catalogFetchInFlight = true;
+        clearProductListBlank();
         showPleaseWait(designNo);
 
-        return new Promise(function (resolve) {
-            requestAnimationFrame(function () {
-                requestAnimationFrame(function () {
-                    resolve();
-                });
-            });
-        }).then(function () {
+        return yieldToBrowser().then(function () {
             return fetch(
                 'ajax/get-jewelry-catalogue-for-modal.php?design_no=' + encodeURIComponent(designNo),
                 { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } }
             );
         })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                return r.text().then(function (text) {
+                    var data = null;
+                    try {
+                        data = text ? JSON.parse(text) : null;
+                    } catch (parseErr) {
+                        var snippet = String(text || '').replace(/\s+/g, ' ').trim();
+                        if (snippet.length > 220) {
+                            snippet = snippet.slice(0, 220) + '…';
+                        }
+                        throw new Error(snippet || ('Server returned HTTP ' + r.status));
+                    }
+                    if (!r.ok && (!data || !data.message)) {
+                        throw new Error((data && data.message) || ('Server returned HTTP ' + r.status));
+                    }
+                    return data;
+                });
+            })
             .then(function (data) {
                 catalogFetchInFlight = false;
                 hidePleaseWait();
 
                 if (!data || !data.success) {
-                    showCatalogEmptyMessage((data && data.message) || 'Could not load catalogue.');
-                    alert((data && data.message) || 'Could not load catalogue.');
+                    var failMsg = (data && data.message) || 'Could not load catalogue.';
+                    showCatalogEmptyMessage(failMsg);
+                    alert(failMsg);
                     return;
                 }
 
                 var rows = data.modal_rows || [];
                 if (!rows.length) {
-                    showCatalogEmptyMessage('No Bill of Material items found for this design.');
-                    alert('This catalogue has no Bill of Material items.');
+                    var dn = String(designNo || '').trim();
+                    var hint = dn
+                        ? ('Design ' + dn + ' has no Bill of Material lines. Open Product Catalogue, edit this design, and add products under Bill of Material — or ensure title, weight, and amount are saved on the catalogue.')
+                        : 'This catalogue has no Bill of Material items.';
+                    showCatalogEmptyMessage(hint);
+                    alert(hint);
                     return;
                 }
 
-                var tbody = getProductListBody();
-                if (!tbody) return;
+                catalogTemplate = {
+                    design_no: designNo,
+                    rows: rows,
+                    metal_id: data.metal_id || 0,
+                    title: data.title || ''
+                };
 
-                tbody.innerHTML = '';
-                var metalsUsed = {};
-
-                rows.forEach(function (md) {
-                    addRowFn();
-                    var row = tbody.querySelector('.product-row:last-of-type');
-                    if (!row) return;
-                    var rowMetal = resolveRowMetalId(md, data.metal_id);
-                    if (rowMetal) {
-                        row.setAttribute('data-metal-id', rowMetal);
-                        metalsUsed[rowMetal] = true;
-                    }
-                    row.setAttribute('data-catalogue-design', designNo);
-                    window.applyModalRowDataToSelectionRow(row, md);
-                });
-
-                var firstMetal = Object.keys(metalsUsed)[0] || (data.metal_id ? String(data.metal_id) : '');
-                if (firstMetal) {
-                    switchModalMetalTab(firstMetal);
-                } else if (typeof window.filterProductsByMetal === 'function') {
-                    var active = document.querySelector('#productSelectionModal .category-tab-btn.active');
-                    var mid = active ? active.getAttribute('data-metal-id') : '';
-                    window.filterProductsByMetal(mid || '');
-                }
-
-                var gn = document.getElementById('modalGroupName');
-                if (gn && data.title) {
-                    gn.value = data.title;
-                }
-
-                var visible = tbody.querySelectorAll('tr.product-row:not([style*="display: none"])').length;
-                if (visible === 0 && Object.keys(metalsUsed).length > 0) {
-                    switchModalMetalTab(Object.keys(metalsUsed)[0]);
-                }
+                clearProductListBlank();
             })
-            .catch(function () {
+            .catch(function (err) {
                 catalogFetchInFlight = false;
                 hidePleaseWait();
-                showCatalogEmptyMessage('Network error while loading catalogue.');
-                alert('Could not load catalogue design.');
+                var msg = (err && err.message) ? String(err.message) : 'Could not load catalogue design.';
+                showCatalogEmptyMessage(msg);
+                alert(msg);
             });
     }
 
@@ -328,7 +865,11 @@
         var val = (sel.value || '').trim();
         if (!val) {
             if (catalogFetchInFlight) return;
+            catalogTemplate = null;
             hidePleaseWait();
+            resetProductListToDefault();
+            var qtyInp = document.getElementById('modalProductQty');
+            if (qtyInp) qtyInp.value = '';
             return;
         }
         loadCatalogueIntoModal(val);
@@ -351,16 +892,23 @@
     function onModalShown() {
         designListLoaded = false;
         hidePleaseWait();
+        ensureAutoAddToOrderChecked();
         bindDesignNoUi();
+        bindQtyApplyButton();
         loadDesignNumbers(true);
     }
 
     function init() {
+        ensureAutoAddToOrderChecked();
         bindDesignNoUi();
+        bindQtyApplyButton();
         if (typeof jQuery !== 'undefined') {
             jQuery(document).on('shown.bs.modal', '#productSelectionModal', onModalShown);
             jQuery(document).on('hidden.bs.modal', '#productSelectionModal', function () {
                 catalogFetchInFlight = false;
+                qtyApplyInFlight = false;
+                catalogTemplate = null;
+                setCatalogBatchUiDisabled(false);
                 hidePleaseWait();
             });
         }
@@ -374,6 +922,11 @@
 
     window.auragoldLoadJewelryCatalogDesignNumbers = loadDesignNumbers;
     window.auragoldLoadJewelryCatalogIntoModal = loadCatalogueIntoModal;
+    window.auragoldApplyCatalogueQtyToModal = function (qty) {
+        if (!catalogTemplate) return Promise.resolve();
+        return applyCatalogueQtyToModal(catalogTemplate, qty != null ? qty : getCatalogQty());
+    };
+    window.auragoldRunCatalogueMultiBatchApply = runCatalogueMultiBatchApply;
     window.auragoldHideCatalogDesignLoader = hidePleaseWait;
     window.auragoldShowCatalogDesignLoader = showPleaseWait;
 })();

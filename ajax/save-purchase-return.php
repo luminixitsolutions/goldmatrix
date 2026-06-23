@@ -4,6 +4,7 @@ require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -416,6 +417,7 @@ try {
                 $barcode = esc(auragold_resolve_unique_invoice_item_barcode($conn, $item, $invoice_used_barcodes));
 
                 // Insert return item with all fields matching table structure
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_purchase_return_items', $item);
                 $item_sql = "
                     INSERT INTO tbl_purchase_return_items (
                         return_id, product_id, product_characteristic_id, barcode, 
@@ -426,7 +428,7 @@ try {
                         making_amount, amount, tax_amount, 
                         net_amount, net_amt_with_tax, net_amt_weight,
                         diamond_weight, gemstone_weight, diamond_amount,
-                        design_no,
+                        design_no{$ef_parts['columns']},
                         status, created_at
                     ) VALUES (
                         $return_id, $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
@@ -448,7 +450,7 @@ try {
                         " . (isset($item['diamond_weight']) ? (float)$item['diamond_weight'] : 0) . ",
                         " . (isset($item['gemstone_weight']) ? (float)$item['gemstone_weight'] : 0) . ",
                         $diamond_amount,
-                        " . ($design_no ? "'$design_no'" : "NULL") . ",
+                        " . ($design_no ? "'$design_no'" : "NULL") . "{$ef_parts['values']},
                         1, NOW()
                     )
                 ";

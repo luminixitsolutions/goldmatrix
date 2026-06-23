@@ -34,6 +34,85 @@ function gas_sj_has(array $sj_cols, $name) {
     return isset($sj_cols[strtolower((string) $name)]);
 }
 
+/** Inward qty: prefer live current_qty; when zeroed (e.g. stock-journal merge), fall back to opening_qty. */
+function gas_stock_inward_qty_expr(string $alias = 's'): string
+{
+    return 'COALESCE(NULLIF(' . $alias . '.current_qty, 0), ' . $alias . '.opening_qty, 0)';
+}
+
+/** Inward weight: prefer live current_weight; when zeroed (e.g. stock-journal merge), fall back to opening_weight. */
+function gas_stock_inward_wt_expr(string $alias = 's'): string
+{
+    return 'COALESCE(NULLIF(' . $alias . '.current_weight, 0), ' . $alias . '.opening_weight, 0)';
+}
+
+/** @alias gas_stock_inward_wt_expr Net on-hand receipt weight (gold-silver-analysis / stock-history). */
+function gas_stock_balance_inward_wt_expr(string $alias = 's'): string
+{
+    return gas_stock_inward_wt_expr($alias);
+}
+
+/** @alias gas_stock_inward_qty_expr Net on-hand receipt qty (gold-silver-analysis / stock-history). */
+function gas_stock_balance_inward_qty_expr(string $alias = 's'): string
+{
+    return gas_stock_inward_qty_expr($alias);
+}
+
+/** @return string[] lowercased tbl_metal.display_name values for a tab */
+function gas_tab_metal_display_names(string $tab): array
+{
+    $tab = strtolower(trim($tab));
+    if ($tab === 'gold') {
+        return ['gold'];
+    }
+    if ($tab === 'silver') {
+        return ['silver'];
+    }
+
+    return ['gold', 'silver'];
+}
+
+/**
+ * Stock row belongs on a gold/silver tab when tbl_stock.metal_id matches or the product characteristic metal does
+ * (stock journal rows sometimes default metal_id to Gold when characteristic metal was not resolved).
+ */
+function gas_sql_stock_matches_tab_metal(mysqli $conn, string $tab, array $tab_metal_ids, string $alias = 's'): string
+{
+    if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $alias)) {
+        $alias = 's';
+    }
+    $tab_metal_ids = array_values(array_unique(array_filter(array_map('intval', $tab_metal_ids))));
+    $parts = [];
+    if ($tab_metal_ids !== []) {
+        $parts[] = $alias . '.metal_id IN (' . implode(',', $tab_metal_ids) . ')';
+    }
+    $names = gas_tab_metal_display_names($tab);
+    $name_sql = implode(',', array_map(static function ($n) use ($conn) {
+        return "'" . mysqli_real_escape_string($conn, $n) . "'";
+    }, $names));
+    if ($name_sql !== '') {
+        $parts[] = "EXISTS (
+            SELECT 1 FROM tbl_product_characteristics pc_gas
+            INNER JOIN tbl_metal m_gas ON m_gas.id = pc_gas.metal_id AND m_gas.status = 1
+            WHERE pc_gas.status = 1
+            AND LOWER(TRIM(m_gas.display_name)) IN ($name_sql)
+            AND (
+                pc_gas.id = {$alias}.product_characteristic_id
+                OR (
+                    {$alias}.product_characteristic_id IS NULL
+                    AND pc_gas.product_id = {$alias}.product_id
+                    AND (pc_gas.branch_id = {$alias}.branch_id OR pc_gas.branch_id IS NULL OR {$alias}.branch_id IS NULL OR pc_gas.branch_id = 0 OR {$alias}.branch_id = 0)
+                )
+            )
+        )";
+    }
+    if ($parts === []) {
+        return '1=0';
+    }
+
+    return '(' . implode(' OR ', $parts) . ')';
+}
+
 function gas_sj_active_sql(array $sj_cols) {
     if (!gas_sj_has($sj_cols, 'status')) {
         return '1=1';
@@ -176,7 +255,7 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         }
     }
 
-    $scope_metals = getList("SELECT id, display_name AS name FROM tbl_metal WHERE status = 1 AND display_name IN ('Gold','Silver') ORDER BY display_name ASC, id ASC");
+    $scope_metals = getList("SELECT id, display_name AS name FROM tbl_metal WHERE status = 1 AND LOWER(TRIM(display_name)) IN ('gold','silver') ORDER BY display_name ASC, id ASC");
     $scope_metal_ids = array_map('intval', array_column($scope_metals ?: [], 'id'));
     $gold_metal_ids = [];
     $silver_metal_ids = [];
@@ -202,9 +281,8 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         $tab_metal_ids = $silver_metal_ids;
     }
     $tab_metal_ids = array_values(array_unique(array_map('intval', $tab_metal_ids)));
-    $scope_ids_sql = implode(',', $tab_metal_ids);
-    if ($scope_ids_sql === '') {
-        $scope_ids_sql = '0';
+    if ($tab_metal_ids === []) {
+        $tab_metal_ids = [0];
     }
 
     $has_stock = gas_tbl_exists($conn, 'tbl_stock');
@@ -245,7 +323,7 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
     $inner_where = [
         's.status = 1',
         "(s.barcode IS NOT NULL AND TRIM(COALESCE(s.barcode,'')) <> '')",
-        's.metal_id IN (' . $scope_ids_sql . ')',
+        gas_sql_stock_matches_tab_metal($conn, $tab, $tab_metal_ids, 's'),
     ];
     $gas_br_pred = gas_tbl_stock_branch_predicate($conn, $branch_filter, 's');
     if ($gas_br_pred !== '') {
@@ -253,15 +331,22 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
     }
     $inner_sql = implode(' AND ', $inner_where);
 
-    $gas_stk_in_types_sql = "'opening','purchase','stock_journal','balance','sale_return'";
+    $gas_stk_in_types_sql = "'opening','purchase','stock_journal','balance','sale_return','inward'";
 
+    $in_qty = gas_stock_balance_inward_qty_expr('s');
+    $in_wt = gas_stock_balance_inward_wt_expr('s');
     $agg_subquery = "
     SELECT s.barcode, s.branch_id,
-        (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)
+        (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN $in_qty ELSE 0 END)
          - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)) AS bal_qty,
-        (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)
+        (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN $in_wt ELSE 0 END)
          - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)) AS bal_wt,
-        COALESCE(MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN s.id END), MAX(s.id)) AS pick_id
+        COALESCE(
+            MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql)
+                AND ($in_wt) > 0.00001 THEN s.id END),
+            MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN s.id END),
+            MAX(s.id)
+        ) AS pick_id
     FROM tbl_stock s
     LEFT JOIN tbl_products p ON s.product_id = p.id
     LEFT JOIN tbl_product_characteristics pc ON s.product_characteristic_id = pc.id
@@ -276,6 +361,7 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         $sj_status_sql = gas_sj_active_sql($sj_cols);
         $sj_parts = [
             gas_sj_sel_expr($sj_cols, 'id', 'sj_row_id'),
+            gas_sj_sel_expr($sj_cols, 'item_id', 'sj_item_id'),
             gas_sj_sel_expr($sj_cols, 'barcode', 'sj_barcode'),
             gas_sj_sel_expr($sj_cols, 'invoice_id', 'sj_invoice_id'),
             gas_sj_sel_expr($sj_cols, 'huid_no', 'huid_no'),
@@ -398,7 +484,8 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         sj.wastage_wt,
         sj.wastage_per,
         sj.sj_created_at,
-        sj.sj_status
+        sj.sj_status,
+        sj.sj_item_id
 ";
 
     if (!$has_stock_journal) {
@@ -448,7 +535,8 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         NULL AS wastage_wt,
         NULL AS wastage_per,
         NULL AS sj_created_at,
-        NULL AS sj_status
+        NULL AS sj_status,
+        NULL AS sj_item_id
     FROM ($agg_subquery) bal
     INNER JOIN tbl_stock s ON s.id = bal.pick_id
     LEFT JOIN tbl_branches b ON s.branch_id = b.id
@@ -494,11 +582,178 @@ function auragold_gold_silver_stock_list_fetch(mysqli $conn, string $tab): array
         }
     }
 
+    $extra_field_defs = auragold_gold_silver_stock_extra_field_defs($conn, $branch_filter, $tab);
+    if (!empty($rows) && !empty($extra_field_defs)) {
+        auragold_gold_silver_stock_attach_extra_field_values($conn, $rows, $extra_field_defs);
+    }
+
     return [
         'rows' => $rows,
         'error' => $load_error,
         'has_journal_images' => $gas_has_journal_images,
+        'extra_field_defs' => $extra_field_defs,
+        'branch_id' => $branch_filter,
     ];
+}
+
+/**
+ * Active extra-field column definitions for gold-and-silver tabs.
+ *
+ * @return array<string, array{id:int,label:string,metal_type:string}>
+ */
+function auragold_gold_silver_stock_extra_field_defs($conn, int $branch_id, string $tab): array
+{
+    if (!$conn instanceof mysqli) {
+        return [];
+    }
+    if (!function_exists('auragold_get_extra_fields')) {
+        require_once __DIR__ . '/auragold_extra_fields_schema.php';
+    }
+
+    $metals = [];
+    $tab = strtolower(trim($tab));
+    if ($tab === 'gold' || $tab === 'all') {
+        $metals[] = 'Gold';
+    }
+    if ($tab === 'silver' || $tab === 'all') {
+        $metals[] = 'Silver';
+    }
+
+    $defs = [];
+    foreach ($metals as $metal) {
+        foreach (auragold_get_extra_fields($conn, $branch_id, $metal) as $field) {
+            if ((int) ($field['status'] ?? 0) !== 1) {
+                continue;
+            }
+            $id = (int) ($field['id'] ?? 0);
+            $label = trim((string) ($field['display_name'] ?? ''));
+            if ($id <= 0 || $label === '') {
+                continue;
+            }
+            $key = 'ef_' . $id;
+            $defs[$key] = [
+                'id' => $id,
+                'label' => $label,
+                'metal_type' => (string) ($field['metal_type'] ?? $metal),
+            ];
+        }
+    }
+
+    return $defs;
+}
+
+/**
+ * Attach parsed extra-field values to each stock row (by barcode / purchase line id).
+ *
+ * @param array<int, array<string, mixed>> $rows
+ * @param array<string, array{id:int,label:string,metal_type:string}> $field_defs
+ */
+function auragold_gold_silver_stock_attach_extra_field_values($conn, array &$rows, array $field_defs): void
+{
+    if (!$conn instanceof mysqli || empty($rows) || empty($field_defs)) {
+        return;
+    }
+    if (!function_exists('auragold_ensure_extra_fields_json_column')) {
+        require_once __DIR__ . '/auragold_extra_fields_item_values.php';
+    }
+    if (!auragold_ensure_extra_fields_json_column($conn, 'tbl_purchase_invoice_items')) {
+        return;
+    }
+
+    $barcodes = [];
+    $item_ids = [];
+    foreach ($rows as $row) {
+        $bc = trim((string) ($row['barcode'] ?? ''));
+        if ($bc !== '') {
+            $barcodes[$bc] = $bc;
+        }
+        $iid = (int) ($row['sj_item_id'] ?? 0);
+        if ($iid > 0) {
+            $item_ids[$iid] = $iid;
+        }
+    }
+
+    $json_by_barcode = [];
+    $json_by_item_id = [];
+    if (!empty($barcodes)) {
+        $in = [];
+        foreach ($barcodes as $bc) {
+            $in[] = "'" . mysqli_real_escape_string($conn, $bc) . "'";
+        }
+        $res = @mysqli_query(
+            $conn,
+            'SELECT id, barcode, extra_fields_json FROM tbl_purchase_invoice_items
+             WHERE barcode IN (' . implode(',', $in) . ')
+               AND extra_fields_json IS NOT NULL AND TRIM(extra_fields_json) <> \'\'
+             ORDER BY id DESC'
+        );
+        if ($res) {
+            while ($r = mysqli_fetch_assoc($res)) {
+                $bc = trim((string) ($r['barcode'] ?? ''));
+                $raw = trim((string) ($r['extra_fields_json'] ?? ''));
+                if ($bc !== '' && $raw !== '' && !isset($json_by_barcode[$bc])) {
+                    $json_by_barcode[$bc] = $raw;
+                }
+                $iid = (int) ($r['id'] ?? 0);
+                if ($iid > 0 && $raw !== '' && !isset($json_by_item_id[$iid])) {
+                    $json_by_item_id[$iid] = $raw;
+                }
+            }
+            mysqli_free_result($res);
+        }
+    }
+
+    if (!empty($item_ids)) {
+        $missing = array_diff_key($item_ids, $json_by_item_id);
+        if (!empty($missing)) {
+            $inIds = implode(',', array_map('intval', array_values($missing)));
+            $res = @mysqli_query(
+                $conn,
+                'SELECT id, extra_fields_json FROM tbl_purchase_invoice_items
+                 WHERE id IN (' . $inIds . ')
+                   AND extra_fields_json IS NOT NULL AND TRIM(extra_fields_json) <> \'\'
+                 ORDER BY id DESC'
+            );
+            if ($res) {
+                while ($r = mysqli_fetch_assoc($res)) {
+                    $iid = (int) ($r['id'] ?? 0);
+                    $raw = trim((string) ($r['extra_fields_json'] ?? ''));
+                    if ($iid > 0 && $raw !== '' && !isset($json_by_item_id[$iid])) {
+                        $json_by_item_id[$iid] = $raw;
+                    }
+                }
+                mysqli_free_result($res);
+            }
+        }
+    }
+
+    foreach ($rows as $idx => $row) {
+        $raw = '';
+        $bc = trim((string) ($row['barcode'] ?? ''));
+        if ($bc !== '' && isset($json_by_barcode[$bc])) {
+            $raw = $json_by_barcode[$bc];
+        } else {
+            $iid = (int) ($row['sj_item_id'] ?? 0);
+            if ($iid > 0 && isset($json_by_item_id[$iid])) {
+                $raw = $json_by_item_id[$iid];
+            }
+        }
+
+        $values = [];
+        if ($raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $fid => $val) {
+                    if ($val === null || $val === '') {
+                        continue;
+                    }
+                    $values[(string) $fid] = (string) $val;
+                }
+            }
+        }
+
+        $rows[$idx]['extra_field_values'] = $values;
+    }
 }
 
 function auragold_gold_silver_export_tab_period_line(string $tab): string

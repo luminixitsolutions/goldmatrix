@@ -94,7 +94,10 @@
         return { partyName: partyName, partyId: partyId, params: params };
     }
 
-    function load(cfg) {
+    var loadDebounceTimer = null;
+    var loadDebounceMs = 120;
+
+    function loadImmediate(cfg) {
         cfg = cfg || global.PB_PAGE_CONFIG || {};
         var partyNameEl = cfg.partyNameSelector ? document.querySelector(cfg.partyNameSelector) : document.getElementById('customerName');
         if (!partyNameEl) {
@@ -134,10 +137,27 @@
         if (typeof cfg.onBeforeLoad === 'function') {
             cfg.onBeforeLoad();
         }
-        return fetch(url)
+        var fetchOpts = { credentials: 'same-origin' };
+        if (typeof AbortController !== 'undefined') {
+            var abortCtrl = new AbortController();
+            fetchOpts.signal = abortCtrl.signal;
+            setTimeout(function () {
+                abortCtrl.abort();
+            }, 60000);
+        }
+        return fetch(url, fetchOpts)
             .then(function (r) {
                 if (!r.ok) throw new Error('Network error');
-                return r.json();
+                return r.text();
+            })
+            .then(function (text) {
+                var data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseErr) {
+                    throw new Error('Invalid balance response');
+                }
+                return data;
             })
             .then(function (data) {
                 if (myGen !== global.__pbLoadGeneration) return;
@@ -180,6 +200,13 @@
                 if (typeof cfg.onAfterLoad === 'function') cfg.onAfterLoad();
             })
             .finally(function () {
+                if (myGen !== global.__pbLoadGeneration) {
+                    global.__pbBalanceFetchPending = Math.max(
+                        0,
+                        (typeof global.__pbBalanceFetchPending === 'number' ? global.__pbBalanceFetchPending : 1) - 1
+                    );
+                    return;
+                }
                 global.__pbBalanceFetchPending = Math.max(
                     0,
                     (typeof global.__pbBalanceFetchPending === 'number' ? global.__pbBalanceFetchPending : 1) - 1
@@ -200,6 +227,16 @@
                     }
                 }
             });
+    }
+
+    function load(cfg) {
+        cfg = cfg || global.PB_PAGE_CONFIG || {};
+        clearTimeout(loadDebounceTimer);
+        return new Promise(function (resolve) {
+            loadDebounceTimer = setTimeout(function () {
+                Promise.resolve(loadImmediate(cfg)).then(resolve);
+            }, loadDebounceMs);
+        });
     }
 
     function shouldSkipAutoLoad(cfg) {
@@ -228,7 +265,7 @@
         };
 
         global.loadCustomerBalance = function () {
-            return load(merged);
+            return loadImmediate(merged);
         };
 
         function partyFieldOrIdReady() {
@@ -297,6 +334,7 @@
         formatAmount: formatAmount,
         formatMetal: formatMetal,
         load: load,
+        loadImmediate: loadImmediate,
         clearPanel: clearPanel,
         init: init,
         registerFormatAliases: registerFormatAliases

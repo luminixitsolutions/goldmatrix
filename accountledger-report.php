@@ -306,6 +306,9 @@ $voucher_types = [
     'metal_to_amount' => 'Metal To Amount',
     'amount_to_metal' => 'Amount To Metal',
     'investment_fund_transfer' => 'Investment Fund Transfer',
+    'pdc_receivable' => 'PDC Receivable',
+    'pdc_payable' => 'PDC Payable',
+    'pdc_clearance' => 'PDC Clearance',
 ];
 
 $filter_voucher_keys = [];
@@ -735,6 +738,9 @@ if ($active_tab == 'balance') {
                 WHEN l.transaction_type = 'amount_to_metal' THEN 'Amount To Metal'
                 WHEN l.transaction_type = 'investment_fund_transfer' THEN 'Investment Fund Transfer'
                 WHEN l.transaction_type = 'jobwork_order' THEN 'Job Work Order'
+                WHEN l.transaction_type = 'pdc_receivable' THEN 'PDC Receivable'
+                WHEN l.transaction_type = 'pdc_payable' THEN 'PDC Payable'
+                WHEN l.transaction_type = 'pdc_clearance' THEN 'PDC Clearance'
                 ELSE l.transaction_type
             END as type_of_voucher,
             l.debit_amount,

@@ -74,6 +74,7 @@ if ($voucher !== 'sale_order' && ($product_id <= 0 || $characteristic_id <= 0)) 
 
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stock_journal_excel_import.php';
+require_once __DIR__ . '/../includes/auragold_excel_sample_columns.php';
 
 $preview_only = $voucher === 'sale_order' || (
     !empty($_POST['preview_only']) && (
@@ -128,6 +129,9 @@ if ($voucher !== 'sale_order') {
     }
     $prod = getRecord("SELECT id, name FROM tbl_products WHERE id = $product_id LIMIT 1");
     $product_name = $prod ? trim((string) ($prod['name'] ?? '')) : '';
+    if ($metal_id_sample <= 0 && !empty($pc['metal_id'])) {
+        $metal_id_sample = (int) $pc['metal_id'];
+    }
 }
 
 $tmpPath = $_FILES['excel_file']['tmp_name'];
@@ -208,6 +212,12 @@ foreach ($col as $__ck => $cidx) {
         continue;
     }
     $markExcelUsed($cidx);
+}
+$ef_branch_id = function_exists('auragold_settings_branch_id') ? (int) auragold_settings_branch_id() : 0;
+$extra_field_defs_imp = auragold_excel_sample_extra_field_defs($conn, $metal_id_sample, $ef_branch_id);
+$extra_field_col_map = auragold_sj_excel_map_extra_field_columns($headers, $extra_field_defs_imp);
+foreach ($extra_field_col_map as $efColIdx) {
+    $markExcelUsed((int) $efColIdx);
 }
 $excelExtraColIndexes = [];
 for ($__eci = 1; $__eci <= $highestCol; $__eci++) {
@@ -382,8 +392,20 @@ for ($r = 2; $r <= $highestRow; $r++) {
     $row['wastage_per'] = $sjF($cM, 'wastage_per', $sheet, $r);
     $row['wastage_wt'] = $sjF($cM, 'wastage_wt', $sheet, $r);
     $row['alloy_wt'] = $sjF($cM, 'alloy_wt', $sheet, $r);
+    $row['metal_rate'] = $sjF($cM, 'metal_rate', $sheet, $r);
     $row['metal_value'] = $sjF($cM, 'metal_value', $sheet, $r);
     $row['metal_cost'] = $sjF($cM, 'metal_cost', $sheet, $r);
+    $lineRateExcel = (float) ($row['rate'] ?? 0);
+    $metalRateExcel = (float) ($row['metal_rate'] ?? 0);
+    if ($lineRateExcel <= 0.00001 && $metalRateExcel > 0) {
+        $row['rate'] = $metalRateExcel;
+        $lineRateExcel = $metalRateExcel;
+    } elseif ($metalRateExcel <= 0.00001 && $lineRateExcel > 0) {
+        $row['metal_rate'] = $lineRateExcel;
+    }
+    if ((float) ($row['metal_value'] ?? 0) <= 0.00001 && $lineRateExcel > 0 && $pure_weight > 0) {
+        $row['metal_value'] = $pure_weight * $lineRateExcel;
+    }
     $row['setting_charge'] = $sjF($cM, 'setting_charge', $sheet, $r);
     $row['requested_purity'] = $sjF($cM, 'requested_purity', $sheet, $r);
     $row['requested'] = $sjF($cM, 'requested', $sheet, $r);
@@ -452,6 +474,30 @@ for ($r = 2; $r <= $highestRow; $r++) {
         $qtyR,
         $metalForMk
     );
+
+    $row['extra_fields'] = [];
+    foreach ($extra_field_col_map as $efId => $efCol) {
+        $cv = auragold_sj_excel_ws_cell($sheet, (int) $efCol, $r);
+        try {
+            $vx = $cv->getCalculatedValue();
+        } catch (Throwable $__ef) {
+            $vx = $cv->getValue();
+        }
+        if ($vx instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
+            $vx = $vx->__toString();
+        }
+        if ($vx === null) {
+            $vs = '';
+        } elseif (is_float($vx) || is_int($vx)) {
+            $vxF = (float) $vx;
+            $vs = (is_nan($vxF) || is_infinite($vxF)) ? '' : trim((string) $vx);
+        } else {
+            $vs = trim(preg_replace('/\s+/', ' ', (string) $vx));
+        }
+        if ($vs !== '') {
+            $row['extra_fields'][(string) $efId] = $vs;
+        }
+    }
 
     $extrasRow = [];
     foreach ($excelExtraColIndexes as $eci) {
@@ -559,7 +605,7 @@ if (empty($products)) {
 $floatKeys = [
     'quantity', 'gross_weight', 'less_weight', 'purity', 'final_weight', 'net_weight', 'pure_weight',
     'rate', 'amount', 'net_amount', 'net_amt_tax', 'tax_amount', 'making_amount', 'pkt_wt', 'pkt_less_wt',
-    'stone_weight', 'gold_loss_1', 'gold_loss_2', 'wastage_per', 'wastage_wt', 'alloy_wt', 'metal_value', 'metal_cost',
+    'stone_weight', 'gold_loss_1', 'gold_loss_2', 'wastage_per', 'wastage_wt', 'alloy_wt', 'metal_rate', 'metal_value', 'metal_cost',
     'setting_charge', 'requested_purity', 'requested', 'discount', 'discount_per', 'discount_amount', 'making_rate', 'making_discount_amt', 'making_actual_value', 'making_cost',
     'stone_rate', 'stone_amount', 'stone_cost', 'diamond_amount', 'purchase_amount', 'sale_amount', 'sale_amount_with',
     'reverse', 'other_amount', 'other_weight', 'other_rate', 'hallmark_amount', 'hallmark_rate', 'diamond_value', 'gemstone_value', 'stone_charges', 'other_charges',

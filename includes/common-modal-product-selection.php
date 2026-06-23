@@ -98,8 +98,14 @@ if (empty($common_modal_show_checkbox_column)) {
 ?>
 <!-- Product Selection Modal -->
 <div class="modal fade" id="productSelectionModal" tabindex="-1" role="dialog" aria-labelledby="productSelectionModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl" role="document" style="max-width: 95%;">
+    <div class="modal-dialog modal-xl product-selection-modal-dialog" role="document">
         <div class="modal-content">
+            <div class="product-modal-mobile-header d-md-none">
+                <button type="button" class="close product-modal-mobile-back" aria-label="Back">
+                    <i class="feather icon-chevron-left"></i>
+                </button>
+                <h5 id="productSelectionModalLabel">Add Item</h5>
+            </div>
             <?php if (!empty($common_modal_show_excel_import)): ?>
             <div id="productModalExcelImportLoader" class="product-modal-excel-import-loader" aria-hidden="true">
                 <div class="product-modal-excel-import-loader__panel">
@@ -118,7 +124,7 @@ if (empty($common_modal_show_checkbox_column)) {
             </div> -->
             <div class="modal-body"<?php echo $common_modal_modal_body_attr; ?>>
                 <!-- Category Tabs -->
-                <div class="product-category-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem;">
+                <div class="product-category-tabs">
                     <?php 
                     $first_metal = true;
                     foreach($metals as $metal): 
@@ -149,8 +155,8 @@ if (empty($common_modal_show_checkbox_column)) {
                 </div>
                 
                 <!-- Item Entry Fields Above Table -->
-                <div class="row mb-3" style="background: transparent; padding: 0px; border-radius: 0px;">
-                    <div class="col-md-2">
+                <div class="row mb-3 product-modal-entry-row">
+                    <div class="col-6 col-md-2">
                         <div class="form-group mb-2">
                             <label>Barcode</label>
                             <div class="input-group input-group-sm">
@@ -163,13 +169,13 @@ if (empty($common_modal_show_checkbox_column)) {
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-6 col-md-2">
                         <div class="form-group mb-2">
                             <label>Code</label>
                             <input type="text" class="form-control form-control-sm" id="modalProductCode" placeholder="Code">
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-6 col-md-2">
                         <div class="form-group mb-2">
                             <label for="modalProductDesignNo">Des. No.</label>
                             <select class="form-control form-control-sm" id="modalProductDesignNo" title="Jewellery catalogue design number">
@@ -177,21 +183,23 @@ if (empty($common_modal_show_checkbox_column)) {
                             </select>
                         </div>
                     </div>
-                    <div class="col-md-1">
+                    <div class="col-6 col-md-1">
                         <div class="form-group mb-2">
-                            <label>&nbsp;</label>
+                            <label>Qty</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" class="form-control form-control-sm" id="modalProductQty" value="1" min="1" step="0.01">
+                                <input type="text" class="form-control form-control-sm" id="modalProductQty" value="" placeholder="Qty" min="1" step="0.01">
                                 <div class="input-group-append">
-                                    <button class="btn btn-sm" type="button" style="background: #f8fafc; border: 1px solid #e2e8f0;"><i class="feather icon-refresh-cw"></i></button>
+                                    <button class="btn btn-sm" type="button" id="modalProductQtyApplyBtn" title="Apply quantity — duplicate catalogue items with unique barcodes" style="background: #f8fafc; border: 1px solid #e2e8f0;"><i class="feather icon-refresh-cw"></i></button>
                                 </div>
                             </div>
+                            <input type="checkbox" id="modalCatalogAutoAddToOrder" checked hidden aria-hidden="true" tabindex="-1">
                         </div>
                     </div>
-                    <div class="<?php echo !empty($common_modal_show_group_single_item_checkbox) ? 'col-md-3' : 'col-md-2'; ?>">
+                    <div class="<?php echo !empty($common_modal_show_group_single_item_checkbox) ? 'col-12 col-md-3 product-modal-entry-options-col' : 'col-12 col-md-2 product-modal-entry-options-col'; ?>">
                         <div class="form-group mb-2">
-                            <label>&nbsp;</label>
-                            <div class="d-flex flex-wrap" style="gap: 0.5rem; align-items: center;">
+                            <label class="d-none d-md-block">&nbsp;</label>
+                            <label class="d-md-none">Options</label>
+                            <div class="d-flex flex-wrap product-modal-entry-options">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="modalMetalUnfix">
                                     <label class="form-check-label" for="modalMetalUnfix" style="font-size: 0.75rem;">Metal Unfix</label>
@@ -220,9 +228,9 @@ if (empty($common_modal_show_checkbox_column)) {
                 </div>
                 
                 <!-- Column Visibility Settings -->
-                <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-2 product-modal-toolbar-row">
                     <h6 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #1e293b;">Product Selection</h6>
-                    <div class="d-flex align-items-center" style="gap: 0.5rem;">
+                    <div class="d-flex align-items-center product-modal-toolbar-actions">
                         <?php if (!empty($common_modal_show_excel_import)): ?>
                         <div class="dropdown product-modal-excel-import-wrap">
                             <button type="button" class="btn btn-purple btn-sm dropdown-toggle" data-toggle="dropdown" aria-expanded="false" title="Import lines from Excel">
@@ -236,7 +244,7 @@ if (empty($common_modal_show_checkbox_column)) {
                         <input type="file" id="<?php echo htmlspecialchars($common_modal_excel_import_file_id); ?>" accept=".xlsx,.xls" style="display: none;" tabindex="-1">
                         <?php endif; ?>
                         <?php if (!empty($common_modal_show_add_product_in_header)): ?>
-                        <button type="button" class="<?php echo htmlspecialchars($common_modal_add_row_btn_class); ?>" id="<?php echo htmlspecialchars($common_modal_add_row_btn_id); ?>" style="background: #c5a864; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; gap: 0.25rem;">
+                        <button type="button" class="<?php echo htmlspecialchars($common_modal_add_row_btn_class); ?>" id="<?php echo htmlspecialchars($common_modal_add_row_btn_id); ?>" style="background: linear-gradient(135deg, #c5a864 0%, #a68a4a 100%); color: #11294b; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; gap: 0.25rem; font-weight: 600;">
                             <i class="feather icon-plus"></i> Add Product
                         </button>
                         <?php endif; ?>
@@ -660,6 +668,30 @@ if (empty($common_modal_show_checkbox_column)) {
                 </div>
                 
                 <style>
+                /* Stack above .company-header (z-index 1300 in newcss.css) so metal tabs are not hidden under the top bar */
+                #productSelectionModal.modal {
+                    z-index: 10600 !important;
+                }
+                /* Only while product selection is open — do not raise every .modal-backdrop (breaks payment modals) */
+                body.modal-open:has(#productSelectionModal.show) .modal-backdrop {
+                    z-index: 10550 !important;
+                }
+                /* Product picker from a row inside product selection modal — above #productSelectionModal (10600) */
+                #productSearchModal {
+                    z-index: 10700 !important;
+                }
+                #productSelectionModal .modal-dialog {
+                    margin-top: 1.25rem !important;
+                    margin-bottom: 1rem !important;
+                }
+                #productSelectionModal .product-category-tabs {
+                    position: sticky;
+                    top: 0;
+                    z-index: 12;
+                    background: #fff;
+                    padding-top: 0.35rem;
+                    margin-top: -0.25rem;
+                }
                 /* Excel import overlay (sale order / purchase invoice only when flag is on) */
                 #productSelectionModal .modal-content {
                     position: relative;
@@ -957,6 +989,16 @@ if (empty($common_modal_show_checkbox_column)) {
                     box-sizing: border-box;
                 }
                 </style>
+                <link rel="stylesheet" href="assets/css/product-selection-modal-mobile.css?v=<?php echo @filemtime(__DIR__ . '/../assets/css/product-selection-modal-mobile.css'); ?>">
+                <!-- Mobile: columns as 2-col form (table hidden via CSS) -->
+                <div id="productModalMobileFormWrap" class="product-modal-mobile-form-wrap d-md-none">
+                    <div id="productModalMobileFormEmpty" class="product-modal-mobile-form-empty" hidden aria-hidden="true"></div>
+                    <div id="productModalMobileForm" class="product-row-detail-modal__form product-modal-mobile-form"></div>
+                    <div id="productModalMobileFormFooter" class="product-modal-mobile-form-footer" hidden>
+                        <button type="button" class="product-row-detail-modal__btn-clear" data-action="mobile-clear">Clear</button>
+                        <button type="button" class="product-row-detail-modal__btn-save" data-action="mobile-save">Save</button>
+                    </div>
+                </div>
                 <!-- Product List Table with All Options - Horizontally Scrollable (scroll wrapper needed for sticky right columns) -->
                 <div class="product-list-table-outer product-selection-wrapper" id="productListTableOuter">
                 <div id="productListTableScrollWrapper" class="table-responsive" style="overflow-x: auto; overflow-y: auto; max-height: 500px; border: 1px solid #e2e8f0; border-radius: 6px; position: relative;">
@@ -1109,14 +1151,14 @@ if (empty($common_modal_show_checkbox_column)) {
                 </div>
                 
                 <!-- Bottom Section -->
-                <div class="row mt-3">
-                    <div class="col-md-6">
+                <div class="row mt-3 product-modal-bottom-row">
+                    <div class="col-6 col-md-6">
                         <div class="form-group mb-2">
                             <label>Group Name</label>
                             <input type="text" class="form-control form-control-sm" id="modalGroupName" placeholder="Group Name">
                         </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-6 col-md-6">
                         <div class="form-group mb-2">
                             <label>Comment</label>
                             <input type="text" class="form-control form-control-sm" id="modalComment" placeholder="Comment">
@@ -1153,3 +1195,46 @@ if (function_exists('auragold_echo_product_modal_spec_masters_js')) {
 }
 $GLOBALS['auragold_common_modal_product_selection_included'] = true;
 ?>
+<script>
+(function () {
+    var modal = document.getElementById('productSelectionModal');
+    if (!modal || modal.dataset.mobileTabsScrollBound === '1') {
+        return;
+    }
+    modal.dataset.mobileTabsScrollBound = '1';
+
+    function isMobileTabs() {
+        return window.matchMedia('(max-width: 767.98px)').matches;
+    }
+
+    function scrollActiveCategoryTab(inline) {
+        if (!isMobileTabs()) {
+            return;
+        }
+        var tabs = modal.querySelector('.product-category-tabs');
+        var active = tabs && tabs.querySelector('.category-tab-btn.active');
+        if (!active || typeof active.scrollIntoView !== 'function') {
+            return;
+        }
+        active.scrollIntoView({
+            inline: inline || 'nearest',
+            block: 'nearest',
+            behavior: 'auto'
+        });
+    }
+
+    modal.addEventListener('shown.bs.modal', function () {
+        scrollActiveCategoryTab('start');
+    });
+
+    modal.addEventListener('click', function (e) {
+        var btn = e.target.closest('.category-tab-btn');
+        if (!btn || !isMobileTabs()) {
+            return;
+        }
+        window.setTimeout(function () {
+            btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+        }, 0);
+    });
+})();
+</script>

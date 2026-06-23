@@ -15,6 +15,7 @@ $fetch = auragold_gold_silver_stock_list_fetch($conn, $tab);
 $rows = $fetch['rows'];
 $load_error = $fetch['error'];
 $gas_has_journal_images = $fetch['has_journal_images'];
+$gas_extra_field_defs = is_array($fetch['extra_field_defs'] ?? null) ? $fetch['extra_field_defs'] : [];
 
 // Placeholder thumbnail when stock has no image or primary URL fails (admin/no_image.jpg).
 $gas_no_image_src = 'no_image.jpg';
@@ -91,6 +92,15 @@ $gas_column_group_defs = [
         'keys' => ['metal_cost', 'making_cost', 'stone_cost', 'purchase_amount', 'making_charge_amt', 'stone_amt', 'metal_value', 'stone_rate', 'making_charge_rate', 'making_type', 'stone_charge_type'],
     ],
 ];
+foreach ($gas_extra_field_defs as $ef_key => $ef_meta) {
+    $gas_columns[$ef_key] = (string) ($ef_meta['label'] ?? $ef_key);
+}
+if (!empty($gas_extra_field_defs)) {
+    $gas_column_group_defs['extra'] = [
+        'label' => 'Extra Fields',
+        'keys' => array_keys($gas_extra_field_defs),
+    ];
+}
 /** @var array<string, array{label: string, id: string}> per column key */
 $gas_col_group_info = [];
 foreach ($gas_column_group_defs as $gid => $gdef) {
@@ -951,6 +961,19 @@ foreach ($rows as $r) {
         'wastage_wt' => htmlspecialchars(gas_fmt_num($r['wastage_wt'] ?? null, 3), ENT_QUOTES, 'UTF-8'),
         'wastage_per' => htmlspecialchars(gas_fmt_num($r['wastage_per'] ?? null, 2), ENT_QUOTES, 'UTF-8'),
     ];
+    $ef_vals = is_array($r['extra_field_values'] ?? null) ? $r['extra_field_values'] : [];
+    foreach ($gas_extra_field_defs as $ef_key => $ef_meta) {
+        $ef_id = (int) ($ef_meta['id'] ?? 0);
+        $ef_raw = '';
+        if ($ef_id > 0) {
+            if (isset($ef_vals[(string) $ef_id])) {
+                $ef_raw = (string) $ef_vals[(string) $ef_id];
+            } elseif (isset($ef_vals[$ef_id])) {
+                $ef_raw = (string) $ef_vals[$ef_id];
+            }
+        }
+        $gas_row_cells[$ef_key] = htmlspecialchars($ef_raw, ENT_QUOTES, 'UTF-8');
+    }
     echo '<tr data-gas-barcode="' . htmlspecialchars($gas_row_barcode, ENT_QUOTES, 'UTF-8') . '">';
     foreach ($gas_columns as $gck => $_glab) {
         $gm = $gas_col_meta[$gck];

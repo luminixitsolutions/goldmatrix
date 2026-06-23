@@ -4,6 +4,7 @@ require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -845,6 +846,9 @@ try {
                 $mq_val = $qi_has_metal_qty ? ", $metal_qty" : "";
                 $mw_col = $qi_has_metal_weight ? ", metal_weight" : "";
                 $mw_val = $qi_has_metal_weight ? ", $metal_weight" : "";
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_sale_quotation_items', $item);
+                $ef_col = $ef_parts['columns'];
+                $ef_val = $ef_parts['values'];
                 // Insert quotation item (all fields including diamond-related)
                 $item_sql = "
                     INSERT INTO tbl_sale_quotation_items (
@@ -852,7 +856,7 @@ try {
                         carat, quantity, gross_weight, less_weight, purity, purity_weight,
                         final_weight, net_weight, pure_weight, rate,
                         making_amount, amount, tax_amount, net_amount, net_amt_with_tax,
-                        design_no, location_id, status, created_at $dc_col $mr_col $ct_col $mv_col $da_col $sa_col $sw_col $mq_col $mw_col
+                        design_no, location_id, status, created_at $dc_col $mr_col $ct_col $mv_col $da_col $sa_col $sw_col $mq_col $mw_col$ef_col
                     ) VALUES (
                         $quotation_id, $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
                         " . ($barcode ? "'$barcode'" : "NULL") . ",
@@ -863,7 +867,7 @@ try {
                         $making_amount, $amount, $tax, $net_amount, $net_amt_with_tax,
                         " . ($design_no ? "'$design_no'" : "NULL") . ",
                         " . ($location_id ? $location_id : "NULL") . ",
-                        1, NOW() $dc_val $mr_val $ct_val $mv_val $da_val $sa_val $sw_val $mq_val $mw_val
+                        1, NOW() $dc_val $mr_val $ct_val $mv_val $da_val $sa_val $sw_val $mq_val $mw_val$ef_val
                     )
                 ";
                 

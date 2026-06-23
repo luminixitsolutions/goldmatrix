@@ -38,7 +38,10 @@ $auragold_ss_menu_close = function_exists('auragold_t')
             <i class="feather icon-x" aria-hidden="true"></i>
         </button>
     </div>
-    <div class="set-software-sidebar-title d-none d-lg-block"><?php echo $auragold_set_ss_title; ?></div>
+    <div class="set-software-sidebar-head d-none d-lg-flex">
+        <div class="set-software-sidebar-title"><?php echo $auragold_set_ss_title; ?></div>
+        <button type="button" class="set-software-collapse-tab" title="<?php echo $auragold_collapse_hide; ?>" aria-expanded="true" aria-controls="set-software-nav-aside" data-auragold-title-show="<?php echo $auragold_collapse_show; ?>" data-auragold-title-hide="<?php echo $auragold_collapse_hide; ?>"><i class="feather icon-chevron-left" aria-hidden="true"></i></button>
+    </div>
     <nav class="set-software-sidebar-menu" aria-label="<?php echo $auragold_set_ss_title; ?>">
     <a href="set-software.php" class="set-software-nav-item<?php echo ($current_page === 'set-software.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-hash"></i> <?php echo $auragold_t_ss('set_software.barcode_setting'); ?></span>
@@ -54,6 +57,14 @@ $auragold_ss_menu_close = function_exists('auragold_t')
     </a>
     <a href="mail-settings.php" class="set-software-nav-item<?php echo ($current_page === 'mail-settings.php') ? ' active' : ''; ?>">
         <span><i class="feather icon-mail"></i> <?php echo $auragold_t_ss('set_software.mail_setting'); ?></span>
+        <i class="feather icon-chevron-right"></i>
+    </a>
+    <a href="extra-fields.php" class="set-software-nav-item<?php echo ($current_page === 'extra-fields.php') ? ' active' : ''; ?>">
+        <span><i class="feather icon-sliders"></i> Extra Fields</span>
+        <i class="feather icon-chevron-right"></i>
+    </a>
+    <a href="credit-card.php" class="set-software-nav-item<?php echo ($current_page === 'credit-card.php') ? ' active' : ''; ?>">
+        <span><i class="feather icon-credit-card"></i> Credit Card</span>
         <i class="feather icon-chevron-right"></i>
     </a>
    
@@ -110,7 +121,6 @@ $auragold_ss_menu_close = function_exists('auragold_t')
     </details>
     </nav>
 </aside>
-<button type="button" class="set-software-collapse-tab" title="<?php echo $auragold_collapse_hide; ?>" aria-expanded="true" aria-controls="set-software-nav-aside" data-auragold-title-show="<?php echo $auragold_collapse_show; ?>" data-auragold-title-hide="<?php echo $auragold_collapse_hide; ?>"><i class="feather icon-chevron-left"></i></button>
 <script>
 (function () {
     var ssMenuOpenLabel = <?php echo json_encode($auragold_ss_menu_open, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;

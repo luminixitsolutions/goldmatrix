@@ -88,6 +88,9 @@ $summary_row_meta = [
     'balance_amount' => 'Balance Amount (highlighted)',
 ];
 $default_doc_title_hint = function_exists('getInvoicePrintDefaultDocumentTitle') ? getInvoicePrintDefaultDocumentTitle($current_setting_type) : 'INVOICE';
+$email_message_subject = trim((string) ($settings['email_message_subject'] ?? ''));
+$email_message_body = (string) ($settings['email_message_body'] ?? '');
+$current_doc_label = $setting_type_labels[$current_setting_type] ?? $current_setting_type;
 
 $preview_invoice_id = 0;
 $last_inv = getRecord("SELECT id FROM tbl_sale_invoices ORDER BY id DESC LIMIT 1");
@@ -107,6 +110,8 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
     <?php include 'header-script.php';?>
     <link rel="stylesheet" href="set-software-sidebar.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
     <style>
         .ips-invoice-print-layout { align-items: stretch; min-height: calc(100vh - 100px); }
         .ips-invoice-print-layout .set-software-main { overflow: auto; flex: 1; min-width: 0; }
@@ -179,6 +184,23 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
         .ips-summary-order-list { min-height: 120px; max-height: 220px; }
         .ips-summary-label-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         @media (max-width: 992px) { .ips-cards-row { grid-template-columns: 1fr; } .ips-card-body.scroll-card { max-height: none; } .ips-summary-label-grid { grid-template-columns: 1fr; } }
+        .ips-email-editor-wrap { border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+        .ips-email-editor-wrap .ql-toolbar { border: none; border-bottom: 1px solid #e2e8f0; border-radius: 6px 6px 0 0; background: #f8fafc; }
+        .ips-email-editor-wrap .ql-container { border: none; min-height: 180px; font-size: 0.85rem; }
+        .ips-email-editor-wrap .ql-editor { min-height: 180px; }
+        .ips-placeholder-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .ips-placeholder-tag {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: #ebf8ff;
+            color: #2c5282;
+            font-size: 0.68rem;
+            font-family: ui-monospace, monospace;
+            cursor: pointer;
+            border: 1px solid #bee3f8;
+        }
+        .ips-placeholder-tag:hover { background: #bee3f8; }
     </style>
 </head>
 <body>
@@ -426,6 +448,68 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
                                                 <label class="ips-upload-btn"><input type="file" id="ipsBannerFile" accept="image/jpeg,image/png,image/gif,image/webp"> Banner</label>
                                                 <input type="hidden" name="advertise_banner_path" id="ipsBannerPath" value="<?php echo htmlspecialchars($settings['advertise_banner_path'] ?? ''); ?>">
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                </div>
+
+                                <!-- Email message template (per document type) -->
+                                <div class="ips-cards-row">
+                                <div class="ips-card ips-card-full">
+                                    <div class="ips-card-header">Email message template — <?php echo htmlspecialchars($current_doc_label); ?></div>
+                                    <div class="ips-card-body">
+                                        <p class="ips-hint">Compose the default email subject and body for this document type. Use placeholders below; they are replaced when sending mail. Saved with the document type selected in <strong>Setting For</strong>.</p>
+                                        <div class="ips-field">
+                                            <label for="ipsEmailSubject">Email subject</label>
+                                            <input type="text" id="ipsEmailSubject" name="email_message_subject" placeholder="e.g. {document_title} {invoice_no} — {company_name}" value="<?php echo htmlspecialchars($email_message_subject); ?>">
+                                        </div>
+                                        <div class="ips-field" style="margin-top: 10px;">
+                                            <label>Email message body</label>
+                                            <div class="ips-email-editor-wrap">
+                                                <div id="ipsEmailToolbar">
+                                                    <span class="ql-formats">
+                                                        <select class="ql-header">
+                                                            <option selected></option>
+                                                            <option value="1"></option>
+                                                            <option value="2"></option>
+                                                        </select>
+                                                    </span>
+                                                    <span class="ql-formats">
+                                                        <button class="ql-bold"></button>
+                                                        <button class="ql-italic"></button>
+                                                        <button class="ql-underline"></button>
+                                                    </span>
+                                                    <span class="ql-formats">
+                                                        <button class="ql-list" value="ordered"></button>
+                                                        <button class="ql-list" value="bullet"></button>
+                                                    </span>
+                                                    <span class="ql-formats">
+                                                        <button class="ql-link"></button>
+                                                    </span>
+                                                    <span class="ql-formats">
+                                                        <button class="ql-clean"></button>
+                                                    </span>
+                                                </div>
+                                                <div id="ipsEmailEditor"></div>
+                                            </div>
+                                            <textarea id="ipsEmailBodyHidden" name="email_message_body" style="display:none;"><?php echo htmlspecialchars($email_message_body); ?></textarea>
+                                        </div>
+                                        <div class="ips-label" style="margin-top: 10px;">Insert placeholder (click to add at cursor)</div>
+                                        <div class="ips-placeholder-tags" id="ipsEmailPlaceholders">
+                                            <?php
+                                            $email_placeholders = [
+                                                '{customer_name}' => 'Customer / party name',
+                                                '{invoice_no}' => 'Document number',
+                                                '{invoice_date}' => 'Document date',
+                                                '{grand_total}' => 'Grand total amount',
+                                                '{company_name}' => 'Company name from settings',
+                                                '{document_title}' => 'Document title on print',
+                                                '{document_type}' => 'Document type label',
+                                            ];
+                                            foreach ($email_placeholders as $token => $hint):
+                                            ?>
+                                            <span class="ips-placeholder-tag" data-token="<?php echo htmlspecialchars($token); ?>" title="<?php echo htmlspecialchars($hint); ?>"><?php echo htmlspecialchars($token); ?></span>
+                                            <?php endforeach; ?>
                                         </div>
                                     </div>
                                 </div>
@@ -701,6 +785,16 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
         fd.append('t7_bank_account_no', document.getElementById('ipsT7AcctNo') ? document.getElementById('ipsT7AcctNo').value : '');
         fd.append('t7_bank_ifsc', document.getElementById('ipsT7Ifsc') ? document.getElementById('ipsT7Ifsc').value : '');
         fd.append('custom_print_css', document.getElementById('ipsCustomPrintCss') ? document.getElementById('ipsCustomPrintCss').value : '');
+        var emailSubjEl = document.getElementById('ipsEmailSubject');
+        fd.append('email_message_subject', emailSubjEl ? emailSubjEl.value : '');
+        var emailBodyHtml = '';
+        if (ipsEmailQuill) {
+            emailBodyHtml = ipsEmailQuill.root.innerHTML;
+        } else {
+            var emailBodyHidden = document.getElementById('ipsEmailBodyHidden');
+            emailBodyHtml = emailBodyHidden ? emailBodyHidden.value : '';
+        }
+        fd.append('email_message_body', emailBodyHtml);
         var logoFile = document.getElementById('ipsLogoFile');
         if (logoFile && logoFile.files && logoFile.files[0]) fd.append('company_logo', logoFile.files[0]);
         var bannerFile = document.getElementById('ipsBannerFile');
@@ -717,6 +811,41 @@ $preview_uses_sample_invoice = ($preview_invoice_id <= 0);
         t.classList.add('show');
         setTimeout(function() { t.classList.remove('show'); }, 3000);
     }
+
+    var ipsEmailQuill = null;
+    var ipsEmailEditorEl = document.getElementById('ipsEmailEditor');
+    if (ipsEmailEditorEl && typeof Quill !== 'undefined') {
+        ipsEmailQuill = new Quill('#ipsEmailEditor', {
+            theme: 'snow',
+            modules: { toolbar: '#ipsEmailToolbar' }
+        });
+        var ipsEmailBodyHidden = document.getElementById('ipsEmailBodyHidden');
+        if (ipsEmailBodyHidden && ipsEmailBodyHidden.value.trim() !== '') {
+            ipsEmailQuill.root.innerHTML = ipsEmailBodyHidden.value;
+        }
+    }
+    document.querySelectorAll('#ipsEmailPlaceholders .ips-placeholder-tag').forEach(function(tag) {
+        tag.addEventListener('click', function() {
+            var token = this.getAttribute('data-token');
+            if (!token) return;
+            var subjEl = document.getElementById('ipsEmailSubject');
+            if (subjEl && document.activeElement === subjEl) {
+                var start = subjEl.selectionStart != null ? subjEl.selectionStart : subjEl.value.length;
+                var end = subjEl.selectionEnd != null ? subjEl.selectionEnd : start;
+                subjEl.value = subjEl.value.slice(0, start) + token + subjEl.value.slice(end);
+                subjEl.focus();
+                subjEl.selectionStart = subjEl.selectionEnd = start + token.length;
+                return;
+            }
+            if (ipsEmailQuill) {
+                var range = ipsEmailQuill.getSelection(true);
+                ipsEmailQuill.insertText(range.index, token);
+                ipsEmailQuill.setSelection(range.index + token.length);
+            } else if (subjEl) {
+                subjEl.value += token;
+            }
+        });
+    });
 
     var settingForSelect = document.getElementById('settingForSelect');
     if (settingForSelect) {

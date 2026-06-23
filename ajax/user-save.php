@@ -5,6 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/session_login_type.php';
 require_once __DIR__ . '/../includes/user_management_schema.php';
+require_once __DIR__ . '/../includes/auragold_employee_management_schema.php';
 
 if (empty($_SESSION['Admin']) || !auragold_session_is_admin_login_type()) {
     echo json_encode(['ok' => false, 'message' => 'Unauthorized']);
@@ -198,6 +199,7 @@ if ($is_update) {
         echo json_encode(['ok' => false, 'message' => 'Could not update user: ' . mysqli_error($conn)]);
         exit;
     }
+    auragold_em_sync_user_to_employee_branches($conn, $id);
     echo json_encode(['ok' => true, 'message' => 'User updated.']);
     exit;
 }
@@ -213,6 +215,11 @@ $sql = "
 if (!mysqli_query($conn, $sql)) {
     echo json_encode(['ok' => false, 'message' => 'Could not save user: ' . mysqli_error($conn)]);
     exit;
+}
+
+$newUserId = (int) mysqli_insert_id($conn);
+if ($newUserId > 0) {
+    auragold_em_sync_user_to_employee_branches($conn, $newUserId);
 }
 
 echo json_encode(['ok' => true, 'message' => 'User saved.']);

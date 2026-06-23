@@ -31,10 +31,11 @@ function auragold_smtp_send_message(array $cfg, string $to, string $subject, str
         return ['ok' => false, 'message' => 'Invalid recipient email address.'];
     }
 
-    $envelopeFrom = filter_var($user, FILTER_VALIDATE_EMAIL) ? $user : $fromEmail;
-    if (!filter_var($envelopeFrom, FILTER_VALIDATE_EMAIL)) {
-        return ['ok' => false, 'message' => 'SMTP username must be a valid email address (used as envelope sender), or set From email to a valid address.'];
-    }
+    $resolved = auragold_smtp_resolve_from_addresses($user, $fromEmail, $fromName);
+    $envelopeFrom = $resolved['envelope'];
+    $displayFrom = $resolved['display'];
+    $displayName = $resolved['name'];
+    $fromMismatch = $resolved['mismatch'];
 
     $autoload = dirname(__DIR__) . '/vendor/autoload.php';
     if (is_file($autoload)) {
@@ -48,12 +49,14 @@ function auragold_smtp_send_message(array $cfg, string $to, string $subject, str
             $user,
             $pass,
             $envelopeFrom,
-            $fromName,
+            $displayName,
+            $displayFrom,
             $fromEmail,
             $to,
             $subject,
             $htmlBody,
-            $attachments
+            $attachments,
+            $fromMismatch
         );
     }
 
@@ -64,13 +67,93 @@ function auragold_smtp_send_message(array $cfg, string $to, string $subject, str
         $user,
         $pass,
         $envelopeFrom,
-        $fromName,
+        $displayName,
+        $displayFrom,
         $fromEmail,
         $to,
         $subject,
         $htmlBody,
-        $attachments
+        $attachments,
+        $fromMismatch
     );
+}
+
+/**
+ * Resolve envelope + display From for SMTP (display must match authenticated account for deliverability).
+ *
+ * @return array{envelope:string,display:string,name:string,mismatch:bool}
+ */
+function auragold_smtp_resolve_from_addresses(string $smtpUser, string $fromEmail, string $fromName): array
+{
+    $user = trim($smtpUser);
+    $fromEmail = trim($fromEmail);
+    $fromName = trim($fromName);
+
+    $envelope = filter_var($user, FILTER_VALIDATE_EMAIL) ? $user : $fromEmail;
+    if (!filter_var($envelope, FILTER_VALIDATE_EMAIL)) {
+        return [
+            'envelope' => '',
+            'display' => '',
+            'name' => $fromName,
+            'mismatch' => false,
+        ];
+    }
+
+    $display = filter_var($fromEmail, FILTER_VALIDATE_EMAIL) ? $fromEmail : $envelope;
+    $mismatch = strcasecmp($display, $envelope) !== 0;
+    if ($mismatch) {
+        // Sending via mail@yourdomain.com but From set to gmail.com — Gmail often drops these.
+        $display = $envelope;
+    }
+
+    return [
+        'envelope' => $envelope,
+        'display' => $display,
+        'name' => $fromName,
+        'mismatch' => $mismatch,
+    ];
+}
+
+/**
+ * Parse Exim/cPanel queue id from SMTP 250 reply (e.g. "250 OK id=1abc-...").
+ */
+function auragold_smtp_extract_queue_id(string $smtpReply): string
+{
+    if (preg_match('/\bid=([^\s\r\n]+)/i', $smtpReply, $m)) {
+        return trim((string) $m[1]);
+    }
+
+    return '';
+}
+
+/**
+ * @return array{ok:bool,message:string,from:string,queue_id:string}
+ */
+function auragold_smtp_build_success_response(string $host, string $displayFrom, string $to, string $queueId = '', bool $fromMismatch = false): array
+{
+    $msg = 'Mail server accepted the message for delivery.';
+    $msg .= "\n\nFrom: " . $displayFrom;
+    $msg .= "\nTo: " . $to;
+    if ($queueId !== '') {
+        $msg .= "\nServer queue ID: " . $queueId;
+    }
+    $msg .= "\n\nGoldMatrix sent this to " . $host . '. Delivery to the inbox is done by your mail host (not the app).';
+    $msg .= "\n\nIf not received: open cPanel → Track Delivery and search this queue ID.";
+    if ($queueId !== '') {
+        $msg .= ' Queue ID: ' . $queueId . '.';
+    }
+    $msg .= ' Common cPanel error: “exceeded max defers and failures per hour — message discarded”. Wait 1 hour, fix Email Deliverability (DKIM), then retry.';
+
+    if ($fromMismatch) {
+        $msg .= "\n\nNote: From email was set to match SMTP username (" . $displayFrom . ').';
+    }
+
+    return [
+        'ok'       => true,
+        'message'  => $msg,
+        'from'     => $displayFrom,
+        'queue_id' => $queueId,
+    ];
 }
 
 /**
@@ -85,12 +168,20 @@ function auragold_smtp_send_message_phpmailer(
     string $pass,
     string $envelopeFrom,
     string $fromName,
-    string $fromEmail,
+    string $displayFrom,
+    string $replyToEmail,
     string $to,
     string $subject,
     string $htmlBody,
-    array $attachments
+    array $attachments,
+    bool $fromMismatch = false
 ): array {
+    if ($envelopeFrom === '' || !filter_var($envelopeFrom, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'message' => 'SMTP username must be a valid email address (envelope sender).'];
+    }
+    if ($displayFrom === '' || !filter_var($displayFrom, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'message' => 'From email is not set or invalid in Mail Setting.'];
+    }
     $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
     try {
         $mail->isSMTP();
@@ -118,10 +209,15 @@ function auragold_smtp_send_message_phpmailer(
             $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
         }
 
-        $mail->setFrom($envelopeFrom, $fromName !== '' ? $fromName : '');
+        if (preg_match('/@([a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9])$/', $displayFrom, $hm)) {
+            $mail->Hostname = $hm[1];
+        }
+
+        $mail->setFrom($displayFrom, $fromName !== '' ? $fromName : '');
+        $mail->Sender = $envelopeFrom;
         $mail->addAddress($to);
-        if (filter_var($fromEmail, FILTER_VALIDATE_EMAIL) && strcasecmp($envelopeFrom, $fromEmail) !== 0) {
-            $mail->addReplyTo($fromEmail, $fromName !== '' ? $fromName : '');
+        if (filter_var($replyToEmail, FILTER_VALIDATE_EMAIL) && strcasecmp($displayFrom, $replyToEmail) !== 0) {
+            $mail->addReplyTo($replyToEmail, $fromName !== '' ? $fromName : '');
         }
 
         $mail->isHTML(true);
@@ -141,10 +237,18 @@ function auragold_smtp_send_message_phpmailer(
 
         $mail->send();
 
-        return [
-            'ok'      => true,
-            'message' => 'Message sent via SMTP. If the recipient does not see it, ask them to check Spam/Junk and Promotions (Gmail).',
-        ];
+        $queueId = '';
+        $smtp = $mail->getSMTPInstance();
+        if ($smtp) {
+            if (method_exists($smtp, 'getLastTransactionID')) {
+                $queueId = trim((string) $smtp->getLastTransactionID());
+            }
+            if ($queueId === '' && method_exists($smtp, 'getLastReply')) {
+                $queueId = auragold_smtp_extract_queue_id((string) $smtp->getLastReply());
+            }
+        }
+
+        return auragold_smtp_build_success_response($host, $displayFrom, $to, $queueId, $fromMismatch);
     } catch (\PHPMailer\PHPMailer\Exception $e) {
         $detail = $mail->ErrorInfo !== '' ? $mail->ErrorInfo : $e->getMessage();
 
@@ -166,12 +270,20 @@ function auragold_smtp_send_message_native(
     string $pass,
     string $envelopeFrom,
     string $fromName,
-    string $fromEmail,
+    string $displayFrom,
+    string $replyToEmail,
     string $to,
     string $subject,
     string $htmlBody,
-    array $attachments
+    array $attachments,
+    bool $fromMismatch = false
 ): array {
+    if ($envelopeFrom === '' || !filter_var($envelopeFrom, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'message' => 'SMTP username must be a valid email address (envelope sender).'];
+    }
+    if ($displayFrom === '' || !filter_var($displayFrom, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'message' => 'From email is not set or invalid in Mail Setting.'];
+    }
     $ehloHost = 'localhost';
     if (preg_match('/@([a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9])$/', $envelopeFrom, $m)) {
         $ehloHost = $m[1];
@@ -319,8 +431,8 @@ function auragold_smtp_send_message_native(
     $boundary = 'bnd_' . bin2hex(random_bytes(12));
     $subjEnc = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $fromHdr = $fromName !== ''
-        ? ('=?UTF-8?B?' . base64_encode($fromName) . '?= <' . $envelopeFrom . '>')
-        : $envelopeFrom;
+        ? ('=?UTF-8?B?' . base64_encode($fromName) . '?= <' . $displayFrom . '>')
+        : $displayFrom;
 
     $msgDomain = 'localhost';
     if (preg_match('/@([a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9])$/', $envelopeFrom, $md)) {
@@ -333,10 +445,10 @@ function auragold_smtp_send_message_native(
     $headers[] = 'Message-ID: ' . $messageId;
     $headers[] = 'From: ' . $fromHdr;
     $headers[] = 'To: <' . $to . '>';
-    if (filter_var($fromEmail, FILTER_VALIDATE_EMAIL) && strcasecmp($envelopeFrom, $fromEmail) !== 0) {
+    if (filter_var($replyToEmail, FILTER_VALIDATE_EMAIL) && strcasecmp($displayFrom, $replyToEmail) !== 0) {
         $headers[] = 'Reply-To: ' . ($fromName !== ''
-            ? ('=?UTF-8?B?' . base64_encode($fromName) . '?= <' . $fromEmail . '>')
-            : $fromEmail);
+            ? ('=?UTF-8?B?' . base64_encode($fromName) . '?= <' . $replyToEmail . '>')
+            : $replyToEmail);
     }
     $headers[] = 'Subject: ' . $subjEnc;
     $headers[] = 'MIME-Version: 1.0';
@@ -377,16 +489,15 @@ function auragold_smtp_send_message_native(
     }
     fflush($socket);
 
-    if (($e = $expect($socket, [250], 'Message body')) !== null) {
+    $dataResp = $read($socket);
+    if ($dataResp === '' || strlen($dataResp) < 3 || (int) substr($dataResp, 0, 3) !== 250) {
         fclose($socket);
 
-        return ['ok' => false, 'message' => $e];
+        return ['ok' => false, 'message' => 'Message body: ' . trim(preg_replace("/\r\n?|\n/", ' ', $dataResp !== '' ? $dataResp : 'empty response'))];
     }
+    $queueId = auragold_smtp_extract_queue_id($dataResp);
     $write($socket, "QUIT\r\n");
     fclose($socket);
 
-    return [
-        'ok'      => true,
-        'message' => 'Message accepted by the mail server (native SMTP). If the recipient does not see it, ask them to check Spam/Junk.',
-    ];
+    return auragold_smtp_build_success_response($host, $displayFrom, $to, $queueId, $fromMismatch);
 }

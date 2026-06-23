@@ -1,7 +1,18 @@
 <?php
 
 require_once __DIR__ . '/jewelry_catalogue_create_schema.php';
-require_once __DIR__ . '/jewelry_catalog_stock_include.php';
+
+if (!function_exists('auragold_jewelry_catalogue_boot_stock_helpers')) {
+    function auragold_jewelry_catalogue_boot_stock_helpers(): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        require_once __DIR__ . '/jewelry_catalog_stock_include.php';
+        $done = true;
+    }
+}
 
 /**
  * Resolve tbl_voucher_types.id for Jewellery Catalogue (bill-series.php voucher type).
@@ -244,6 +255,7 @@ function auragold_jewelry_catalogue_grid_fetch(mysqli $conn, array $opts = [], s
  */
 function auragold_jewelry_catalogue_row_to_grid_item(array $row, string $siteUrl = ''): array
 {
+    auragold_jewelry_catalogue_boot_stock_helpers();
     $images = [];
     if (!empty($row['images_json'])) {
         $dec = json_decode((string) $row['images_json'], true);
@@ -330,6 +342,7 @@ function auragold_jewelry_catalogue_row_to_grid_item(array $row, string $siteUrl
  */
 function auragold_jewelry_catalog_merge_stock_and_catalogue(array $stockItems, array $catalogueItems): array
 {
+    auragold_jewelry_catalogue_boot_stock_helpers();
     $byBarcode = [];
     foreach ($stockItems as $idx => $it) {
         $bc = strtolower(trim((string) ($it['barcode'] ?? '')));
@@ -494,6 +507,123 @@ function auragold_jewelry_catalogue_bom_to_modal_rows(array $bom, array $catalog
 }
 
 /**
+ * When catalogue has header data but no BOM lines, build one modal row from the catalogue record.
+ *
+ * @return list<array<string, mixed>>
+ */
+function auragold_jewelry_catalogue_header_to_modal_rows(mysqli $conn, array $catalogue): array
+{
+    $productName = trim((string) ($catalogue['title'] ?? ''));
+    if ($productName === '') {
+        $productName = trim((string) ($catalogue['short_desc'] ?? ''));
+    }
+    $designNo = trim((string) ($catalogue['design_no'] ?? ''));
+    $barcode = trim((string) ($catalogue['barcode'] ?? ''));
+    $weight = (float) ($catalogue['weight'] ?? 0);
+    $amount = (float) ($catalogue['amount'] ?? 0);
+    $metalId = (int) ($catalogue['metal_id'] ?? 0);
+    $productId = (int) ($catalogue['product_id'] ?? 0);
+    $categoryId = (int) ($catalogue['category_id'] ?? 0);
+    $charId = 0;
+    $category = '';
+
+    if ($productId > 0) {
+        $prod = getRecord(
+            'SELECT p.name, p.category_id, pc.id AS characteristic_id, pc.metal_id
+             FROM tbl_products p
+             LEFT JOIN tbl_product_characteristics pc ON pc.product_id = p.id AND pc.status = 1
+             WHERE p.id = ' . $productId . ' AND p.status = 1
+             ORDER BY pc.id ASC LIMIT 1'
+        );
+        if ($prod) {
+            if ($productName === '' && !empty($prod['name'])) {
+                $productName = trim((string) $prod['name']);
+            }
+            if ($charId <= 0 && !empty($prod['characteristic_id'])) {
+                $charId = (int) $prod['characteristic_id'];
+            }
+            if ($metalId <= 0 && !empty($prod['metal_id'])) {
+                $metalId = (int) $prod['metal_id'];
+            }
+            if ($categoryId <= 0 && !empty($prod['category_id'])) {
+                $categoryId = (int) $prod['category_id'];
+            }
+        }
+    }
+
+    if ($categoryId > 0 && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_categories', 'name')) {
+        $catRow = getRecord('SELECT name FROM tbl_categories WHERE id = ' . $categoryId . ' LIMIT 1');
+        if ($catRow && !empty($catRow['name'])) {
+            $category = trim((string) $catRow['name']);
+        }
+    }
+
+    if ($productName === '' && $designNo === '' && $weight <= 0 && $amount <= 0) {
+        return [];
+    }
+    if ($productName === '') {
+        $productName = $designNo !== '' ? ('Catalogue ' . $designNo) : 'Catalogue item';
+    }
+
+    $row = [
+        'product_id' => $productId,
+        'characteristic_id' => $charId,
+        'product_name' => $productName,
+        'barcode' => $barcode,
+        'design_no' => $designNo,
+        'quantity' => 1,
+        'gross_wt' => $weight,
+        'final_wt' => $weight,
+        'net_wt' => $weight,
+        'pure_wt' => $weight,
+        'making_amount' => 0,
+        'tax' => 0,
+        'amount' => $amount,
+        'metal_id' => $metalId,
+        'calculation_type' => 'Rate X Gross Wt',
+    ];
+    if ($category !== '') {
+        $row['category'] = $category;
+    }
+    if ($categoryId > 0) {
+        $row['product_category_id'] = $categoryId;
+    }
+
+    return [$row];
+}
+
+/**
+ * @param mixed $value
+ * @return mixed
+ */
+function auragold_jewelry_catalogue_json_safe_value($value)
+{
+    if (is_array($value)) {
+        $out = [];
+        foreach ($value as $k => $v) {
+            $out[$k] = auragold_jewelry_catalogue_json_safe_value($v);
+        }
+
+        return $out;
+    }
+    if (is_float($value) && !is_finite($value)) {
+        return 0.0;
+    }
+    if (is_string($value)) {
+        if (function_exists('mb_convert_encoding')) {
+            $clean = @mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+            if (is_string($clean)) {
+                return $clean;
+            }
+        }
+
+        return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value) ?? '';
+    }
+
+    return $value;
+}
+
+/**
  * Load catalogue header + BOM lines for sale invoice product modal.
  *
  * @return array<string, mixed>|null
@@ -515,6 +645,13 @@ function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo
 
     $catalogue = auragold_jewelry_catalogue_normalize_db_row($row);
     $modalRows = auragold_jewelry_catalogue_bom_to_modal_rows($catalogue['bom'] ?? [], $catalogue);
+    if (!$modalRows) {
+        $modalRows = auragold_jewelry_catalogue_header_to_modal_rows($conn, $catalogue);
+    }
+    $modalRows = auragold_jewelry_catalogue_json_safe_value($modalRows);
+    if (!is_array($modalRows)) {
+        $modalRows = [];
+    }
 
     return [
         'catalogue' => $catalogue,

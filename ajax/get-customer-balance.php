@@ -69,6 +69,162 @@ if ($col_check && mysqli_num_rows($col_check) > 0) {
 }
 $gold_pure_sql = $has_balance_gold_pure ? ", balance_gold_pure" : "";
 
+/**
+ * Sale / purchase invoice panel (ledger_cl_balance=1): compute CL balance with minimal queries and return.
+ */
+function auragold_get_customer_balance_ledger_cl_fast(
+    mysqli $conn,
+    string $ledger_scope,
+    string $brLedgerAnd,
+    bool $has_balance_gold_pure,
+    string $gold_pure_sql
+): ?array {
+    if ($ledger_scope === '') {
+        return null;
+    }
+    $ledger_cnt = getRecord("SELECT COUNT(*) AS n FROM tbl_customer_ledger WHERE status = 1 AND $ledger_scope $brLedgerAnd");
+    if ((int)($ledger_cnt['n'] ?? 0) <= 0) {
+        return null;
+    }
+
+    $ledger_excl_pb = " AND COALESCE(transaction_type,'') <> 'previous_balance_payment'";
+    $base_where = "status = 1 AND $ledger_scope $ledger_excl_pb $brLedgerAnd";
+
+    $has_against_ledger = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'against_ledger');
+    if ($has_against_ledger) {
+        $amount_row = getRecord("
+            SELECT
+                COALESCE(SUM(debit_amount - credit_amount), 0) AS net_amt,
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = 'payment'
+                            AND debit_amount > 0
+                            AND ABS(credit_amount) < 0.00001
+                            AND LOWER(description) LIKE '%purchase invoice%'
+                            AND LOWER(TRIM(against_ledger)) LIKE 'scrap(%'
+                        THEN debit_amount ELSE 0
+                    END
+                ), 0) AS pi_scrap,
+                COALESCE(SUM(
+                    CASE
+                        WHEN transaction_type = 'payment'
+                            AND debit_amount > 0
+                            AND ABS(credit_amount) < 0.00001
+                            AND LOWER(description) LIKE '%sale invoice%'
+                            AND LOWER(TRIM(against_ledger)) LIKE 'scrap(%'
+                        THEN debit_amount ELSE 0
+                    END
+                ), 0) AS si_scrap
+            FROM tbl_customer_ledger
+            WHERE $base_where
+        ");
+        $balance_amount = (float)($amount_row['net_amt'] ?? 0)
+            - 2.0 * (float)($amount_row['pi_scrap'] ?? 0)
+            - 2.0 * (float)($amount_row['si_scrap'] ?? 0);
+    } else {
+        $amount_row = getRecord("
+            SELECT COALESCE(SUM(debit_amount - credit_amount), 0) AS net_amt
+            FROM tbl_customer_ledger
+            WHERE $base_where
+        ");
+        $balance_amount = (float)($amount_row['net_amt'] ?? 0);
+    }
+
+    $hedging_metal_sql = "LOWER(COALESCE(description,'')) LIKE '%(hedging)%'";
+    $payment_metal_sql = "(COALESCE(transaction_type,'') = 'payment' AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
+    $rv_pv_metal_sql = "(COALESCE(transaction_type,'') IN ('receipt_voucher','sale_receipt_voucher','payment_voucher') AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
+    $ledger_metal_view_sql = "($hedging_metal_sql OR $payment_metal_sql OR $rv_pv_metal_sql)";
+
+    $metal_cl_row = getRecord("
+        SELECT
+            COALESCE(SUM(debit_gold - credit_gold), 0) AS net_gold,
+            COALESCE(SUM(debit_silver - credit_silver), 0) AS net_silver
+            " . ($has_balance_gold_pure ? ", COALESCE(SUM(debit_gold_pure - credit_gold_pure), 0) AS net_gold_pure" : "") . "
+        FROM tbl_customer_ledger
+        WHERE status = 1 AND $ledger_scope AND ($ledger_metal_view_sql)
+        $brLedgerAnd
+    ");
+
+    $balance_gold = $has_balance_gold_pure && isset($metal_cl_row['net_gold_pure'])
+        ? (float)$metal_cl_row['net_gold_pure']
+        : (float)($metal_cl_row['net_gold'] ?? 0);
+    $balance_silver = (float)($metal_cl_row['net_silver'] ?? 0);
+
+    $diamond_cols = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'balance_diamond')
+        ? ', balance_diamond, balance_gemstone'
+        : '';
+    $last_row = getRecord("
+        SELECT balance_amount $diamond_cols
+        FROM tbl_customer_ledger
+        WHERE status = 1 AND $ledger_scope
+        $brLedgerAnd
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $balance_diamond = (float)($last_row['balance_diamond'] ?? 0);
+    $balance_gemstone = (float)($last_row['balance_gemstone'] ?? 0);
+
+    return [
+        'balance_amount' => $balance_amount,
+        'balance_gold' => $balance_gold,
+        'balance_silver' => $balance_silver,
+        'balance_diamond' => $balance_diamond,
+        'balance_gemstone' => $balance_gemstone,
+    ];
+}
+
+$ledger_scope_for_cl = '';
+if ($customer_id > 0) {
+    $ledger_scope_for_cl = 'customer_id = ' . (int)$customer_id;
+} elseif (!empty($customer_name)) {
+    $esc_sum_name = mysqli_real_escape_string($conn, trim((string)$customer_name));
+    if ($esc_sum_name !== '') {
+        $ledger_scope_for_cl = "LOWER(TRIM(customer_name)) = LOWER(TRIM('$esc_sum_name'))";
+    }
+}
+
+if ($purchase_ledger_prev_balance && $ledger_scope_for_cl !== '') {
+    $fast_balance = auragold_get_customer_balance_ledger_cl_fast(
+        $conn,
+        $ledger_scope_for_cl,
+        $brLedgerAnd,
+        $has_balance_gold_pure,
+        $gold_pure_sql
+    );
+    if (is_array($fast_balance)) {
+        $original_amount = (float)($fast_balance['balance_amount'] ?? 0);
+        $original_gold = (float)($fast_balance['balance_gold'] ?? 0);
+        $original_silver = (float)($fast_balance['balance_silver'] ?? 0);
+        $balance_diamond = (float)($fast_balance['balance_diamond'] ?? 0);
+        $balance_gemstone = (float)($fast_balance['balance_gemstone'] ?? 0);
+        echo json_encode([
+            'status' => 'success',
+            'balance' => [
+                'amount' => $original_amount,
+                'gold' => $original_gold,
+                'silver' => $original_silver,
+                'diamond' => $balance_diamond,
+                'gemstone' => $balance_gemstone,
+            ],
+            'advance' => [
+                'amount' => 0,
+                'total_amount' => 0,
+                'used_adjusted_balance' => 0,
+                'gold' => 0,
+                'silver' => 0,
+            ],
+            'original_balance' => [
+                'amount' => $original_amount,
+                'gold' => $original_gold,
+                'silver' => $original_silver,
+                'diamond' => $balance_diamond,
+                'gemstone' => $balance_gemstone,
+            ],
+        ]);
+        exit;
+    }
+}
+
 // Single source of truth: last ledger entry so "Previous Balance" matches Transaction History
 // ORDER BY id DESC ensures we get the very latest row (e.g. after sale_invoice + previous_balance_payment)
 $balance = null;

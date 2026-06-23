@@ -6,7 +6,9 @@ require_once __DIR__ . '/../includes/dashboard_currency_display.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 require_once __DIR__ . '/../includes/auragold_product_metal_tab_match.php';
+require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
 
 header('Content-Type: application/json');
 
@@ -134,7 +136,9 @@ if (!function_exists('purchase_invoice_post_auto_payment_voucher_ledger')) {
             if ($dep_raw === '' && (($pt === 'metal_exchange') || strpos($pt, 'm. exch') !== false || strpos($pt, 'metal-exchange') !== false || (strpos($pt, 'metal') !== false && strpos($pt, 'exch') !== false))) {
                 $dep_raw = 'Metal Exchange';
             }
-            if ($dep_raw !== '') {
+            if (auragold_payment_is_cheque_type($pt)) {
+                $party_against_parts[] = auragold_cheque_payment_against_label($line_amt, 'payable');
+            } elseif ($dep_raw !== '') {
                 $party_against_parts[] = $dep_raw . '(' . number_format($line_amt, 2) . 'Dr)';
             }
         }
@@ -281,6 +285,9 @@ if (!function_exists('purchase_invoice_post_auto_payment_voucher_ledger')) {
                 $dep_raw = 'Metal Exchange';
             }
             if ($dep_raw === '') {
+                continue;
+            }
+            if (auragold_payment_is_cheque_type($pt_raw)) {
                 continue;
             }
             $dep_esc = esc($dep_raw);
@@ -1097,6 +1104,7 @@ try {
                 
                 // Insert invoice item with all fields
                 // Note: Some columns may not exist in the table yet - we'll handle that with ALTER TABLE if needed
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_purchase_invoice_items', $item);
                 $item_sql = "
                     INSERT INTO tbl_purchase_invoice_items (
                         invoice_id, active, product_id, product_characteristic_id, rfid, voucher_type, barcode" . (!empty($pi_has_barcode_no_column) ? ", barcode_no" : "") . ", 
@@ -1111,7 +1119,7 @@ try {
                         sale_amount, sale_amount_with, net_amount, tax, other_charge_type, other_weight, other_rate,
                         other_info, other_amount, hallmark_amount, hallmark_rate, net_amt_with_tax, reverse" . 
                         ($has_group_image_column ? ", group_image" : "") . 
-                        (!empty($pi_has_merge_group_index_column) ? ", merge_group_index" : "") . ",
+                        (!empty($pi_has_merge_group_index_column) ? ", merge_group_index" : "") . $ef_parts['columns'] . ",
                         status, created_at
                     ) VALUES (
                         $invoice_id, $active, $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
@@ -1145,7 +1153,7 @@ try {
                         " . ($other_info ? "'$other_info'" : "NULL") . ",
                         $other_amount, $hallmark_amount, $hallmark_rate, $net_amt_with_tax, $reverse" . 
                         ($has_group_image_column ? ", " . ($group_image ? "'" . mysqli_real_escape_string($conn, $group_image) . "'" : "NULL") : "") . 
-                        (!empty($pi_has_merge_group_index_column) ? ", " . $merge_group_index_sql : "") . ",
+                        (!empty($pi_has_merge_group_index_column) ? ", " . $merge_group_index_sql : "") . $ef_parts['values'] . ",
                         1, NOW()
                     )
                 ";
@@ -2290,6 +2298,7 @@ try {
                 $current_order_amount = (float)($payment['amount'] ?? 0);
                 $previous_balance_amount = (float)($payment['previous_balance_amount'] ?? 0);
                 $payment_amount = $current_order_amount + $previous_balance_amount;
+                $payment_type_raw = strtolower(trim((string) ($payment['payment_type'] ?? 'cash')));
                 $payment_type = esc($payment['payment_type'] ?? 'cash');
                 $deposit_into = esc($payment['deposit_into'] ?? 'Cash');
 
@@ -2341,7 +2350,11 @@ try {
                         // Party line stays Debit in DB (running balance = debit − credit). Scrap settlement: show Credit in account ledger UI — label Cr matches that display.
                         $is_scrap_payment_line = (strtolower(trim((string) $payment_type)) === 'scrap');
                         $pay_crdr = $is_scrap_payment_line ? 'Cr' : 'Dr';
-                        $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                        if (auragold_payment_is_cheque_type($payment_type_raw)) {
+                            $payment_against_ledger = auragold_cheque_payment_against_label($current_order_amount, 'payable');
+                        } else {
+                            $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                        }
                         
                         $pay_desc_suffix = ($pay_dg > 0.00001 || $pay_dgp > 0.00001 || $pay_ds > 0.00001) ? ' — Metal Exchange' : '';
                         $pay_desc = mysqli_real_escape_string($conn, 'Payment for Purchase Invoice: ' . $invoice_no . $pay_desc_suffix);
@@ -2403,7 +2416,7 @@ try {
                     
                     // Create Cash/Payment Account ledger entry for total payment (current + previous balance)
                     $total_payment_received = $current_order_amount + $previous_balance_amount;
-                    if ($total_payment_received > 0 && !empty($deposit_into)) {
+                    if ($total_payment_received > 0 && !empty($deposit_into) && auragold_payment_should_post_deposit_ledger($payment_type_raw)) {
                         // Get Cash account balance
                         $cash_balance_record = getRecord("
                             SELECT balance_amount 
@@ -2718,6 +2731,21 @@ try {
     if ((int) $invoice_id > 0) {
         require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
         auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'purchase_invoice', (int) $invoice_id, $invoice_no, $invoice_date);
+    }
+
+    require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
+    if (function_exists('auragold_sync_voucher_cheque_entries')) {
+        auragold_sync_voucher_cheque_entries($conn, [
+            'voucher_no' => $invoice_no,
+            'voucher_type' => 'Purchase Invoice',
+            'voucher_date' => $invoice_date,
+            'account_ledger' => $supplier_name,
+            'transaction_id' => (int) $invoice_id,
+            'ledger_transaction_no' => isset($txn_for_payment) ? (string) $txn_for_payment : $invoice_no,
+            'user_id' => (int) $user_id,
+            'payments' => isset($payments) && is_array($payments) ? $payments : [],
+            'pdc_direction' => 'payable',
+        ]);
     }
 
     mysqli_commit($conn);

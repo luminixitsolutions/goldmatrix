@@ -314,4 +314,15 @@ saveInvoicePrintSetting('t7_bank_account_no', $t7_bank_account_no, $setting_type
 saveInvoicePrintSetting('t7_bank_ifsc', $t7_bank_ifsc, $setting_type);
 saveInvoicePrintSetting('custom_print_css', $custom_print_css, $setting_type);
 
+$email_message_subject = isset($input['email_message_subject']) ? trim((string) $input['email_message_subject']) : '';
+if (strlen($email_message_subject) > 500) {
+    $email_message_subject = substr($email_message_subject, 0, 500);
+}
+$email_message_body = isset($input['email_message_body']) ? (string) $input['email_message_body'] : '';
+if (strlen($email_message_body) > 65535) {
+    $email_message_body = substr($email_message_body, 0, 65535);
+}
+saveInvoicePrintSetting('email_message_subject', $email_message_subject, $setting_type);
+saveInvoicePrintSetting('email_message_body', $email_message_body, $setting_type);
+
 echo json_encode(['success' => true, 'message' => 'Settings saved successfully.', 'company_logo_path' => $company_logo_path, 'advertise_banner_path' => $advertise_banner_path]);

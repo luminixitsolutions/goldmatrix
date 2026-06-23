@@ -3638,6 +3638,9 @@ window.PB_PAGE_CONFIG = {
                 modalProductBarcodeFetchInFlight = false;
                 modalProductBarcodeLastFetchDoneBarcode = trimmed;
                 modalProductBarcodeLastFetchDoneTime = Date.now();
+                if (typeof auragoldModalBarcodeBatchOnFetchComplete === 'function') {
+                    auragoldModalBarcodeBatchOnFetchComplete();
+                }
             });
     }
     
@@ -3647,21 +3650,28 @@ window.PB_PAGE_CONFIG = {
     function triggerModalProductBarcodeCheck(input, fromBlur) {
         fromBlur = !!fromBlur;
         var $input = $(input);
-        var barcode = $input.val().trim();
-        if (!barcode) {
+        var raw = $input.val().trim();
+        if (!raw) {
             modalProductBarcodeLastCheck = '';
             return;
         }
-        if (shouldSuppressModalProductBarcodeCheck(barcode, fromBlur)) {
+        var barcodes = typeof auragoldParseModalBarcodeTokens === 'function'
+            ? auragoldParseModalBarcodeTokens(raw)
+            : raw.split(/\s+/).filter(function (s) { return s.length > 0; });
+        if (shouldSuppressModalProductBarcodeCheck(barcodes.length > 1 ? raw : (barcodes[0] || raw), fromBlur)) {
             return;
         }
         var t = Date.now();
-        if (barcode === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
+        if (raw === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
             return;
         }
-        modalProductBarcodeLastCheck = barcode;
+        modalProductBarcodeLastCheck = raw;
         modalProductBarcodeLastCheckTime = t;
-        fetchProductByBarcodeAndAdd(barcode);
+        if (barcodes.length > 1 && typeof auragoldStartModalBarcodeBatch === 'function') {
+            auragoldStartModalBarcodeBatch(barcodes, input, fetchProductByBarcodeAndAdd);
+            return;
+        }
+        fetchProductByBarcodeAndAdd(barcodes[0] || raw);
     }
     
     // Handle Add Product Icon Click
@@ -9718,7 +9728,7 @@ window.PB_PAGE_CONFIG = {
             }
         });
         
-        orderData.items = items;
+        orderData.items = (typeof auragoldEnrichVoucherItemsExtraFields === 'function' ? auragoldEnrichVoucherItemsExtraFields(items) : items);
 
         // Hedging: full sale invoice total is kept; server creates purchase fixing from sum of line metal_cost
 

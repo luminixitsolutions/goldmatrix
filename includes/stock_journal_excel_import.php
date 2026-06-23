@@ -741,3 +741,44 @@ if (!function_exists('auragold_sj_excel_resolve_sale_order_product_ids')) {
         return [$product_id, $characteristic_id];
     }
 }
+
+if (!function_exists('auragold_sj_excel_map_extra_field_columns')) {
+    /**
+     * Map header row cells to extra-field ids by display_name (case-insensitive).
+     *
+     * @param array<int, string> $headers 1-based column index => label
+     * @param array<int, array<string, mixed>> $field_defs from auragold_excel_sample_extra_field_defs
+     * @return array<int, int> field_id => column index
+     */
+    function auragold_sj_excel_map_extra_field_columns(array $headers, array $field_defs): array
+    {
+        if (empty($field_defs)) {
+            return [];
+        }
+        $byLabel = [];
+        foreach ($field_defs as $def) {
+            $id = (int) ($def['id'] ?? 0);
+            $label = trim((string) ($def['display_name'] ?? ''));
+            if ($id <= 0 || $label === '') {
+                continue;
+            }
+            $byLabel[strtolower($label)] = $id;
+        }
+        if ($byLabel === []) {
+            return [];
+        }
+        $map = [];
+        foreach ($headers as $colIdx => $raw) {
+            $hl = strtolower(trim((string) $raw));
+            if ($hl === '' || !isset($byLabel[$hl])) {
+                continue;
+            }
+            $fid = (int) $byLabel[$hl];
+            if ($fid > 0 && !isset($map[$fid])) {
+                $map[$fid] = (int) $colIdx;
+            }
+        }
+
+        return $map;
+    }
+}

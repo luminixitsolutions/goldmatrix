@@ -293,6 +293,30 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
 </script>
 
 <?php $GLOBALS['auragold_common_modal_payments_included'] = true; ?>
+<?php
+if (!isset($bank_accounts) || !is_array($bank_accounts)) {
+    $bank_accounts = [];
+}
+if (!isset($credit_cards) || !is_array($credit_cards)) {
+    $credit_cards = [];
+    if (isset($conn) && $conn instanceof mysqli) {
+        require_once __DIR__ . '/auragold_credit_card_schema.php';
+        if (function_exists('auragold_ensure_branch_id_on_settings_tables')) {
+            auragold_ensure_branch_id_on_settings_tables($conn);
+        }
+        $cc_branch_id = 0;
+        if (function_exists('auragold_settings_branch_id')) {
+            $cc_branch_id = (int) auragold_settings_branch_id();
+        }
+        if ($cc_branch_id <= 0 && !empty($auragold_working_branch_id)) {
+            $cc_branch_id = (int) $auragold_working_branch_id;
+        }
+        if (function_exists('auragold_get_credit_cards')) {
+            $credit_cards = auragold_get_credit_cards($conn, $cc_branch_id);
+        }
+    }
+}
+?>
 <!-- Payment Modals -->
 <!-- Cash Payment Modal -->
 <div class="modal fade" id="cashPaymentModal" tabindex="-1" role="dialog">
@@ -313,7 +337,7 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                 </div>
                 <div class="form-group">
                     <label>Amount</label>
-                    <input type="text" class="form-control" id="cashAmount" value="0.00" step="0.01">
+                    <input type="text" class="form-control auragold-payment-amount-input" id="cashAmount" value="0.00" inputmode="decimal" autocomplete="off">
                 </div>
             </div>
             <div class="modal-footer">
@@ -350,7 +374,7 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                 </div>
                 <div class="form-group">
                     <label>Amount</label>
-                    <input type="text" class="form-control" id="bankAmount" value="0.00" step="0.01">
+                    <input type="text" class="form-control auragold-payment-amount-input" id="bankAmount" value="0.00" inputmode="decimal" autocomplete="off">
                 </div>
             </div>
             <div class="modal-footer">
@@ -387,7 +411,7 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                 </div>
                 <div class="form-group">
                     <label>Amount</label>
-                    <input type="text" class="form-control" id="chequeAmount" value="0.00" step="0.01">
+                    <input type="text" class="form-control auragold-payment-amount-input" id="chequeAmount" value="0.00" inputmode="decimal" autocomplete="off">
                 </div>
                 <div class="form-group">
                     <label>Cheque Dt.</label>
@@ -435,7 +459,7 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                 </div>
                 <div class="form-group">
                     <label>Amount</label>
-                    <input type="text" class="form-control" id="upiAmount" value="0.00" step="0.01">
+                    <input type="text" class="form-control auragold-payment-amount-input" id="upiAmount" value="0.00" inputmode="decimal" autocomplete="off">
                 </div>
             </div>
             <div class="modal-footer">
@@ -540,8 +564,15 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                     <label>Deposit Into</label>
                     <select class="form-control" id="cardDepositInto">
                         <option value="">Select Account</option>
-                        <option value="Credit Card">Credit Card</option>
-                        <option value="Debit Card">Debit Card</option>
+                        <?php foreach ($credit_cards as $card) :
+                            $card_name = trim((string) ($card['name'] ?? ''));
+                            if ($card_name === '') {
+                                continue;
+                            }
+                            $is_default = !empty($card['is_default']);
+                            ?>
+                        <option value="<?php echo htmlspecialchars($card_name, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $is_default ? ' selected' : ''; ?>><?php echo htmlspecialchars($card_name); ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div class="form-group">
@@ -554,7 +585,7 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
                 </div>
                 <div class="form-group">
                     <label>Amount</label>
-                    <input type="text" class="form-control" id="cardAmount" value="0.00" step="0.01">
+                    <input type="text" class="form-control auragold-payment-amount-input" id="cardAmount" value="0.00" inputmode="decimal" autocomplete="off">
                 </div>
             </div>
             <div class="modal-footer">
@@ -731,7 +762,75 @@ window.auragoldProductModalBranches = <?php echo json_encode($ab_json, JSON_HEX_
     </div>
 </div>
 
+<style>
+/* Payment modals above company-header (1300) and product-selection backdrop (10550) */
+#cashPaymentModal.modal,
+#bankPaymentModal.modal,
+#chequePaymentModal.modal,
+#upiPaymentModal.modal,
+#cardPaymentModal.modal,
+#metalExchangeModal.modal,
+#scrapPaymentModal.modal {
+    z-index: 10800 !important;
+}
+body.modal-open:has(#cashPaymentModal.show) .modal-backdrop,
+body.modal-open:has(#bankPaymentModal.show) .modal-backdrop,
+body.modal-open:has(#chequePaymentModal.show) .modal-backdrop,
+body.modal-open:has(#upiPaymentModal.show) .modal-backdrop,
+body.modal-open:has(#cardPaymentModal.show) .modal-backdrop,
+body.modal-open:has(#metalExchangeModal.show) .modal-backdrop,
+body.modal-open:has(#scrapPaymentModal.show) .modal-backdrop {
+    z-index: 10750 !important;
+}
+#cashPaymentModal .auragold-payment-amount-input,
+#bankPaymentModal .auragold-payment-amount-input,
+#chequePaymentModal .auragold-payment-amount-input,
+#upiPaymentModal .auragold-payment-amount-input,
+#cardPaymentModal .auragold-payment-amount-input,
+#metalExchangeModal #metalExchangeAmount,
+#scrapPaymentModal #scrapAmount {
+    pointer-events: auto !important;
+    background-color: #fff !important;
+    border: 1px solid #ced4da !important;
+    cursor: text;
+}
+</style>
+
 <script>
+(function () {
+    if (window.__auragoldPaymentModalFocusInited) return;
+    window.__auragoldPaymentModalFocusInited = true;
+    var amountFieldByModal = {
+        cashPaymentModal: 'cashAmount',
+        bankPaymentModal: 'bankAmount',
+        chequePaymentModal: 'chequeAmount',
+        upiPaymentModal: 'upiAmount',
+        cardPaymentModal: 'cardAmount',
+        metalExchangeModal: 'metalExchangeAmount',
+        scrapPaymentModal: 'scrapAmount'
+    };
+    function focusPaymentAmount(modalId) {
+        var fieldId = amountFieldByModal[modalId];
+        if (!fieldId) return;
+        var el = document.getElementById(fieldId);
+        if (!el) return;
+        el.removeAttribute('readonly');
+        el.disabled = false;
+        setTimeout(function () {
+            try {
+                el.focus();
+                if (typeof el.select === 'function') el.select();
+            } catch (e) {}
+        }, 80);
+    }
+    if (typeof jQuery !== 'undefined' && jQuery.fn.on) {
+        jQuery(document).on(
+            'shown.bs.modal',
+            '#cashPaymentModal,#bankPaymentModal,#chequePaymentModal,#upiPaymentModal,#cardPaymentModal,#metalExchangeModal,#scrapPaymentModal',
+            function () { focusPaymentAmount(this.id); }
+        );
+    }
+})();
 (function () {
     if (window.__metalExchangeProductSearchInited) return;
     window.__metalExchangeProductSearchInited = true;

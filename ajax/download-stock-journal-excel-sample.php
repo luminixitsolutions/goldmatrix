@@ -22,6 +22,7 @@ if ($voucher !== '' && !in_array($voucher, $allowedVouchers, true)) {
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/auragold_product_metal_tab_match.php';
+require_once __DIR__ . '/../includes/auragold_excel_sample_columns.php';
 
 $item_id_dl = isset($_GET['item_id']) ? (int) $_GET['item_id'] : 0;
 $product_id = isset($_GET['product_id']) ? (int) $_GET['product_id'] : 0;
@@ -192,7 +193,7 @@ if ($voucher === 'sale_order' && $metal_id_sample > 0) {
     $sample_product_labels = $build_sample_product_labels_from_rows(is_array($so_rows) ? $so_rows : []);
 } elseif ($characteristic_id > 0) {
     $pchars = getList(
-        'SELECT p.name, m.display_name AS metal_name, pc.id AS characteristic_id
+        'SELECT p.name, m.display_name AS metal_name, m.id AS metal_id, pc.id AS characteristic_id
         FROM tbl_product_characteristics pc
         INNER JOIN tbl_products p ON pc.product_id = p.id
         INNER JOIN tbl_metal m ON m.id = pc.metal_id
@@ -200,6 +201,12 @@ if ($voucher === 'sale_order' && $metal_id_sample > 0) {
         ORDER BY p.name ASC, pc.id ASC'
     );
     $sample_product_labels = $build_sample_product_labels_from_rows(is_array($pchars) ? $pchars : []);
+    if ($metal_id_sample <= 0 && !empty($pchars[0]['metal_id'])) {
+        $metal_id_sample = (int) $pchars[0]['metal_id'];
+        if ($metal_name_sample === '' && !empty($pchars[0]['metal_name'])) {
+            $metal_name_sample = trim((string) $pchars[0]['metal_name']);
+        }
+    }
 }
 if (empty($sample_product_labels) && $product_name_db !== '') {
     $sample_product_labels = [$product_name_db];
@@ -249,97 +256,10 @@ $sheet = $spreadsheet->getActiveSheet();
 $sheet->setTitle('Stock import');
 
 // Column order matches product selection / modal groups (same labels as Show/Hide columns UI).
-$headers = [
-    'Images',
-    'Action',
-    'Column Groups',
-    'Basic Information',
-    'Id',
-    'RFIDCode',
-    'Voucher Type',
-    'Photo',
-    'Barcode',
-    'Design No',
-    'HUID No',
-    'Category',
-    'Calculation',
-    'Product',
-    'Location',
-    'Diamond group',
-    'Pkt. Wt.',
-    'PKt. Less Wt.',
-    'Gross Wt.',
-    'Carat',
-    'D.Weight',
-    'Net Wt.',
-    'Quantity',
-    'Rate',
-    'Amount',
-    'Metal group',
-    'Metal Qty',
-    'Weight',
-    'Carat',
-    'Purity %',
-    'Purity Wt',
-    'Loss Wt.',
-    'Loss Wt. Per',
-    'Loss Value',
-    'Wastage Per',
-    'Wastage Wt',
-    'Metal Rate',
-    'Metal Value',
-    'Metal Cost',
-    'Request & Final Wt.',
-    'Requested Purity',
-    'Requested',
-    'Setting Charge',
-    'Final Wt.',
-    'Alloy Wt.',
-    'Discount (group)',
-    'Discount Type',
-    'Discount Per.',
-    'Discount Amount',
-    'Discount',
-    'Making (group)',
-    'Making Type',
-    'Making Rate',
-    'Making Discount Amt.',
-    'Making Amount',
-    'Making Actual Value',
-    'Making Cost',
-    'Minimum',
-    'Minimum Price',
-    'Minimum Code',
-    'Stone group',
-    'Stone Charge Type',
-    'Stone Rate',
-    'Stone Amount',
-    'Stone Cost',
-    'Diamond Amount',
-    'Amounts',
-    'Purchase Amount',
-    'Sale Amount',
-    'Sale Amount With Tax',
-    'Net Amt',
-    'Tax Type',
-    'Tax %',
-    'Tax',
-    'Other Charge (group)',
-    'Other Charge Type',
-    'Other Weight',
-    'Other Rate',
-    'Other Info',
-    'Other Amount',
-    'Hallmark',
-    'Hallmark Amount',
-    'Hallmark Rate',
-    'Net Amt+Tax / Reverse',
-    'Net Amt+Tax',
-    'Reverse',
-    'Product Name',
-    'Product ID',
-    'Characteristic ID',
-];
+// metal_id filters columns to the active tab (Gold/Silver = metal columns; Diamond & Stones = diamond columns).
+$ef_branch_id = function_exists('auragold_settings_branch_id') ? (int) auragold_settings_branch_id() : 0;
+$headers = auragold_excel_sample_headers_for_metal_tab_with_extras($conn, $metal_id_sample, $ef_branch_id);
+$extra_field_defs_sample = auragold_excel_sample_extra_field_defs($conn, $metal_id_sample, $ef_branch_id);
 
 $sheet->fromArray([$headers], null, 'A1', true);
 
@@ -366,9 +286,11 @@ $set('Images', '(optional: URL, base64, path, or embed picture)');
 if ($product_display_for_sample !== '') {
     $set('Product', $product_display_for_sample);
 }
-// Second "Carat" column (metal / karat dropdown). First "Carat" in the sheet = diamond D. weight column in UI, not a karat select.
-if (isset($labelIndices['Carat']) && count($labelIndices['Carat']) > 1) {
-    $exampleRow[$labelIndices['Carat'][1]] = $sample_carat_names[0] ?? '';
+// Karat dropdown: last "Carat" when two exist (diamond + metal); sole "Carat" on metal-only tabs.
+if (!empty($labelIndices['Carat'])) {
+    $caratCols = $labelIndices['Carat'];
+    $karatIdx = count($caratCols) > 1 ? $caratCols[count($caratCols) - 1] : $caratCols[0];
+    $exampleRow[$karatIdx] = $sample_carat_names[0] ?? '';
 }
 // Last columns: fixed context for this voucher (do not change when adding rows — import uses page / form product & characteristic).
 $set('Product Name', $product_name_db);
@@ -423,6 +345,20 @@ $listDefOrder = [
     'tax_type' => $sample_tax_type_labels,
     'other_charge_type' => $sample_other_charge_types,
 ];
+foreach ($extra_field_defs_sample as $efDef) {
+    if (($efDef['field_type'] ?? '') !== 'dropdown') {
+        continue;
+    }
+    $opts = $efDef['dropdown_options'] ?? [];
+    if (!is_array($opts) || $opts === []) {
+        continue;
+    }
+    $efId = (int) ($efDef['id'] ?? 0);
+    if ($efId <= 0) {
+        continue;
+    }
+    $listDefOrder['ef_' . $efId] = array_values($opts);
+}
 
 $listRangeMeta = [];
 $nextListCol = 1;
@@ -511,12 +447,32 @@ foreach ($labelToListKey as $headerLabel => $mkey) {
     }
     $applyListDv($sheet, $c1, $f1, $maxDvRows);
 }
-// Only the second "Carat" column = metal karat dropdown; first "Carat" in the sheet = diamond D. weight (not this list).
-if (isset($labelIndices['Carat'], $listRangeMeta['carat']) && count($labelIndices['Carat']) > 1) {
-    $cCar2 = (int) $labelIndices['Carat'][1] + 1;
+// Karat list validation on the metal Carat column (last when two Carat columns exist).
+if (!empty($labelIndices['Carat']) && !empty($listRangeMeta['carat'])) {
+    $caratCols = $labelIndices['Carat'];
+    $karatIdx = count($caratCols) > 1 ? $caratCols[count($caratCols) - 1] : $caratCols[0];
+    $cCarKarat = (int) $karatIdx + 1;
     $f1k = $getFormula1ForListKey('carat');
     if ($f1k !== null) {
-        $applyListDv($sheet, $cCar2, $f1k, $maxDvRows);
+        $applyListDv($sheet, $cCarKarat, $f1k, $maxDvRows);
+    }
+}
+foreach ($extra_field_defs_sample as $efDef) {
+    if (($efDef['field_type'] ?? '') !== 'dropdown') {
+        continue;
+    }
+    $efId = (int) ($efDef['id'] ?? 0);
+    $efLabel = trim((string) ($efDef['display_name'] ?? ''));
+    if ($efId <= 0 || $efLabel === '') {
+        continue;
+    }
+    $cEf = $headerToCol1($headers, $efLabel);
+    if ($cEf === null) {
+        continue;
+    }
+    $fEf = $getFormula1ForListKey('ef_' . $efId);
+    if ($fEf !== null) {
+        $applyListDv($sheet, $cEf, $fEf, $maxDvRows);
     }
 }
 
@@ -534,6 +490,15 @@ if ($voucher === 'sale_order') {
     }
 } elseif ($product_id > 0) {
     $filename .= '_product' . $product_id;
+    if ($metal_name_sample !== '') {
+        $slug = strtolower(preg_replace('/[^a-z0-9]+/', '_', $metal_name_sample));
+        $slug = trim($slug, '_');
+        if ($slug !== '') {
+            $filename .= '_' . $slug;
+        }
+    } elseif ($metal_id_sample > 0) {
+        $filename .= '_metal' . $metal_id_sample;
+    }
 }
 $filename .= '.xlsx';
 

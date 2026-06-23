@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/branch_profile_schema.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/international-dial-codes.php';
 require_once __DIR__ . '/includes/location-helpers.php';
+require_once __DIR__ . '/includes/auragold_user_menu_preferences.php';
 
 if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0 || empty($_SESSION['Admin'])) {
     header('Location: index.php');
@@ -15,6 +16,7 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0 || empty($_S
 auragold_ensure_tbl_branches_profile_columns($conn_master);
 $auragold_profile_user_link = (isset($conn) && $conn instanceof mysqli) ? $conn : $conn_master;
 auragold_ensure_tbl_users_profile_photo_column($auragold_profile_user_link);
+auragold_ensure_tbl_users_menu_style_column($auragold_profile_user_link);
 
 $uid = (int) $_SESSION['user_id'];
 $userRow = getRecord('SELECT * FROM tbl_users WHERE id = ' . $uid . ' LIMIT 1');
@@ -60,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
     $lname = trim((string) ($_POST['Lname'] ?? ''));
     $phone = trim((string) ($_POST['Phone'] ?? ''));
     $email = trim((string) ($_POST['EmailId'] ?? ''));
+    $menu_style = auragold_normalize_menu_style($_POST['menu_style'] ?? 'horizontal');
 
     if (strlen($fname) > 100 || strlen($lname) > 100) {
         $fail('First or last name is too long.');
@@ -142,6 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
             Lname = '" . esc($lname) . "',
             Phone = " . ($phone === '' ? 'NULL' : "'" . esc($phone) . "'") . ",
             EmailId = " . ($email === '' ? 'NULL' : "'" . esc($email) . "'") . ",
+            menu_style = '" . esc($menu_style) . "',
             profile_photo = " . $photoSql . ",
             ModifiedBy = " . (int) $uid . ",
             ModifiedDate = NOW()
@@ -164,7 +168,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
         $_SESSION['Admin']['Phone'] = $phone;
         $_SESSION['Admin']['EmailId'] = $email;
         $_SESSION['Admin']['profile_photo'] = $user_photo_path;
+        $_SESSION['Admin']['menu_style'] = $menu_style;
     }
+    auragold_sync_user_menu_style_in_session($menu_style);
 
     $_SESSION['auragold_toast'] = ['type' => 'success', 'message' => 'Your profile was saved.'];
     header('Location: my-profile.php');
@@ -416,6 +422,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
     if ($uPhotoPath !== '' && is_file(__DIR__ . '/' . $uPhotoPath)) {
         $uPhotoUrl = $uPhotoPath . '?v=' . (int) @filemtime(__DIR__ . '/' . $uPhotoPath);
     }
+    $uMenuStyle = auragold_normalize_menu_style($ur['menu_style'] ?? auragold_get_user_menu_style($uid));
     ?>
         <form method="post" action="my-profile.php" enctype="multipart/form-data" autocomplete="on" class="mb-3">
             <input type="hidden" name="profile_form" value="user">
@@ -475,6 +482,20 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                         <input type="email" class="form-control" id="mp_EmailId" name="EmailId" maxlength="100"
                                value="<?php echo htmlspecialchars($uEmail); ?>">
                     </div>
+                </div>
+                <div class="form-group mb-3">
+                    <label>Menu style</label>
+                    <div class="d-flex flex-wrap" style="gap:16px;">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="menu_style" id="mp_menu_horizontal" value="horizontal"<?php echo $uMenuStyle === 'horizontal' ? ' checked' : ''; ?>>
+                            <label class="form-check-label" for="mp_menu_horizontal">Horizontal (top bar)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="menu_style" id="mp_menu_vertical" value="vertical"<?php echo $uMenuStyle === 'vertical' ? ' checked' : ''; ?>>
+                            <label class="form-check-label" for="mp_menu_vertical">Vertical (left sidebar)</label>
+                        </div>
+                    </div>
+                    <div class="mp-hint">Choose how the main navigation appears. Vertical mode opens submenus below each item (like Region in Set Software). Use the tab on the menu edge to hide or show the sidebar.</div>
                 </div>
                 <button type="submit" class="btn mp-btn-save">Save profile</button>
             </div>

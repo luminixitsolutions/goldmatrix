@@ -41,6 +41,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (($_POST['mail_settings_act
 
 $row = auragold_get_mail_settings_row($conn);
 $has_smtp_password = isset($row['smtp_password']) && trim((string) $row['smtp_password']) !== '';
+$smtp_user = trim((string) ($row['smtp_username'] ?? ''));
+$from_email_cfg = trim((string) ($row['from_email'] ?? ''));
+$mail_from_mismatch = ($smtp_user !== '' && $from_email_cfg !== '' && strcasecmp($smtp_user, $from_email_cfg) !== 0);
 
 $t = static function (string $key, string $fallback = ''): string {
     if (function_exists('auragold_t')) {
@@ -103,6 +106,15 @@ details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600;
                         </div>
                     <?php endif; ?>
 
+                    <?php if ($mail_from_mismatch): ?>
+                        <div class="alert alert-warning" role="alert">
+                            <strong>From email does not match SMTP username.</strong>
+                            SMTP login is <code><?php echo htmlspecialchars($smtp_user, ENT_QUOTES, 'UTF-8'); ?></code>
+                            but From email is <code><?php echo htmlspecialchars($from_email_cfg, ENT_QUOTES, 'UTF-8'); ?></code>.
+                            Click <strong>Save</strong> below — From email will be corrected automatically to match SMTP username.
+                        </div>
+                    <?php endif; ?>
+
                     <form method="post" action="mail-settings.php" autocomplete="off" id="mail-settings-form">
                         <input type="hidden" name="mail_settings_action" value="save">
 
@@ -153,6 +165,7 @@ details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600;
                                     <div class="form-group">
                                         <label for="from_email"><?php echo $t('mail_settings.from_email', 'From email'); ?></label>
                                         <input type="email" class="form-control" id="from_email" name="mail[from_email]" value="<?php echo htmlspecialchars((string) ($row['from_email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <small class="form-text text-muted">Should match SMTP username for best delivery.</small>
                                     </div>
                                 </div>
                             </div>
@@ -209,6 +222,10 @@ details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600;
 
                         <button type="submit" class="btn btn-primary"><?php echo $t('mail_settings.save', 'Save'); ?></button>
                         <button type="button" class="btn btn-outline-secondary ml-2" id="btn-test-smtp"><?php echo $t('mail_settings.test_connection', 'Test SMTP connection'); ?></button>
+                        <div class="d-flex flex-wrap align-items-center mt-3" style="gap:8px;">
+                            <input type="email" class="form-control" id="test_mail_to" placeholder="Test recipient email" style="max-width:280px;" value="<?php echo htmlspecialchars($from_email_cfg, ENT_QUOTES, 'UTF-8'); ?>">
+                            <button type="button" class="btn btn-outline-primary" id="btn-send-test-mail">Send test email</button>
+                        </div>
                         <p class="text-muted small mt-2 mb-0" id="mail-test-result" style="display:none;"></p>
                     </form>
                 </div>
@@ -221,6 +238,8 @@ details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600;
 (function () {
     var btn = document.getElementById('btn-test-smtp');
     var out = document.getElementById('mail-test-result');
+    var sendBtn = document.getElementById('btn-send-test-mail');
+    var toInput = document.getElementById('test_mail_to');
     if (!btn || !out) return;
     btn.addEventListener('click', function () {
         var host = (document.getElementById('smtp_host') || {}).value || '';
@@ -255,6 +274,43 @@ details.mail-nonssl summary { cursor: pointer; color: #1e5a8a; font-weight: 600;
                 out.textContent = <?php echo json_encode(function_exists('auragold_t') ? (string) auragold_t('mail_settings.test_network_error') : 'Network error.', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?>;
             });
     });
+    if (sendBtn && toInput) {
+        sendBtn.addEventListener('click', function () {
+            var to = (toInput.value || '').trim();
+            if (!to) {
+                alert('Enter a test recipient email address.');
+                toInput.focus();
+                return;
+            }
+            out.style.display = 'block';
+            out.className = 'text-muted small mt-2 mb-0';
+            out.textContent = 'Sending test email…';
+            sendBtn.disabled = true;
+            fetch('ajax/send-test-mail.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ to: to })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    sendBtn.disabled = false;
+                    if (data && data.ok) {
+                        out.className = 'small mt-2 mb-0 text-success';
+                        out.style.whiteSpace = 'pre-wrap';
+                        out.textContent = data.message || 'Test email sent.';
+                    } else {
+                        out.className = 'small mt-2 mb-0 text-danger';
+                        out.style.whiteSpace = 'pre-wrap';
+                        out.textContent = (data && data.message) ? data.message : 'Send failed.';
+                    }
+                })
+                .catch(function () {
+                    sendBtn.disabled = false;
+                    out.className = 'small mt-2 mb-0 text-danger';
+                    out.textContent = 'Network error.';
+                });
+        });
+    }
 })();
 </script>
 </body>

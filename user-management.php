@@ -39,45 +39,8 @@ $users    = getList(
     'SELECT * FROM ' . $um_users_table . ' WHERE 1=1' . auragold_um_sql_users_scope_and($conn_master) . ' ORDER BY id ASC'
 );
 
-// Branch picker: use operational DB tbl_branches when present (matches this app DB); else registry scoped like branches.php.
-$branch_list = [];
-if (isset($conn) && $conn instanceof mysqli) {
-    $tb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_branches'");
-    $has_branches_tbl = $tb && mysqli_num_rows($tb) > 0;
-    if ($tb) {
-        mysqli_free_result($tb);
-    }
-    if ($has_branches_tbl) {
-        $branch_list = getList(
-            "SELECT id, name FROM tbl_branches WHERE (status = 1 OR status = '1') ORDER BY IFNULL(main_branch_id, 0) ASC, id ASC"
-        );
-        if (!is_array($branch_list)) {
-            $branch_list = [];
-        }
-    }
-}
-if (empty($branch_list)) {
-    $scopeMain = auragold_branches_page_list_scope_main_id();
-    if ($scopeMain > 0) {
-        $branch_list = getListMaster(
-            'SELECT id, name FROM tbl_branches WHERE (status = 1 OR status = \'1\') AND ('
-            . '(IFNULL(main_branch_id, 0) = 0 AND id = ' . (int) $scopeMain . ') OR main_branch_id = ' . (int) $scopeMain
-            . ') ORDER BY IFNULL(main_branch_id, 0) ASC, id ASC'
-        );
-    } else {
-        $branch_list = getListMaster(
-            "SELECT id, name FROM tbl_branches WHERE (status = 1 OR status = '1') ORDER BY IFNULL(main_branch_id, 0) ASC, id ASC"
-        );
-    }
-    if (!is_array($branch_list)) {
-        $branch_list = [];
-    }
-}
-if (empty($branch_list)) {
-    require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
-    $mid = auragold_registry_main_branch_id_for_login();
-    $branch_list = $mid > 0 ? [['id' => $mid, 'name' => 'Main Branch']] : [];
-}
+// Branch picker: main branch with nested sub-branches (scoped like branches.php).
+$um_branch_groups = auragold_um_branch_picker_groups($conn, $conn_master);
 
 $page_title = 'User Management — ' . auragold_app_name();
 $auragold_admin_tab = 'users';
@@ -522,6 +485,32 @@ $auragold_admin_tab = 'users';
         .um-branch-label {
             font-weight: 500;
         }
+        .um-branch-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .um-branch-group + .um-branch-group {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--um-border);
+        }
+        .um-branch-main {
+            font-weight: 600;
+            color: var(--um-text);
+        }
+        .um-branch-subs {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-left: 24px;
+            padding-left: 12px;
+            border-left: 2px solid var(--um-purple-soft);
+        }
+        .um-branch-sub {
+            font-weight: 500;
+            color: var(--um-muted);
+        }
         .um-pw-wrap {
             position: relative;
         }
@@ -815,30 +804,42 @@ $auragold_admin_tab = 'users';
                                 <div class="um-form-group">
                                     <label id="umBranchFieldLabel" style="display:block;font-weight:600;margin-bottom:8px;color:var(--um-text);">Branch <span class="um-req">*</span></label>
                                     <div class="um-branch-checkboxes" id="umBranchBoxes" role="group" aria-labelledby="umBranchFieldLabel">
-                                        <?php foreach ($branch_list as $b): ?>
+                                        <?php foreach ($um_branch_groups as $um_branch_group): ?>
                                             <?php
-                                            $bn = trim((string) ($b['name'] ?? ''));
-                                            if ($bn === '') {
-                                                continue;
-                                            }
-                                            $bid = (int) ($b['id'] ?? 0);
-                                            if ($bid <= 0) {
-                                                if (!function_exists('auragold_registry_main_branch_id_for_login')) {
-                                                    require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
-                                                }
-                                                $bid = auragold_registry_main_branch_id_for_login();
-                                            }
-                                            if ($bid <= 0) {
+                                            $um_main = $um_branch_group['main'] ?? [];
+                                            $um_subs = $um_branch_group['subs'] ?? [];
+                                            $um_main_id = (int) ($um_main['id'] ?? 0);
+                                            $um_main_name = trim((string) ($um_main['name'] ?? ''));
+                                            if ($um_main_id <= 0 || $um_main_name === '') {
                                                 continue;
                                             }
                                             ?>
-                                            <label class="um-check-inline um-branch-label">
-                                                <input type="checkbox" class="um-branch-cb" name="branches[]" value="<?php echo $bid; ?>" data-branch-name="<?php echo htmlspecialchars($bn, ENT_QUOTES, 'UTF-8'); ?>">
-                                                <?php echo htmlspecialchars($bn, ENT_QUOTES, 'UTF-8'); ?>
-                                            </label>
+                                            <div class="um-branch-group">
+                                                <label class="um-check-inline um-branch-label um-branch-main">
+                                                    <input type="checkbox" class="um-branch-cb" name="branches[]" value="<?php echo $um_main_id; ?>" data-branch-name="<?php echo htmlspecialchars($um_main_name, ENT_QUOTES, 'UTF-8'); ?>" data-branch-type="main">
+                                                    <?php echo htmlspecialchars($um_main_name, ENT_QUOTES, 'UTF-8'); ?>
+                                                </label>
+                                                <?php if (!empty($um_subs)): ?>
+                                                    <div class="um-branch-subs">
+                                                        <?php foreach ($um_subs as $um_sub): ?>
+                                                            <?php
+                                                            $um_sub_id = (int) ($um_sub['id'] ?? 0);
+                                                            $um_sub_name = trim((string) ($um_sub['name'] ?? ''));
+                                                            if ($um_sub_id <= 0 || $um_sub_name === '') {
+                                                                continue;
+                                                            }
+                                                            ?>
+                                                            <label class="um-check-inline um-branch-label um-branch-sub">
+                                                                <input type="checkbox" class="um-branch-cb" name="branches[]" value="<?php echo $um_sub_id; ?>" data-branch-name="<?php echo htmlspecialchars($um_sub_name, ENT_QUOTES, 'UTF-8'); ?>" data-branch-type="sub">
+                                                                <?php echo htmlspecialchars($um_sub_name, ENT_QUOTES, 'UTF-8'); ?>
+                                                            </label>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
                                         <?php endforeach; ?>
                                     </div>
-                                    <p style="font-size:12px;color:var(--um-muted);margin:8px 0 0;">Select one or more branches (tick the checkbox).</p>
+                                    <p style="font-size:12px;color:var(--um-muted);margin:8px 0 0;">Select the main branch and/or its sub-branches.</p>
                                 </div>
                                 <div class="um-form-group">
                                     <label for="umUsername">User Name <span class="um-req">*</span></label>

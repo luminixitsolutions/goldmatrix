@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -340,6 +341,9 @@ try {
                 $mw_val = $ri_has_metal_weight ? ", $metal_weight" : "";
                 $src_col = $ri_has_source_against ? ", source_against_item_id" : "";
                 $src_val = $ri_has_source_against ? ", " . ($source_against_item_id > 0 ? $source_against_item_id : "NULL") : "";
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_sale_return_items', $item);
+                $ef_col = $ef_parts['columns'];
+                $ef_val = $ef_parts['values'];
                 // Insert return item
                 $item_sql = "
                     INSERT INTO tbl_sale_return_items (
@@ -347,7 +351,7 @@ try {
                         description$dc_col, carat, quantity$mq_col$mw_col, gross_weight, final_weight,
                         net_weight, pure_weight, making_amount, tax_amount,
                         amount, net_amount, net_amt_weight,
-                        diamond_weight, gemstone_weight, diamond_amount$ct_col,
+                        diamond_weight, gemstone_weight, diamond_amount$ct_col$ef_col,
                         status, created_at
                     ) VALUES (
                         $return_id$src_val, $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
@@ -358,7 +362,7 @@ try {
                         $quantity$mq_val$mw_val, $gross_weight, $final_weight,
                         $net_weight, $pure_weight, $making, $tax,
                         $amount, $net_amount, $net_amt_weight,
-                        $diamond_weight, $gemstone_weight, $diamond_amount$ct_val,
+                        $diamond_weight, $gemstone_weight, $diamond_amount$ct_val$ef_val,
                         1, NOW()
                     )
                 ";

@@ -161,6 +161,22 @@
     }
     window.getActiveProductModalMetalName = getActiveProductModalMetalName;
 
+    function isCatalogueModalProductRow(row) {
+        if (!row) return false;
+        return row.hasAttribute('data-catalogue-set-index') || row.hasAttribute('data-catalogue-design');
+    }
+    window.isCatalogueModalProductRow = isCatalogueModalProductRow;
+
+    /** Rows to commit: catalogue rows always; others only if visible on active metal tab. */
+    function getCommitProductModalRows(allRows) {
+        return Array.prototype.slice.call(allRows || []).filter(function (row) {
+            if (!row) return false;
+            if (isCatalogueModalProductRow(row)) return true;
+            return row.style.display !== 'none';
+        });
+    }
+    window.getCommitProductModalRows = getCommitProductModalRows;
+
     function isGoldOrSilverMetalTab() {
         var n = (getActiveProductModalMetalName() || '').toLowerCase().trim();
         return n === 'gold' || n === 'silver';
@@ -670,6 +686,7 @@
         });
         const barcodeFieldInput = row.querySelector('[data-column="barcode"] input');
         addListeners(barcodeFieldInput, function() {
+            if (row.getAttribute('data-detail-modal-sync') === '1') return;
             if (typeof syncDiamondTabSharedBarcodes === 'function') syncDiamondTabSharedBarcodes();
         });
         addListeners(otherWeightInput, function() { calculateModalRowNetWeight(row); });
@@ -694,6 +711,9 @@
             addListeners(row.querySelector('[data-column="sale-amount-with"] input'), piSaleAmountFieldsChanged);
         }
         if (typeof applyCalculationSelectOptionsForRow === 'function') applyCalculationSelectOptionsForRow(calculationSelect, row, typeof isDiamondTabActive === 'function' && isDiamondTabActive());
+        if (typeof window.ensureProductRowViewIcon === 'function') {
+            window.ensureProductRowViewIcon(row);
+        }
     }
     window.addModalRowCalculationListeners = addModalRowCalculationListeners;
 
@@ -1436,6 +1456,9 @@
         if (taxTypeSelectRow) {
             taxTypeSelectRow.addEventListener('change', function() { clearPreserveAndCalc(); });
         }
+        if (typeof window.ensureProductRowViewIcon === 'function') {
+            window.ensureProductRowViewIcon(row);
+        }
     }
     window.addRowCalculationListeners = addRowCalculationListeners;
 
@@ -1734,11 +1757,13 @@
             } catch (e) {}
         }
         var srcAgainst = row.getAttribute('data-source-against-item-id');
+        var srcSoItem = row.getAttribute('data-source-sale-order-item-id');
         return {
             product_id: productId,
             characteristic_id: row.getAttribute('data-characteristic-id') || characteristicId || '',
             metal_id: metalId,
             source_against_item_id: (srcAgainst != null && String(srcAgainst).trim() !== '') ? String(srcAgainst).trim() : '',
+            source_sale_order_item_id: (srcSoItem != null && String(srcSoItem).trim() !== '') ? String(srcSoItem).trim() : '',
             product_name: getValue('product', false),
             barcode: barcode || '',
             item_code: getValue('item-code', false),
@@ -1943,6 +1968,7 @@
             design_no: item.design_no || '',
             calculation_type: (item.calculation_type || item.calculation || 'Rate X Gross Wt').toString().trim(),
             source_against_item_id: (item.source_against_item_id != null && item.source_against_item_id !== '') ? item.source_against_item_id : '',
+            source_sale_order_item_id: (item.source_sale_order_item_id != null && item.source_sale_order_item_id !== '') ? item.source_sale_order_item_id : '',
             merge_group_index: (item.merge_group_index != null && item.merge_group_index !== '') ? item.merge_group_index : null,
             // Sale order line photos (PHP sets group_image from tbl_sale_order_items.images JSON)
             group_image: item.group_image != null && item.group_image !== '' ? item.group_image : '',
@@ -1957,7 +1983,20 @@
                 return (Math.max(a, b) > 0) ? String(Math.max(a, b)) : '';
             })(),
             gst_line_taxes: (item.gst_line_taxes != null && item.gst_line_taxes !== '') ? String(item.gst_line_taxes) : '',
-            product_taxes: (item.product_taxes != null && item.product_taxes !== '') ? String(item.product_taxes) : '[]'
+            product_taxes: (item.product_taxes != null && item.product_taxes !== '') ? String(item.product_taxes) : '[]',
+            extra_fields: (function () {
+                if (item.extra_fields && typeof item.extra_fields === 'object') {
+                    return item.extra_fields;
+                }
+                var raw = item.extra_fields_json;
+                if (typeof raw === 'string' && raw.trim() !== '') {
+                    try {
+                        var parsed = JSON.parse(raw);
+                        if (parsed && typeof parsed === 'object') return parsed;
+                    } catch (e) {}
+                }
+                return {};
+            })()
         };
     }
     window.savedItemToModalRowData = savedItemToModalRowData;
@@ -3051,46 +3090,66 @@
         function setBarcode(row, code) {
             var inp = row.querySelector('[data-column="barcode"] input');
             if (inp) inp.value = code;
+            if (code) row.setAttribute('data-barcode', code);
         }
         function isCompositeCat(c) {
             return c === 'Jewellery' || c === 'Diamonds' || c === 'GemStones';
         }
-
-        var anchor = '';
-        // Prefer main stock tag (DIA00004) over extra diamond lines (DIAA00006) when both are in the grid
-        for (var pi = 0; pi < rows.length; pi++) {
-            if (!isCompositeCat(rowCategory(rows[pi]))) continue;
-            var bp = rowBarcode(rows[pi]);
-            if (!bp) continue;
-            if (!/^DIAA/i.test(bp)) {
-                anchor = bp;
-                break;
+        function syncBarcodeGroup(groupRows) {
+            if (!groupRows || !groupRows.length) return;
+            var anchor = '';
+            for (var pi = 0; pi < groupRows.length; pi++) {
+                if (!isCompositeCat(rowCategory(groupRows[pi]))) continue;
+                var bp = rowBarcode(groupRows[pi]);
+                if (!bp) continue;
+                if (!/^DIAA/i.test(bp)) {
+                    anchor = bp;
+                    break;
+                }
             }
-        }
-        var order = ['Jewellery', 'Diamonds', 'GemStones'];
-        if (!anchor) {
-            for (var o = 0; o < order.length; o++) {
-                var want = order[o];
-                for (var i = 0; i < rows.length; i++) {
-                    if (rowCategory(rows[i]) === want) {
-                        var b = rowBarcode(rows[i]);
-                        if (b) {
-                            anchor = b;
-                            break;
+            var order = ['Jewellery', 'Diamonds', 'GemStones'];
+            if (!anchor) {
+                for (var o = 0; o < order.length; o++) {
+                    var want = order[o];
+                    for (var i = 0; i < groupRows.length; i++) {
+                        if (rowCategory(groupRows[i]) === want) {
+                            var b = rowBarcode(groupRows[i]);
+                            if (b) {
+                                anchor = b;
+                                break;
+                            }
                         }
                     }
+                    if (anchor) break;
                 }
-                if (anchor) break;
             }
+            if (!anchor) return;
+            groupRows.forEach(function(row) {
+                var c = rowCategory(row);
+                if (isCompositeCat(c)) {
+                    setBarcode(row, anchor);
+                }
+            });
         }
-        if (!anchor) return;
 
-        rows.forEach(function(row) {
-            var c = rowCategory(row);
-            if (isCompositeCat(c)) {
-                setBarcode(row, anchor);
-            }
+        var hasCatalogueSets = rows.some(function(r) {
+            return r.hasAttribute('data-catalogue-set-index');
         });
+        if (hasCatalogueSets) {
+            var bySet = {};
+            rows.forEach(function(row) {
+                var setKey = row.getAttribute('data-catalogue-set-index');
+                if (setKey === null || setKey === '') setKey = '__default__';
+                if (!bySet[setKey]) bySet[setKey] = [];
+                bySet[setKey].push(row);
+            });
+            Object.keys(bySet).forEach(function(setKey) {
+                syncBarcodeGroup(bySet[setKey]);
+            });
+            return;
+        }
+
+        syncBarcodeGroup(rows);
         });
     }
     window.syncDiamondTabSharedBarcodes = syncDiamondTabSharedBarcodes;
@@ -3301,6 +3360,66 @@
         step();
     }
     window.assignUniqueBarcodesToMergedProductListRow = assignUniqueBarcodesToMergedProductListRow;
+
+    /**
+     * Assign sequential unique barcodes to multiple main-table rows (e.g. catalogue qty copies).
+     */
+    function assignUniqueBarcodesSequentialForProductListRows(pairs) {
+        if (!pairs || !pairs.length) return;
+        if (typeof getNextBarcodeFromServer !== 'function' || typeof collectUsedBarcodesForInvoiceRows !== 'function') return;
+        var used = collectUsedBarcodesForInvoiceRows(null);
+        var idx = 0;
+        function step() {
+            if (idx >= pairs.length) return;
+            var pair = pairs[idx];
+            var row = pair && pair.row;
+            var modalRowData = pair && pair.modalRowData;
+            if (!row || !modalRowData) {
+                idx++;
+                step();
+                return;
+            }
+            var candSeq = String(modalRowData.barcode || row.getAttribute('data-barcode') || '').trim();
+            if (candSeq !== '') {
+                row.setAttribute('data-barcode', candSeq);
+                var spanKeep = row.querySelector('[data-column="barcode"] span');
+                var inpKeep = row.querySelector('[data-column="barcode"] input');
+                if (inpKeep) inpKeep.value = candSeq;
+                else if (spanKeep) spanKeep.textContent = candSeq;
+                if (used.indexOf(candSeq) === -1) used.push(candSeq);
+                idx++;
+                step();
+                return;
+            }
+            resolveBarcodePrefixDigitForModal(modalRowData, function(prefix, digit) {
+                getNextBarcodeFromServer({ prefix: prefix, digit: digit, used: used.slice() }, function(barcode) {
+                    if (barcode) {
+                        row.setAttribute('data-barcode', barcode);
+                        var span = row.querySelector('[data-column="barcode"] span');
+                        var inp = row.querySelector('[data-column="barcode"] input');
+                        if (inp) inp.value = barcode;
+                        else if (span) span.textContent = barcode;
+                        modalRowData.barcode = barcode;
+                        used.push(barcode);
+                        try {
+                            var gi = row.getAttribute('data-group-items');
+                            if (gi) {
+                                var arr = JSON.parse(gi);
+                                if (Array.isArray(arr) && arr.length > 0) {
+                                    arr.forEach(function(x) { if (x) x.barcode = barcode; });
+                                    row.setAttribute('data-group-items', JSON.stringify(arr));
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                    idx++;
+                    step();
+                });
+            });
+        }
+        step();
+    }
+    window.assignUniqueBarcodesSequentialForProductListRows = assignUniqueBarcodesSequentialForProductListRows;
 
     /**
      * After manual product pick: resolve barcode via server (unique in doc + not in stock). Skips barcode scan flow and Diamond & Stones tab (shared tag handled on save).

@@ -495,7 +495,7 @@
             if (el) el.value = '';
         });
         var qty = document.getElementById('modalProductQty');
-        if (qty) qty.value = '1';
+        if (qty) qty.value = '';
         var gn = document.getElementById('modalGroupName');
         if (gn) gn.value = '';
         var cm = document.getElementById('modalComment');

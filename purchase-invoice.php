@@ -1596,6 +1596,8 @@ text-transform: uppercase;
         max-width: 95% !important;
         margin-left: auto !important;
         margin-right: auto !important;
+        margin-top: 1.25rem !important;
+        margin-bottom: 1rem !important;
         height: auto !important;
         min-height: 0 !important;
     }
@@ -1603,7 +1605,7 @@ text-transform: uppercase;
         border-radius: 10px;
         border: none;
         box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-        max-height: 95vh !important;
+        max-height: calc(100vh - 2.5rem) !important;
         height: auto !important;
         min-height: 0 !important;
         display: flex;
@@ -1619,9 +1621,16 @@ text-transform: uppercase;
         min-height: 0 !important;
         overflow-y: auto !important;
         overflow-x: auto !important;
-        max-height: calc(95vh - 120px) !important;
+        max-height: calc(100vh - 8rem) !important;
         padding: 1rem 1.5rem 10px 1.5rem !important;
         -webkit-overflow-scrolling: touch;
+    }
+    #productSelectionModal .product-category-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 12;
+        background: #fff;
+        padding-top: 0.35rem;
     }
     #productSelectionModal .modal-body::-webkit-scrollbar {
         width: 8px;
@@ -3634,7 +3643,9 @@ window.PB_PAGE_CONFIG = {
                         if (pr.metal_id != null && pr.metal_id !== '') lastMid = String(pr.metal_id);
                     }
                     if (lastMid && typeof switchToMetalTab === 'function') switchToMetalTab(lastMid);
-                    if (barcodeInput) {
+                    if (typeof auragoldClearModalProductBarcodeInput === 'function') {
+                        auragoldClearModalProductBarcodeInput(barcodeInput);
+                    } else if (barcodeInput) {
                         barcodeInput.value = '';
                         barcodeInput.style.borderColor = '';
                         barcodeInput.focus();
@@ -3657,7 +3668,9 @@ window.PB_PAGE_CONFIG = {
                     if (mid && typeof switchToMetalTab === 'function') switchToMetalTab(mid);
                     function addSiblingSequentialPi(idx, list) {
                         if (!list || idx >= list.length) {
-                            if (barcodeInput) {
+                            if (typeof auragoldClearModalProductBarcodeInput === 'function') {
+                                auragoldClearModalProductBarcodeInput(barcodeInput);
+                            } else if (barcodeInput) {
                                 barcodeInput.value = '';
                                 barcodeInput.style.borderColor = '';
                                 barcodeInput.focus();
@@ -3727,6 +3740,9 @@ window.PB_PAGE_CONFIG = {
                 modalProductBarcodeFetchInFlight = false;
                 modalProductBarcodeLastFetchDoneBarcode = trimmed;
                 modalProductBarcodeLastFetchDoneTime = Date.now();
+                if (typeof auragoldModalBarcodeBatchOnFetchComplete === 'function') {
+                    auragoldModalBarcodeBatchOnFetchComplete();
+                }
             });
     }
     
@@ -3736,21 +3752,28 @@ window.PB_PAGE_CONFIG = {
     function triggerModalProductBarcodeCheck(input, fromBlur) {
         fromBlur = !!fromBlur;
         var $input = $(input);
-        var barcode = $input.val().trim();
-        if (!barcode) {
+        var raw = $input.val().trim();
+        if (!raw) {
             modalProductBarcodeLastCheck = '';
             return;
         }
-        if (shouldSuppressModalProductBarcodeCheck(barcode, fromBlur)) {
+        var barcodes = typeof auragoldParseModalBarcodeTokens === 'function'
+            ? auragoldParseModalBarcodeTokens(raw)
+            : raw.split(/\s+/).filter(function (s) { return s.length > 0; });
+        if (shouldSuppressModalProductBarcodeCheck(barcodes.length > 1 ? raw : (barcodes[0] || raw), fromBlur)) {
             return;
         }
         var t = Date.now();
-        if (barcode === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
+        if (raw === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
             return;
         }
-        modalProductBarcodeLastCheck = barcode;
+        modalProductBarcodeLastCheck = raw;
         modalProductBarcodeLastCheckTime = t;
-        fetchProductByBarcodeAndAdd(barcode);
+        if (barcodes.length > 1 && typeof auragoldStartModalBarcodeBatch === 'function') {
+            auragoldStartModalBarcodeBatch(barcodes, input, fetchProductByBarcodeAndAdd);
+            return;
+        }
+        fetchProductByBarcodeAndAdd(barcodes[0] || raw);
     }
     
     // Handle Add Product Icon Click
@@ -5026,6 +5049,9 @@ window.PB_PAGE_CONFIG = {
                 currentMetalId = btn.getAttribute('data-metal-id');
                 currentMetalName = btn.getAttribute('data-metal-name');
                 filterProductsByMetal(currentMetalId);
+                if (typeof syncProductModalExcelSampleLink === 'function') {
+                    syncProductModalExcelSampleLink();
+                }
                 var isDiamond = (typeof currentMetalName === 'string' && currentMetalName.toLowerCase().indexOf('diamond') !== -1);
                 var modalEl = document.getElementById('productSelectionModal');
                 var scrollWrap = document.getElementById('productListTableScrollWrapper');
@@ -5062,6 +5088,9 @@ window.PB_PAGE_CONFIG = {
         if (firstTab) {
             currentMetalId = firstTab.getAttribute('data-metal-id');
             currentMetalName = firstTab.getAttribute('data-metal-name');
+            if (typeof syncProductModalExcelSampleLink === 'function') {
+                syncProductModalExcelSampleLink();
+            }
             var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
             if (filterRow) {
                 filterRow.style.display = (currentMetalName && currentMetalName.toLowerCase().indexOf('diamond') !== -1) ? '' : 'none';
@@ -5102,6 +5131,9 @@ window.PB_PAGE_CONFIG = {
             var filterRow = document.getElementById('modalDiamondCategoryFilterRow');
             if (filterRow) filterRow.style.display = isDiamond ? '' : 'none';
             if (typeof applyProductModalColumnVisibilityForTab === 'function') applyProductModalColumnVisibilityForTab(currentMetalId || '');
+            if (typeof syncProductModalExcelSampleLink === 'function') {
+                syncProductModalExcelSampleLink();
+            }
         }
     }
     window.switchToMetalTab = switchToMetalTab;
@@ -5145,6 +5177,9 @@ window.PB_PAGE_CONFIG = {
                 initCategoryTabs();
             } catch(e) {
                 console.log('Error initializing category tabs:', e);
+            }
+            if (typeof syncProductModalExcelSampleLink === 'function') {
+                syncProductModalExcelSampleLink();
             }
             
             // Clear search input
@@ -9897,7 +9932,7 @@ window.PB_PAGE_CONFIG = {
             }
         });
         
-        orderData.items = items;
+        orderData.items = (typeof auragoldEnrichVoucherItemsExtraFields === 'function' ? auragoldEnrichVoucherItemsExtraFields(items) : items);
         
         if (currentOrderId <= 0) {
             var productLineCount = 0;

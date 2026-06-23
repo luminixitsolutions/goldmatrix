@@ -3848,6 +3848,9 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                 modalProductBarcodeFetchInFlight = false;
                 modalProductBarcodeLastFetchDoneBarcode = trimmed;
                 modalProductBarcodeLastFetchDoneTime = Date.now();
+                if (typeof auragoldModalBarcodeBatchOnFetchComplete === 'function') {
+                    auragoldModalBarcodeBatchOnFetchComplete();
+                }
             });
     }
 
@@ -4000,21 +4003,28 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     function triggerModalProductBarcodeCheck(input, fromBlur) {
         fromBlur = !!fromBlur;
         var $input = $(input);
-        var barcode = $input.val().trim();
-        if (!barcode) {
+        var raw = $input.val().trim();
+        if (!raw) {
             modalProductBarcodeLastCheck = '';
             return;
         }
-        if (shouldSuppressModalProductBarcodeCheck(barcode, fromBlur)) {
+        var barcodes = typeof auragoldParseModalBarcodeTokens === 'function'
+            ? auragoldParseModalBarcodeTokens(raw)
+            : raw.split(/\s+/).filter(function (s) { return s.length > 0; });
+        if (shouldSuppressModalProductBarcodeCheck(barcodes.length > 1 ? raw : (barcodes[0] || raw), fromBlur)) {
             return;
         }
         var t = Date.now();
-        if (barcode === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
+        if (raw === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
             return;
         }
-        modalProductBarcodeLastCheck = barcode;
+        modalProductBarcodeLastCheck = raw;
         modalProductBarcodeLastCheckTime = t;
-        fetchProductByBarcodeAndAdd(barcode);
+        if (barcodes.length > 1 && typeof auragoldStartModalBarcodeBatch === 'function') {
+            auragoldStartModalBarcodeBatch(barcodes, input, fetchProductByBarcodeAndAdd);
+            return;
+        }
+        fetchProductByBarcodeAndAdd(barcodes[0] || raw);
     }
     
     // Handle Add Product Icon Click
@@ -9337,10 +9347,12 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             return { ok: true, reason: 'edit_saved', mainRowsAdded: 0 };
         }
 
-        var productRows = Array.from(allProductRows).filter(function(row) {
-            if (!row) return false;
-            return row.style.display !== 'none';
-        });
+        var productRows = typeof window.getCommitProductModalRows === 'function'
+            ? window.getCommitProductModalRows(allProductRows)
+            : Array.from(allProductRows).filter(function(row) {
+                if (!row) return false;
+                return row.style.display !== 'none';
+            });
         if (productRows.length === 0) {
             if (notifyEmpty) {
                 alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
@@ -9389,12 +9401,17 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             } else {
                 productRows.forEach(function(row) {
                     var metalId = row.getAttribute('data-metal-id') || '';
-                    if (!byMetal[metalId]) byMetal[metalId] = [];
-                    byMetal[metalId].push(row);
+                    var setIdx = row.getAttribute('data-catalogue-set-index');
+                    var groupKey = (setIdx !== null && setIdx !== '')
+                        ? (metalId + '::catalogue-set::' + setIdx)
+                        : metalId;
+                    if (!byMetal[groupKey]) byMetal[groupKey] = [];
+                    byMetal[groupKey].push(row);
                 });
-                Object.keys(byMetal).forEach(function(metalId) {
-                    metalsTouched[metalId] = true;
-                    var rows = byMetal[metalId];
+                Object.keys(byMetal).forEach(function(groupKey) {
+                    metalsTouched[groupKey] = true;
+                    var rows = byMetal[groupKey];
+                    var metalId = rows.length ? (rows[0].getAttribute('data-metal-id') || '') : '';
                     var modalRowsData = [];
                     rows.forEach(function(r) {
                         var d = getModalRowDataFromRow(r, false);
@@ -9430,8 +9447,9 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
                 productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
             }
             if (window.productModalGroupImageByTab && metalsTouched && typeof metalsTouched === 'object') {
-                Object.keys(metalsTouched).forEach(function(metalId) {
-                    delete window.productModalGroupImageByTab[String(metalId || '')];
+                Object.keys(metalsTouched).forEach(function(groupKey) {
+                    var mid = String(groupKey).split('::catalogue-set::')[0];
+                    delete window.productModalGroupImageByTab[String(mid || '')];
                 });
             }
             var groupNameInput = document.getElementById('modalGroupName');
@@ -9689,7 +9707,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             'modalProductBarcode': '',
             'modalProductCode': '',
             'modalProductDesignNo': '',
-            'modalProductQty': '1',
+            'modalProductQty': '',
             'modalMetalUnfix': false,
             'modalUnfix': false,
             'modalGroupSingleItem': true,
@@ -11161,7 +11179,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             }
         });
         
-        orderData.items = items;
+        orderData.items = (typeof auragoldEnrichVoucherItemsExtraFields === 'function' ? auragoldEnrichVoucherItemsExtraFields(items) : items);
 
         // Hedging: full sale invoice total is kept; server creates purchase fixing from sum of line metal_cost
 

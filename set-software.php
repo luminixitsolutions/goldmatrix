@@ -248,11 +248,33 @@ html, body {
     width: 0;
     min-width: 0;
     max-width: 0;
+    padding-top: 16px;
     padding-left: 0;
     padding-right: 0;
-    opacity: 0;
+    opacity: 1;
     pointer-events: none;
+    overflow: visible;
+    background: transparent;
     border: none;
+}
+
+.set-software-sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    position: relative;
+    z-index: 2;
+}
+
+.set-software-sidebar-head .set-software-sidebar-title {
+    margin-bottom: 0;
+    border-bottom: none;
+    flex: 1;
+    min-width: 0;
 }
 
 .set-software-sidebar-title {
@@ -294,30 +316,58 @@ html, body {
 }
 
 .set-software-collapse-tab {
-    position: absolute;
-    left: calc(240px - 28px);
-    top: 50%;
-    transform: translateY(-50%);
+    position: relative;
+    left: auto;
+    top: auto;
+    transform: none;
     z-index: 25;
     width: 28px;
-    height: 60px;
+    height: 40px;
     margin: 0;
     padding: 0;
-    border: none;
-    background: #11294b;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, #c5a864 0%, #a68a4a 100%);
+    border: 1px solid rgba(17, 41, 75, 0.12);
     border-radius: 0 6px 6px 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color: #11294b;
     cursor: pointer;
     font-size: 12px;
-    box-shadow: 2px 0 6px rgba(0,0,0,0.1);
-    transition: left 0.25s ease, background 0.2s ease;
+    box-shadow: 2px 0 8px rgba(166, 138, 74, 0.35);
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.set-software-collapse-tab:hover {
+    background: linear-gradient(180deg, #d4b872 0%, #c5a864 100%);
+}
+
+.set-software-wrapper.set-software-sidebar-collapsed .set-software-sidebar-menu,
+.set-software-wrapper.set-software-sidebar-collapsed .set-software-sidebar-head .set-software-sidebar-title {
+    opacity: 0;
+    visibility: hidden;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+    border: none;
+    pointer-events: none;
+}
+
+.set-software-wrapper.set-software-sidebar-collapsed .set-software-sidebar-head {
+    border-bottom: none;
+    margin-bottom: 0;
+    width: 28px;
+    pointer-events: auto;
 }
 
 .set-software-wrapper.set-software-sidebar-collapsed .set-software-collapse-tab {
+    position: absolute;
     left: 0;
+    top: 16px;
+    pointer-events: auto;
 }
 
 /* Main content area (title bar + canvas) */

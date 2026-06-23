@@ -930,11 +930,62 @@ window.AURAGOLD_ENTRY_BRANCH_ID = <?php echo (int) $branch_entry_id; ?>;
     if (pw) {
         pw.addEventListener('input', onCredentialInput);
     }
+    function isLoginStep1Visible() {
+        var st1 = document.getElementById('loginStep1');
+        return !!(st1 && !st1.classList.contains('login-step--hidden') && st1.style.display !== 'none');
+    }
+    function isLoginStep2Visible() {
+        var st2 = document.getElementById('loginStep2');
+        return !!(st2 && !st2.classList.contains('login-step--hidden') && st2.style.display !== 'none');
+    }
+    var loginEnterSubmitLock = false;
+    function triggerLoginSubmit() {
+        if (loginEnterSubmitLock) {
+            return;
+        }
+        var submitBtn = document.getElementById('login_submit_btn');
+        if (submitBtn && !submitBtn.disabled) {
+            loginEnterSubmitLock = true;
+            submitBtn.click();
+            setTimeout(function () {
+                loginEnterSubmitLock = false;
+            }, 400);
+        }
+    }
+    function handleLoginEnterKey(e) {
+        if (e.key !== 'Enter') {
+            return;
+        }
+        if (isLoginStep1Visible()) {
+            e.preventDefault();
+            if (nextBtn && !nextBtn.disabled) {
+                runVerify();
+            }
+            return;
+        }
+        if (isLoginStep2Visible()) {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerLoginSubmit();
+        }
+    }
+
     if (nextBtn) {
         nextBtn.addEventListener('click', function () {
             runVerify();
         });
     }
+    if (form) {
+        form.addEventListener('keydown', handleLoginEnterKey, true);
+    }
+    var fy = document.getElementById('financial_year_id');
+    if (br) {
+        br.addEventListener('keydown', handleLoginEnterKey);
+    }
+    if (fy) {
+        fy.addEventListener('keydown', handleLoginEnterKey);
+    }
+
     if (backBtn) {
         backBtn.addEventListener('click', function () {
             verifySeq++;

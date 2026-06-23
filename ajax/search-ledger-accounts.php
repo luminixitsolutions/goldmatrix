@@ -7,6 +7,8 @@ auragold_require_login_or_exit();
 header('Content-Type: application/json');
 
 $search_term = isset($_GET['q']) ? esc($_GET['q']) : '';
+$fetch_all = isset($_GET['all']) && (string) $_GET['all'] === '1';
+$list_limit = $fetch_all ? 5000 : (strlen($search_term) < 1 ? 50 : 30);
 
 // Unique ledger names from tbl_customer_ledger (+ stable customer_id for filters)
 if (strlen($search_term) < 1) {
@@ -18,7 +20,7 @@ if (strlen($search_term) < 1) {
         AND customer_name != ''
         GROUP BY customer_name
         ORDER BY customer_name ASC
-        LIMIT 50
+        LIMIT $list_limit
     ";
 } else {
     $query = "
@@ -35,7 +37,7 @@ if (strlen($search_term) < 1) {
                 ELSE 1
             END,
             customer_name ASC
-        LIMIT 30
+        LIMIT $list_limit
     ";
 }
 

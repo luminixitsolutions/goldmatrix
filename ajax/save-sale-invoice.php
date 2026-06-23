@@ -10,6 +10,8 @@ require_once __DIR__ . '/../includes/auragold_branch_data_scope.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold-gst.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
+require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
 if (is_file(__DIR__ . '/../includes/ewaybill_api_helper.php')) {
     require_once __DIR__ . '/../includes/ewaybill_api_helper.php';
 }
@@ -437,7 +439,9 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             if ($dep_raw === '' && (($pt === 'metal_exchange') || strpos($pt, 'metal-exchange') !== false || strpos($pt, 'm. exch') !== false || (strpos($pt, 'metal') !== false && strpos($pt, 'exch') !== false))) {
                 $dep_raw = 'Metal Exchange';
             }
-            if ($dep_raw !== '') {
+            if (auragold_payment_is_cheque_type($pt)) {
+                $party_against_parts[] = auragold_cheque_payment_against_label($line_amt, 'receivable');
+            } elseif ($dep_raw !== '') {
                 $party_against_parts[] = $dep_raw . '(' . number_format($line_amt, 2) . 'Dr)';
             }
         }
@@ -576,6 +580,9 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             if ($line_amt <= 0.00001 || $dep_raw === '') {
                 continue;
             }
+            if (auragold_payment_is_cheque_type($pt_raw)) {
+                continue;
+            }
             $dep_esc = esc($dep_raw);
             $cash_balance_record = getRecord("
                 SELECT balance_amount FROM tbl_customer_ledger
@@ -662,6 +669,21 @@ try {
     $customer_id = isset($_POST['customer_id']) ? (int)$_POST['customer_id'] : 0;
     $customer_name = esc($_POST['customer_name'] ?? '');
     $against_of = esc($_POST['against_of'] ?? '');
+    $against_id = isset($_POST['against_id']) ? (int) $_POST['against_id'] : 0;
+    if (function_exists('auragold_ensure_sale_invoice_against_id')) {
+        auragold_ensure_sale_invoice_against_id($conn);
+    }
+    if (function_exists('auragold_ensure_sale_invoice_item_source_so_id')) {
+        auragold_ensure_sale_invoice_item_source_so_id($conn);
+    }
+    $has_si_against_id = false;
+    $col_si_aid = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_invoices LIKE 'against_id'");
+    if ($col_si_aid && mysqli_num_rows($col_si_aid) > 0) {
+        $has_si_against_id = true;
+        mysqli_free_result($col_si_aid);
+    } elseif ($col_si_aid) {
+        mysqli_free_result($col_si_aid);
+    }
     $currency = esc($_POST['currency'] ?? 'AED');
     $ref_no = esc($_POST['ref_no'] ?? '');
     $sales_person = esc($_POST['sales_person'] ?? '');
@@ -862,6 +884,46 @@ try {
         }
     }
 
+    $items = [];
+    if (isset($_POST['items'])) {
+        if (is_string($_POST['items'])) {
+            $items = json_decode($_POST['items'], true);
+        } else if (is_array($_POST['items'])) {
+            $items = $_POST['items'];
+        }
+    }
+    if (!is_array($items)) {
+        $items = [];
+    }
+
+    $against_of_norm = strtolower(trim((string) $against_of));
+    if ($against_of_norm === 'sale order' && $against_id > 0) {
+        if (empty($items)) {
+            throw new Exception('Please select at least one Sale Order item.');
+        }
+        $seen_so_item_ids = [];
+        $mapped_so_count = 0;
+        foreach ($items as $it) {
+            $src_so = (int) ($it['source_sale_order_item_id'] ?? 0);
+            if ($src_so <= 0) {
+                continue;
+            }
+            $mapped_so_count++;
+            if (isset($seen_so_item_ids[$src_so])) {
+                throw new Exception('Duplicate Sale Order line on invoice. Please refresh and select items again.');
+            }
+            $seen_so_item_ids[$src_so] = true;
+            if (function_exists('auragold_sale_order_so_item_still_pending')) {
+                if (!auragold_sale_order_so_item_still_pending($conn, $src_so, $against_id, $invoice_id)) {
+                    throw new Exception('One or more Sale Order items are already invoiced. Please refresh and try again.');
+                }
+            }
+        }
+        if ($mapped_so_count === 0) {
+            throw new Exception('Please select at least one Sale Order item.');
+        }
+    }
+
     // Link outward tbl_stock rows to sale invoices so edits remove stale rows (barcode + non-barcode paths)
     $tbl_stock_has_reference = false;
     $__stk_ref = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type')");
@@ -955,6 +1017,9 @@ try {
         $update_fields[] = "customer_id = " . ($customer_id > 0 ? $customer_id : 0);
         $update_fields[] = "customer_name = '$customer_name'";
         $update_fields[] = "against_of = " . ($against_of ? "'$against_of'" : "NULL");
+        if ($has_si_against_id) {
+            $update_fields[] = "against_id = " . ($against_id > 0 ? $against_id : "NULL");
+        }
         $update_fields[] = "currency = '$currency'";
         $update_fields[] = "ref_no = " . ($ref_no ? "'$ref_no'" : "NULL");
         $update_fields[] = "sales_person = " . ($sales_person ? "'$sales_person'" : "NULL");
@@ -1083,6 +1148,9 @@ try {
             "invoice_date", "due_date", "layaways_id", "fixing_type",
             "previous_balance", "previous_gold", "previous_silver"
         ];
+        if ($has_si_against_id) {
+            array_splice($insert_fields, 4, 0, ['against_id']);
+        }
         if ($has_previous_diamond_gemstone) {
             $insert_fields[] = "previous_diamond";
             $insert_fields[] = "previous_gemstone";
@@ -1129,6 +1197,11 @@ try {
             ($customer_id > 0 ? $customer_id : 0),
             "'$customer_name'",
             ($against_of ? "'$against_of'" : "NULL"),
+        ];
+        if ($has_si_against_id) {
+            $insert_values[] = ($against_id > 0 ? $against_id : "NULL");
+        }
+        $insert_values = array_merge($insert_values, [
             "'$currency'",
             ($ref_no ? "'$ref_no'" : "NULL"),
             ($sales_person ? "'$sales_person'" : "NULL"),
@@ -1139,7 +1212,7 @@ try {
             $previous_balance,
             $previous_gold,
             $previous_silver
-        ];
+        ]);
         if ($has_previous_diamond_gemstone) {
             $insert_values[] = $previous_diamond;
             $insert_values[] = $previous_gemstone;
@@ -1220,13 +1293,8 @@ try {
         : ($ledger_has_branch_col ? ', NULL' : '');
 
     // Save invoice items
-    $items = [];
-    if (isset($_POST['items'])) {
-        if (is_string($_POST['items'])) {
-            $items = json_decode($_POST['items'], true);
-        } else if (is_array($_POST['items'])) {
-            $items = $_POST['items'];
-        }
+    if (!is_array($items)) {
+        $items = [];
     }
 
     $hedge_metal_cost_sum = 0;
@@ -1394,6 +1462,15 @@ try {
         }
     }
 
+    $tbl_sale_invoice_items_has_source_so_id = false;
+    $col_sso = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_invoice_items LIKE 'source_sale_order_item_id'");
+    if ($col_sso && mysqli_num_rows($col_sso) > 0) {
+        $tbl_sale_invoice_items_has_source_so_id = true;
+        mysqli_free_result($col_sso);
+    } elseif ($col_sso) {
+        mysqli_free_result($col_sso);
+    }
+
     if (!empty($items) && is_array($items)) {
         $item_index = 0;
         foreach ($items as $item) {
@@ -1434,6 +1511,9 @@ try {
             if (!empty($tbl_sale_invoice_items_has_merge_group_index) && isset($item['merge_group_index']) && $item['merge_group_index'] !== '' && $item['merge_group_index'] !== null) {
                 $merge_group_index_sql = (string)(int)$item['merge_group_index'];
             }
+            $source_sale_order_item_id = (int)($item['source_sale_order_item_id'] ?? 0);
+            $sso_col = $tbl_sale_invoice_items_has_source_so_id ? ", source_sale_order_item_id" : "";
+            $sso_val = $tbl_sale_invoice_items_has_source_so_id ? ", " . ($source_sale_order_item_id > 0 ? $source_sale_order_item_id : "NULL") : "";
 
             if ($product_id > 0) {
                 $sort_order_col = $tbl_sale_invoice_items_has_sort_order ? "sort_order, " : "";
@@ -1458,16 +1538,19 @@ try {
                 $mw_val = $tbl_sale_invoice_items_has_metal_weight ? ", $metal_weight" : "";
                 $mg_col = $tbl_sale_invoice_items_has_merge_group_index ? ", merge_group_index" : "";
                 $mg_val = $tbl_sale_invoice_items_has_merge_group_index ? ", " . $merge_group_index_sql : "";
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_sale_invoice_items', $item);
+                $ef_col = $ef_parts['columns'];
+                $ef_val = $ef_parts['values'];
                 // Insert invoice item
                 $item_sql = "
                     INSERT INTO tbl_sale_invoice_items (
-                        invoice_id, $sort_order_col product_id, product_characteristic_id, barcode, product_name,
+                        invoice_id$sso_col, $sort_order_col product_id, product_characteristic_id, barcode, product_name,
                         carat, quantity, gross_weight, less_weight, purity, purity_weight,
                         final_weight, net_weight, pure_weight, rate,
                         making_amount, amount, tax_amount, net_amount, net_amt_with_tax$mg_col,
-                        design_no, location_id, status, created_at $diamond_cat_col $metal_rate_col $calc_col $da_col $sa_col $sw_col $mv_col $mq_col $mw_col
+                        design_no, location_id, status, created_at $diamond_cat_col $metal_rate_col $calc_col $da_col $sa_col $sw_col $mv_col $mq_col $mw_col$ef_col
                     ) VALUES (
-                        $invoice_id, $sort_order_val $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
+                        $invoice_id$sso_val, $sort_order_val $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
                         " . ($barcode ? "'$barcode'" : "NULL") . ",
                         '$product_name',
                         " . ($carat ? "'$carat'" : "NULL") . ",
@@ -1476,7 +1559,7 @@ try {
                         $making_amount, $amount, $tax, $net_amount, $net_amt_with_tax$mg_val,
                         " . ($design_no ? "'$design_no'" : "NULL") . ",
                         " . ($location_id ? $location_id : "NULL") . ",
-                        1, NOW() $diamond_cat_val $metal_rate_val $calc_val $da_val $sa_val $sw_val $mv_val $mq_val $mw_val
+                        1, NOW() $diamond_cat_val $metal_rate_val $calc_val $da_val $sa_val $sw_val $mv_val $mq_val $mw_val$ef_val
                     )
                 ";
                 
@@ -2486,7 +2569,11 @@ try {
 
                     $is_scrap_payment_line = (strpos($pay_type_raw, 'scrap') !== false);
                     $pay_crdr = $is_scrap_payment_line ? 'Dr' : 'Cr';
-                    $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                    if (auragold_payment_is_cheque_type($pay_type_raw)) {
+                        $payment_against_ledger = auragold_cheque_payment_against_label($current_order_amount, 'receivable');
+                    } else {
+                        $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                    }
 
                     $pay_desc_suffix = ($pay_cg > 0.00001 || $pay_cgp > 0.00001 || $pay_cs > 0.00001) ? ' — Metal Exchange' : '';
                     $pay_desc = mysqli_real_escape_string($conn, 'Payment for Sale Invoice: ' . $invoice_no . $pay_desc_suffix);
@@ -2544,7 +2631,7 @@ try {
                     }
                     
                     // Cash/Bank ledger entry (customer pays us → Cash increases: debit, same pattern as purchase but reversed)
-                    if (!empty($deposit_into)) {
+                    if (!empty($deposit_into) && auragold_payment_should_post_deposit_ledger($pay_type_raw)) {
                         $cash_balance_record = getRecord("
                             SELECT balance_amount 
                             FROM tbl_customer_ledger 
@@ -2863,6 +2950,20 @@ try {
     if ((int) $invoice_id > 0) {
         require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
         auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'sale_invoice', (int) $invoice_id, $invoice_no, $invoice_date);
+    }
+
+    require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
+    if (function_exists('auragold_sync_voucher_cheque_entries')) {
+        auragold_sync_voucher_cheque_entries($conn, [
+            'voucher_no' => $invoice_no,
+            'voucher_type' => 'Sale Invoice',
+            'voucher_date' => $invoice_date,
+            'account_ledger' => $customer_name,
+            'transaction_id' => (int) $invoice_id,
+            'user_id' => (int) $user_id,
+            'payments' => isset($payments) && is_array($payments) ? $payments : [],
+            'pdc_direction' => 'receivable',
+        ]);
     }
 
     mysqli_commit($conn);

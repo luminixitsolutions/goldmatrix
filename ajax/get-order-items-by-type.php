@@ -7,7 +7,9 @@ header('Content-Type: application/json');
 $order_id = isset($_GET['order_id']) ? (int)$_GET['order_id'] : 0;
 $type = isset($_GET['type']) ? trim($_GET['type']) : '';
 $exclude_return_id = isset($_GET['exclude_return_id']) ? (int)$_GET['exclude_return_id'] : 0;
+$exclude_invoice_id = isset($_GET['exclude_invoice_id']) ? (int)$_GET['exclude_invoice_id'] : 0;
 $for_sale_return = isset($_GET['for_sale_return']) ? (int)$_GET['for_sale_return'] : 0;
+$for_sale_invoice = isset($_GET['for_sale_invoice']) ? (int)$_GET['for_sale_invoice'] : 0;
 
 if ($order_id <= 0 || $type === '') {
     echo json_encode(['status' => 'error', 'message' => 'Invalid order_id or type']);
@@ -17,17 +19,32 @@ if ($order_id <= 0 || $type === '') {
 if ($for_sale_return === 1 && function_exists('auragold_ensure_sale_return_item_source_against_id')) {
     auragold_ensure_sale_return_item_source_against_id($conn);
 }
+if ($for_sale_invoice === 1) {
+    if (function_exists('auragold_ensure_sale_invoice_item_source_so_id')) {
+        auragold_ensure_sale_invoice_item_source_so_id($conn);
+    }
+    if (function_exists('auragold_ensure_sale_invoice_against_id')) {
+        auragold_ensure_sale_invoice_against_id($conn);
+    }
+}
 
 $type = esc($type);
 $items = [];
 
 if ($type === 'Sale Order') {
     $items = getList("SELECT * FROM tbl_sale_order_items WHERE order_id = $order_id ORDER BY id ASC");
+    if ($for_sale_invoice === 1 && function_exists('auragold_sale_order_filter_pending_invoice_items')) {
+        $items = auragold_sale_order_filter_pending_invoice_items($conn, $order_id, $items, $exclude_invoice_id);
+    }
     foreach ($items as &$item) {
         $item['barcode_no'] = $item['barcode_no'] ?? $item['barcode'] ?? '';
         $item['product_characteristic_id'] = $item['product_characteristic_id'] ?? $item['characteristic_id'] ?? null;
         $item['tax_amount'] = $item['tax_amount'] ?? $item['tax'] ?? 0;
+        if ($for_sale_invoice === 1) {
+            $item['source_sale_order_item_id'] = isset($item['id']) ? (int) $item['id'] : 0;
+        }
     }
+    unset($item);
 } elseif ($type === 'Repair Order') {
     $items = getList("SELECT * FROM tbl_repair_order_items WHERE order_id = $order_id ORDER BY id ASC");
     foreach ($items as &$item) {

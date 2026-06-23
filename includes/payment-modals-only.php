@@ -1,4 +1,24 @@
-
+<?php
+if (!isset($bank_accounts) || !is_array($bank_accounts)) {
+    $bank_accounts = [];
+}
+if (!isset($credit_cards) || !is_array($credit_cards)) {
+    $credit_cards = [];
+    if (isset($conn) && $conn instanceof mysqli) {
+        require_once __DIR__ . '/auragold_credit_card_schema.php';
+        if (function_exists('auragold_ensure_branch_id_on_settings_tables')) {
+            auragold_ensure_branch_id_on_settings_tables($conn);
+        }
+        $cc_branch_id = function_exists('auragold_settings_branch_id') ? (int) auragold_settings_branch_id() : 0;
+        if ($cc_branch_id <= 0 && !empty($auragold_working_branch_id)) {
+            $cc_branch_id = (int) $auragold_working_branch_id;
+        }
+        if (function_exists('auragold_get_credit_cards')) {
+            $credit_cards = auragold_get_credit_cards($conn, $cc_branch_id);
+        }
+    }
+}
+?>
 <!-- Payment Modals -->
 <!-- Cash Payment Modal -->
 <div class="modal fade" id="cashPaymentModal" tabindex="-1" role="dialog">
@@ -931,8 +951,15 @@ require_once __DIR__ . '/ledger-modal-document-types-script.php';
                     <label>Deposit Into</label>
                     <select class="form-control" id="cardDepositInto">
                         <option value="">Select Account</option>
-                        <option value="Credit Card">Credit Card</option>
-                        <option value="Debit Card">Debit Card</option>
+                        <?php foreach ($credit_cards as $card) :
+                            $card_name = trim((string) ($card['name'] ?? ''));
+                            if ($card_name === '') {
+                                continue;
+                            }
+                            $is_default = !empty($card['is_default']);
+                            ?>
+                        <option value="<?php echo htmlspecialchars($card_name, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $is_default ? ' selected' : ''; ?>><?php echo htmlspecialchars($card_name); ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div class="form-group">

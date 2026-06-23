@@ -1690,6 +1690,8 @@ $AURAGOLD_REPORT_PAGE = true;
 include 'header-script.php';
 ?>
     <link rel="stylesheet" href="style.css">
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
 </head>
 
 <style>
@@ -2737,6 +2739,197 @@ button.action-icon {
     background: #fce7f3;
     color: #9d174d;
 }
+
+/* Email compose modal (transaction report) */
+.tr-mail-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10060;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+.tr-mail-modal-overlay.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+.tr-mail-modal {
+    position: relative;
+    width: 100%;
+    max-width: 760px;
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(148, 163, 184, 0.12);
+    transform: translateY(12px) scale(0.98);
+    transition: transform 0.24s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+.tr-mail-modal-overlay.active .tr-mail-modal {
+    transform: translateY(0) scale(1);
+}
+.tr-mail-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+}
+.tr-mail-modal-close:hover { background: #e2e8f0; color: #1e293b; }
+.tr-mail-modal-header {
+    padding: 1.1rem 1.25rem 0.75rem;
+    border-bottom: 1px solid #e2e8f0;
+    padding-right: 3rem;
+}
+.tr-mail-modal-title {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1e293b;
+}
+.tr-mail-modal-sub {
+    margin: 0;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+.tr-mail-modal-body {
+    padding: 1rem 1.25rem;
+    overflow-y: auto;
+    flex: 1;
+}
+.tr-mail-field { margin-bottom: 12px; }
+.tr-mail-field label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 4px;
+}
+.tr-mail-field input[type="text"],
+.tr-mail-field input[type="email"] {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 0.82rem;
+}
+.tr-mail-editor-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+}
+.tr-mail-editor-wrap .ql-toolbar {
+    border: none;
+    border-bottom: 1px solid #e2e8f0;
+    border-radius: 6px 6px 0 0;
+    background: #f8fafc;
+}
+.tr-mail-editor-wrap .ql-container {
+    border: none;
+    min-height: 140px;
+    font-size: 0.82rem;
+}
+.tr-mail-editor-wrap .ql-editor { min-height: 140px; }
+.tr-mail-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.tr-mail-tab {
+    padding: 5px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+}
+.tr-mail-tab.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+.tr-mail-preview-pane {
+    display: none;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px 14px;
+    min-height: 160px;
+    background: #fafafa;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: #334155;
+}
+.tr-mail-preview-pane.active { display: block; }
+.tr-mail-preview-subject {
+    font-weight: 700;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #cbd5e1;
+    color: #1e293b;
+}
+.tr-mail-attach-note {
+    margin-top: 8px;
+    font-size: 0.7rem;
+    color: #0369a1;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+.tr-mail-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0.85rem 1.25rem 1.1rem;
+    border-top: 1px solid #e2e8f0;
+    background: #fafbfc;
+}
+.tr-mail-modal-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+}
+.tr-mail-modal-btn-primary {
+    background: #2563eb;
+    color: #fff;
+}
+.tr-mail-modal-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.tr-mail-modal-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.tr-mail-modal-btn-secondary {
+    background: #f1f5f9;
+    color: #475569;
+}
+.tr-mail-modal-btn-secondary:hover { background: #e2e8f0; }
+.tr-mail-loading {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: #64748b;
+    font-size: 0.85rem;
+}
 </style>
 
 <body class="report-page">
@@ -2970,7 +3163,7 @@ button.action-icon {
                             } elseif ($tr_party_email !== '') {
                                 echo 'Send email to ', htmlspecialchars($tr_party_email, ENT_QUOTES, 'UTF-8');
                             } else {
-                                echo 'No customer email — set Mail ID on the customer/supplier in Masters';
+                                echo 'Send email — enter recipient in compose window';
                             }
                         ?>"<?php echo $tr_mail_supported ? '' : ' disabled'; ?> data-type="<?php echo htmlspecialchars($t['type']); ?>" data-id="<?php echo (int) $t['id']; ?>" data-party-email="<?php echo htmlspecialchars($tr_party_email, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather icon-mail"></i></button>
                     </div>
@@ -3410,6 +3603,69 @@ button.action-icon {
     </div>
 </div>
 
+<div id="trMailModal" class="tr-mail-modal-overlay" aria-hidden="true">
+    <div class="tr-mail-modal" role="dialog" aria-modal="true" aria-labelledby="trMailModalTitle">
+        <button type="button" class="tr-mail-modal-close" id="trMailModalClose" aria-label="Close">&times;</button>
+        <div class="tr-mail-modal-header">
+            <h2 id="trMailModalTitle" class="tr-mail-modal-title">Send email</h2>
+            <p class="tr-mail-modal-sub" id="trMailModalSub">Loading…</p>
+        </div>
+        <div class="tr-mail-modal-body" id="trMailModalBody">
+            <div class="tr-mail-loading" id="trMailModalLoading">Loading email template…</div>
+            <div id="trMailModalForm" style="display:none;">
+                <div class="tr-mail-field">
+                    <label for="trMailTo">To</label>
+                    <input type="email" id="trMailTo" placeholder="customer@example.com" autocomplete="off">
+                </div>
+                <div class="tr-mail-field">
+                    <label for="trMailSubject">Subject</label>
+                    <input type="text" id="trMailSubject" maxlength="500" autocomplete="off">
+                </div>
+                <div class="tr-mail-field">
+                    <label>Message</label>
+                    <div class="tr-mail-tabs">
+                        <button type="button" class="tr-mail-tab active" data-tr-mail-tab="edit">Edit</button>
+                        <button type="button" class="tr-mail-tab" data-tr-mail-tab="preview">Preview</button>
+                    </div>
+                    <div id="trMailEditPane">
+                        <div class="tr-mail-editor-wrap">
+                            <div id="trMailToolbar">
+                                <span class="ql-formats">
+                                    <button class="ql-bold"></button>
+                                    <button class="ql-italic"></button>
+                                    <button class="ql-underline"></button>
+                                </span>
+                                <span class="ql-formats">
+                                    <button class="ql-list" value="ordered"></button>
+                                    <button class="ql-list" value="bullet"></button>
+                                </span>
+                                <span class="ql-formats">
+                                    <button class="ql-link"></button>
+                                </span>
+                                <span class="ql-formats">
+                                    <button class="ql-clean"></button>
+                                </span>
+                            </div>
+                            <div id="trMailEditor"></div>
+                        </div>
+                    </div>
+                    <div id="trMailPreviewPane" class="tr-mail-preview-pane">
+                        <div class="tr-mail-preview-subject" id="trMailPreviewSubject"></div>
+                        <div id="trMailPreviewBody"></div>
+                    </div>
+                </div>
+                <div class="tr-mail-attach-note" id="trMailAttachNote" style="display:none;">
+                    <i class="feather icon-paperclip"></i> A PDF copy of the invoice will be attached when you send.
+                </div>
+            </div>
+        </div>
+        <div class="tr-mail-modal-footer">
+            <button type="button" class="tr-mail-modal-btn tr-mail-modal-btn-secondary" id="trMailModalCancel">Cancel</button>
+            <button type="button" class="tr-mail-modal-btn tr-mail-modal-btn-primary" id="trMailModalSend" disabled>Send email</button>
+        </div>
+    </div>
+</div>
+
 <script>
 function openFilterModal() {
     document.getElementById('filterModal').classList.add('active');
@@ -3722,6 +3978,7 @@ function exportToPDF() {
 
 document.addEventListener('DOMContentLoaded', function() {
     trDeleteModalBind();
+    trMailModalBind();
     // Add event listeners for view transaction buttons using event delegation
     document.addEventListener('click', function(e) {
         if (e.target && e.target.classList.contains('view-transaction-btn')) {
@@ -3855,34 +4112,185 @@ document.addEventListener('click', function (e) {
     var id = mbtn.getAttribute('data-id');
     var pre = (mbtn.getAttribute('data-party-email') || '').trim();
     if (!type || !id) return;
-    if (!pre) {
-        alert('Customer email not found');
-        return;
+    trMailModalOpen(type, id, pre, mbtn);
+});
+
+// Email compose modal — template from Invoice Print Settings
+var trMailQuill = null;
+var trMailPending = null;
+
+function trMailModalInitQuill() {
+    if (trMailQuill || typeof Quill === 'undefined') return;
+    var editorEl = document.getElementById('trMailEditor');
+    if (!editorEl) return;
+    trMailQuill = new Quill('#trMailEditor', {
+        theme: 'snow',
+        modules: { toolbar: '#trMailToolbar' }
+    });
+}
+
+function trMailModalUpdatePreview() {
+    var subjEl = document.getElementById('trMailSubject');
+    var previewSubj = document.getElementById('trMailPreviewSubject');
+    var previewBody = document.getElementById('trMailPreviewBody');
+    if (previewSubj) {
+        previewSubj.textContent = subjEl ? (subjEl.value || '(No subject)') : '';
     }
-    mbtn.disabled = true;
-    fetch('ajax/send-transaction-email.php', {
+    if (previewBody) {
+        previewBody.innerHTML = trMailQuill ? trMailQuill.root.innerHTML : '';
+    }
+}
+
+function trMailModalSetTab(tab) {
+    var editPane = document.getElementById('trMailEditPane');
+    var previewPane = document.getElementById('trMailPreviewPane');
+    document.querySelectorAll('[data-tr-mail-tab]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-tr-mail-tab') === tab);
+    });
+    if (tab === 'preview') {
+        trMailModalUpdatePreview();
+        if (editPane) editPane.style.display = 'none';
+        if (previewPane) previewPane.classList.add('active');
+    } else {
+        if (editPane) editPane.style.display = '';
+        if (previewPane) previewPane.classList.remove('active');
+    }
+}
+
+function trMailModalHide() {
+    var overlay = document.getElementById('trMailModal');
+    if (overlay) {
+        overlay.classList.remove('active');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+    document.body.style.overflow = '';
+    trMailPending = null;
+    var sendBtn = document.getElementById('trMailModalSend');
+    if (sendBtn) sendBtn.disabled = false;
+}
+
+function trMailModalOpen(type, id, partyEmail, sourceBtn) {
+    trMailModalInitQuill();
+    trMailPending = { type: type, id: parseInt(id, 10), btn: sourceBtn || null };
+    var overlay = document.getElementById('trMailModal');
+    var loading = document.getElementById('trMailModalLoading');
+    var form = document.getElementById('trMailModalForm');
+    var sub = document.getElementById('trMailModalSub');
+    var sendBtn = document.getElementById('trMailModalSend');
+    var attachNote = document.getElementById('trMailAttachNote');
+    if (!overlay || !loading || !form) return;
+
+    if (loading) loading.style.display = '';
+    form.style.display = 'none';
+    if (sendBtn) sendBtn.disabled = true;
+    if (sub) sub.textContent = 'Loading template…';
+    if (attachNote) attachNote.style.display = 'none';
+    trMailModalSetTab('edit');
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+
+    fetch('ajax/preview-transaction-email.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ type: type, id: parseInt(id, 10) })
     })
         .then(function (r) { return r.json(); })
         .then(function (res) {
-            mbtn.disabled = false;
-            if (res && res.ok) {
-                var msg = res.message || 'Message sent.';
-                if (res.recipient) {
-                    msg += '\n\nSent to: ' + res.recipient;
-                }
-                alert(msg);
-            } else {
-                alert((res && res.message) ? res.message : 'Could not send email.');
+            if (!res || !res.ok) {
+                trMailModalHide();
+                alert((res && res.message) ? res.message : 'Could not load email template.');
+                return;
             }
+            loading.style.display = 'none';
+            form.style.display = '';
+
+            var toEl = document.getElementById('trMailTo');
+            var subjEl = document.getElementById('trMailSubject');
+            if (toEl) toEl.value = (partyEmail || res.recipient || '').trim();
+            if (subjEl) subjEl.value = res.subject || '';
+            if (trMailQuill) {
+                trMailQuill.root.innerHTML = res.body || '';
+            }
+            if (sub) {
+                var docLabel = res.document_type_label || type;
+                var docNo = res.doc_no ? (' — ' + res.doc_no) : '';
+                sub.textContent = docLabel + docNo + (res.template_used ? ' · Template from print settings' : ' · Default message');
+            }
+            if (attachNote && res.has_pdf_attachment) {
+                attachNote.style.display = '';
+            }
+            if (sendBtn) sendBtn.disabled = false;
         })
         .catch(function () {
-            mbtn.disabled = false;
+            trMailModalHide();
             alert('Network error. Please try again.');
         });
-});
+}
+
+function trMailModalBind() {
+    var overlay = document.getElementById('trMailModal');
+    var closeBtn = document.getElementById('trMailModalClose');
+    var cancelBtn = document.getElementById('trMailModalCancel');
+    var sendBtn = document.getElementById('trMailModalSend');
+    if (overlay) {
+        overlay.addEventListener('click', function (ev) {
+            if (ev.target === overlay) trMailModalHide();
+        });
+    }
+    if (closeBtn) closeBtn.addEventListener('click', trMailModalHide);
+    if (cancelBtn) cancelBtn.addEventListener('click', trMailModalHide);
+    document.querySelectorAll('[data-tr-mail-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            trMailModalSetTab(btn.getAttribute('data-tr-mail-tab') || 'edit');
+        });
+    });
+    if (sendBtn) {
+        sendBtn.addEventListener('click', function () {
+            if (!trMailPending) return;
+            var toEl = document.getElementById('trMailTo');
+            var subjEl = document.getElementById('trMailSubject');
+            var to = toEl ? toEl.value.trim() : '';
+            if (!to) {
+                alert('Enter recipient email address.');
+                if (toEl) toEl.focus();
+                return;
+            }
+            var subject = subjEl ? subjEl.value.trim() : '';
+            var body = trMailQuill ? trMailQuill.root.innerHTML : '';
+            sendBtn.disabled = true;
+            fetch('ajax/send-transaction-email.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({
+                    type: trMailPending.type,
+                    id: trMailPending.id,
+                    to: to,
+                    subject: subject,
+                    body: body
+                })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    sendBtn.disabled = false;
+                    if (res && res.ok) {
+                        trMailModalHide();
+                        var msg = res.message || 'Email sent.';
+                        if (res.recipient && msg.indexOf(res.recipient) === -1) {
+                            msg += '\n\nSent to: ' + res.recipient;
+                        }
+                        alert(msg);
+                    } else {
+                        alert((res && res.message) ? res.message : 'Could not send email.');
+                    }
+                })
+                .catch(function () {
+                    sendBtn.disabled = false;
+                    alert('Network error. Please try again.');
+                });
+        });
+    }
+}
 </script>
 
 <?php include 'footer-script.php'; ?>

@@ -78,6 +78,51 @@ if (!function_exists('auragold_get_mail_settings_row')) {
     }
 }
 
+if (!function_exists('auragold_mail_is_gmail_smtp')) {
+    function auragold_mail_is_gmail_smtp(array $cfg): bool
+    {
+        $host = strtolower(trim((string) ($cfg['smtp_host'] ?? '')));
+
+        return $host === 'smtp.gmail.com' || $host === 'smtp.googlemail.com';
+    }
+}
+
+if (!function_exists('auragold_save_gmail_smtp_settings')) {
+    /**
+     * Configure outbound mail via Gmail SMTP (App Password).
+     */
+    function auragold_save_gmail_smtp_settings($link, string $gmail, string $appPassword, string $fromName = ''): bool
+    {
+        if (!$link instanceof mysqli) {
+            return false;
+        }
+        $gmail = trim($gmail);
+        $appPassword = preg_replace('/\s+/', '', trim($appPassword));
+        if (!filter_var($gmail, FILTER_VALIDATE_EMAIL) || stripos($gmail, '@gmail.com') === false) {
+            return false;
+        }
+        if (strlen($appPassword) < 16) {
+            return false;
+        }
+        if (!auragold_ensure_mail_settings_table($link)) {
+            return false;
+        }
+
+        return auragold_save_mail_settings_from_post($link, [
+            'smtp_host' => 'smtp.gmail.com',
+            'smtp_port' => 587,
+            'smtp_encryption' => 'tls',
+            'smtp_username' => $gmail,
+            'smtp_password' => $appPassword,
+            'from_name' => $fromName !== '' ? $fromName : 'Gold Matrix',
+            'from_email' => $gmail,
+            'incoming_host' => 'imap.gmail.com',
+            'imap_port' => 993,
+            'pop3_port' => 995,
+        ]);
+    }
+}
+
 if (!function_exists('auragold_save_mail_settings_from_post')) {
     /**
      * @param array<string, mixed> $m sanitized POST mail[...] map
@@ -103,8 +148,15 @@ if (!function_exists('auragold_save_mail_settings_from_post')) {
         }
         $smtp_username = isset($m['smtp_username']) ? trim((string) $m['smtp_username']) : '';
         $pwd_in = isset($m['smtp_password']) ? (string) $m['smtp_password'] : '';
+        $pwd_in = preg_replace('/\s+/', '', trim($pwd_in));
         $from_name = isset($m['from_name']) ? trim((string) $m['from_name']) : '';
         $from_email = isset($m['from_email']) ? trim((string) $m['from_email']) : '';
+        // From must match SMTP login for reliable delivery (Gmail/Yahoo often drop mismatched senders).
+        if ($smtp_username !== '' && filter_var($smtp_username, FILTER_VALIDATE_EMAIL)) {
+            if ($from_email === '' || strcasecmp($from_email, $smtp_username) !== 0) {
+                $from_email = $smtp_username;
+            }
+        }
         $incoming_host = isset($m['incoming_host']) ? trim((string) $m['incoming_host']) : '';
         $imap_port = isset($m['imap_port']) ? (int) $m['imap_port'] : 993;
         $pop3_port = isset($m['pop3_port']) ? (int) $m['pop3_port'] : 995;
@@ -120,7 +172,7 @@ if (!function_exists('auragold_save_mail_settings_from_post')) {
         };
 
         $pwd_sql = '';
-        if (trim($pwd_in) !== '') {
+        if ($pwd_in !== '') {
             $pwd_sql = ", `smtp_password` = '" . $e($link, $pwd_in) . "'";
         }
 

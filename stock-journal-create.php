@@ -144,6 +144,7 @@ if ($edit_item_id > 0) {
 
 // Product opening voucher: load stock details from product characteristic (opening qty/weight) and existing stock journal
 $product_opening_item = null;
+$sj_context_metal_id = 0;
 $voucher_type_param = isset($_GET['voucher']) ? trim($_GET['voucher']) : '';
 $characteristic_id_param = isset($_GET['characteristic_id']) ? (int)$_GET['characteristic_id'] : 0;
 $product_id_param = isset($_GET['product_id']) ? (int)$_GET['product_id'] : 0;
@@ -161,6 +162,7 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
     }
     $pc = getRecord("
         SELECT pc.id,
+               pc.metal_id,
                COALESCE(pc.opening_qty, 0) as total_quantity,
                COALESCE(pc.opening_weight, 0) as total_gross_weight,
                p.name as product_name,
@@ -171,6 +173,9 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
         WHERE pc.id = $characteristic_id_param $pc_branch_sql_sj
     ");
     if ($pc) {
+        if (!empty($pc['metal_id'])) {
+            $sj_context_metal_id = (int) $pc['metal_id'];
+        }
         $mdn = isset($pc['metal_display_name']) ? strtolower((string) $pc['metal_display_name']) : '';
         if ($mdn !== '' && (strpos($mdn, 'diamond') !== false || strpos($mdn, 'stone') !== false)) {
             $product_opening_is_diamond_or_stones = true;
@@ -2868,7 +2873,11 @@ text-transform: uppercase;
                                         <?php 
                                         $first_metal = true;
                                         foreach($metals as $metal): 
-                                            $tab_class = $first_metal ? 'active' : '';
+                                            if ($sj_context_metal_id > 0) {
+                                                $tab_class = ((int) $metal['id'] === $sj_context_metal_id) ? 'active' : '';
+                                            } else {
+                                                $tab_class = $first_metal ? 'active' : '';
+                                            }
                                             $tab_id = 'sj-main-tab-' . (int) $metal['id'];
                                         ?>
                                         <button type="button" class="category-tab-btn <?php echo $tab_class; ?>" data-metal-id="<?php echo $metal['id']; ?>" data-metal-name="<?php echo htmlspecialchars($metal['display_name']); ?>" id="<?php echo $tab_id; ?>">
@@ -3004,8 +3013,11 @@ text-transform: uppercase;
                                             $sj_excel_sample_href = ($voucher_type_param === 'purchase_invoice')
                                                 ? 'ajax/download-stock-journal-excel-sample.php?voucher=purchase_invoice&item_id=' . (int) $edit_item_id . '&product_id=' . (int) $product_id_param . '&characteristic_id=' . (int) $characteristic_id_param
                                                 : 'ajax/download-stock-journal-excel-sample.php?voucher=product_opening&product_id=' . (int) $product_id_param . '&characteristic_id=' . (int) $characteristic_id_param;
+                                            if ($sj_context_metal_id > 0) {
+                                                $sj_excel_sample_href .= '&metal_id=' . (int) $sj_context_metal_id;
+                                            }
                                             ?>
-                                            <a href="<?php echo htmlspecialchars($sj_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm" title="Download template, fill rows, then use Excel import" style="background: #334155; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                            <a href="<?php echo htmlspecialchars($sj_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>" id="sjExcelSampleDownload" class="btn btn-sm" data-sj-excel-sample-base="<?php echo htmlspecialchars($sj_excel_sample_href, ENT_QUOTES, 'UTF-8'); ?>" title="Download template for the active metal tab (Gold / Silver / Diamond columns + extra fields), fill rows, then use Excel import" style="background: #334155; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                                                 <i class="feather icon-download"></i> Sample Excel
                                             </a>
                                             <button type="button" class="btn btn-sm" id="sjExcelImportBtn" title="Upload .xlsx: rows load into the Product List with generated barcodes; stock is updated only when you click Save Stock Journal. Metal Qty and Gross Wt. columns are required per row." style="background: #0f766e; color: #fff; border: none; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600;">
@@ -5531,7 +5543,20 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             final_wt: p.final_weight,
             net_wt: p.net_weight,
             pure_wt: p.pure_weight,
-            rate: p.rate,
+            rate: (function () {
+                var r = parseFloat(p.rate);
+                var mr = parseFloat(p.metal_rate);
+                if (!isNaN(r) && Math.abs(r) > 1e-9) return r;
+                if (!isNaN(mr) && Math.abs(mr) > 1e-9) return mr;
+                return 0;
+            })(),
+            metal_rate: (function () {
+                var mr = parseFloat(p.metal_rate);
+                var r = parseFloat(p.rate);
+                if (!isNaN(mr) && Math.abs(mr) > 1e-9) return mr;
+                if (!isNaN(r) && Math.abs(r) > 1e-9) return r;
+                return 0;
+            })(),
             making_amount: p.making_amount,
             making_type: p.making_type,
             making_rate: p.making_rate,
@@ -5565,9 +5590,23 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             carat_id: (p.karat != null && String(p.karat).trim() !== '') ? String(p.karat).trim() : '',
             location_id: (p.location != null && String(p.location).trim() !== '') ? String(p.location).trim() : '',
             excelTempImagePaths: tpaths,
-            excel_extra_columns: Array.isArray(p.excel_extra_columns) ? p.excel_extra_columns : []
+            excel_extra_columns: Array.isArray(p.excel_extra_columns) ? p.excel_extra_columns : [],
+            extra_fields: (p.extra_fields && typeof p.extra_fields === 'object') ? p.extra_fields : {}
         };
     }
+
+    function sjUpdateExcelSampleDownloadHref(metalId) {
+        var a = document.getElementById('sjExcelSampleDownload');
+        if (!a) return;
+        var base = a.getAttribute('data-sj-excel-sample-base') || a.getAttribute('href') || '';
+        if (!base) return;
+        var url = base.replace(/([?&])metal_id=\d+/g, '$1').replace(/[?&]$/, '');
+        if (metalId !== null && metalId !== undefined && String(metalId).trim() !== '') {
+            url += (url.indexOf('?') >= 0 ? '&' : '?') + 'metal_id=' + encodeURIComponent(String(metalId).trim());
+        }
+        a.setAttribute('href', url);
+    }
+    window.sjUpdateExcelSampleDownloadHref = sjUpdateExcelSampleDownloadHref;
 
     (function initSjExcelImport() {
         var btn = document.getElementById('sjExcelImportBtn');
@@ -5589,6 +5628,14 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             fd.append('voucher', <?php echo json_encode(($voucher_type_param === 'purchase_invoice' && $edit_item_id > 0 && !empty($purchase_invoice_item)) ? 'purchase_invoice' : 'product_opening', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>);
             fd.append('product_id', String(<?php echo (int)($product_id_param ?? 0); ?>));
             fd.append('characteristic_id', String(<?php echo (int)($characteristic_id_param ?? 0); ?>));
+            var sjImpMetalBtn = document.querySelector('.product-category-tabs .category-tab-btn.active') || document.querySelector('.category-tab-btn.active');
+            var sjImpMetalId = sjImpMetalBtn ? sjImpMetalBtn.getAttribute('data-metal-id') : '';
+            if (!sjImpMetalId && typeof currentMetalId !== 'undefined' && currentMetalId) {
+                sjImpMetalId = String(currentMetalId);
+            }
+            if (sjImpMetalId) {
+                fd.append('metal_id', String(sjImpMetalId));
+            }
             <?php if ($voucher_type_param === 'purchase_invoice' && $edit_item_id > 0 && !empty($purchase_invoice_item)): ?>
             fd.append('item_id', String(<?php echo (int) $edit_item_id; ?>));
             <?php endif; ?>
@@ -6657,6 +6704,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 if (typeof applyProductModalColumnVisibilityForTab === 'function') {
                     applyProductModalColumnVisibilityForTab(metalId || '');
                 }
+                if (typeof window.auragoldSyncProductModalExtraFields === 'function') {
+                    window.auragoldSyncProductModalExtraFields(metalName || '');
+                }
+                if (typeof sjUpdateExcelSampleDownloadHref === 'function') {
+                    sjUpdateExcelSampleDownloadHref(metalId || '');
+                }
                 if (typeof window.runStockJournalColumnDragInit === 'function') {
                     window.runStockJournalColumnDragInit();
                 }
@@ -6676,6 +6729,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             // Apply column visibility for initial tab
             if (currentMetalId && typeof applyProductModalColumnVisibilityForTab === 'function') {
                 applyProductModalColumnVisibilityForTab(currentMetalId);
+            }
+            if (currentMetalName && typeof window.auragoldSyncProductModalExtraFields === 'function') {
+                window.auragoldSyncProductModalExtraFields(currentMetalName);
+            }
+            if (typeof sjUpdateExcelSampleDownloadHref === 'function') {
+                sjUpdateExcelSampleDownloadHref(currentMetalId || <?php echo (int) $sj_context_metal_id; ?>);
             }
         }
         sjUpdateMetalTabsLockFromProductList();
@@ -7890,6 +7949,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         if (response.products[0].metal_name && typeof currentMetalName !== 'undefined') {
                             currentMetalName = response.products[0].metal_name;
                         }
+                        if (typeof window.auragoldSyncProductModalExtraFields === 'function') {
+                            window.auragoldSyncProductModalExtraFields(currentMetalName || response.products[0].metal_name || '');
+                        }
+                        if (typeof sjUpdateExcelSampleDownloadHref === 'function') {
+                            sjUpdateExcelSampleDownloadHref(mid);
+                        }
                     })();
                     tbody.querySelectorAll('.stock-journal-images-cell').forEach(function(cell) { initStockJournalImageCell(cell); });
                     tbody.querySelectorAll('tr.product-row').forEach(function(row) {
@@ -8569,22 +8634,49 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         Object.keys(STOCK_JOURNAL_FORCED_MODAL_COLUMNS).forEach(function(col) {
             window.productModalColumnVisibilityByTab[tk][col] = 1;
         });
-        var by = window.productModalColumnVisibilityByTab;
-        var saved = by && (by[tk] || (tk === 'main' ? by[''] : null));
         var isDiamondFamilyTab = (typeof window.isDiamondTabActive === 'function' && window.isDiamondTabActive());
         var diamondVisibleSet = {};
-        if (isDiamondFamilyTab && typeof window.DIAMOND_TAB_VISIBLE_COLUMNS !== 'undefined' && window.DIAMOND_TAB_VISIBLE_COLUMNS && window.DIAMOND_TAB_VISIBLE_COLUMNS.length) {
+        if (typeof window.DIAMOND_TAB_VISIBLE_COLUMNS !== 'undefined' && window.DIAMOND_TAB_VISIBLE_COLUMNS && window.DIAMOND_TAB_VISIBLE_COLUMNS.length) {
             window.DIAMOND_TAB_VISIBLE_COLUMNS.forEach(function(col) { diamondVisibleSet[col] = 1; });
         }
-        var prefs = isDiamondFamilyTab ? Object.assign({}, diamondVisibleSet, saved || {}) : saved;
+        var saved = window.productModalColumnVisibilityByTab && (window.productModalColumnVisibilityByTab[tk] || window.productModalColumnVisibilityByTab[tabKey]);
+        var prefs = isDiamondFamilyTab
+            ? (saved && Object.keys(saved).length > 0 ? saved : diamondVisibleSet)
+            : ((typeof window.mergeProductModalMetalTabPrefs === 'function')
+                ? window.mergeProductModalMetalTabPrefs(tk, tabKey)
+                : saved);
+        var diamondGroupColumns = (typeof window.getDiamondGroupColumnKeys === 'function')
+            ? window.getDiamondGroupColumnKeys()
+            : ['pkt-wt', 'pkt-less-wt', 'gross-wt', 'stone-weight', 'less-wt', 'net-wt', 'quantity', 'rate', 'amount'];
+        var certSpecColumns = (window.PRODUCT_MODAL_COLUMN_GROUPS && window.PRODUCT_MODAL_COLUMN_GROUPS['cert-spec-group'])
+            ? window.PRODUCT_MODAL_COLUMN_GROUPS['cert-spec-group'].slice()
+            : ['certificate-amount', 'certificate-no', 'certificate-link', 'video-link', 'cut', 'color', 'seive-size', 'size', 'shape', 'clarity', 'unit-price'];
+        var diamondOnlyColumnSet = {};
+        diamondGroupColumns.forEach(function(c) { diamondOnlyColumnSet[c] = 1; });
+        certSpecColumns.forEach(function(c) { diamondOnlyColumnSet[c] = 1; });
+        ['voucher-type', 'item-code', 'product-category', 'fc-amount', 'diamond-line-metal-value', 'rapnet-valuation', 'mark-up-amount', 'mark-up-per', 'setting-charge', 'stone-amount'].forEach(function(c) {
+            diamondOnlyColumnSet[c] = 1;
+        });
         function modalColumnShouldShow(columnName) {
+            if (columnName && columnName.indexOf('extra-field-') === 0) {
+                if (prefs && Object.prototype.hasOwnProperty.call(prefs, columnName)) {
+                    return prefs[columnName] === 1;
+                }
+                return true;
+            }
             if (!isDiamondFamilyTab && columnName === 'category') {
                 return false;
+            }
+            if (!isDiamondFamilyTab && diamondOnlyColumnSet[columnName]) {
+                return false;
+            }
+            if (isDiamondFamilyTab) {
+                return !!(prefs && prefs[columnName] === 1);
             }
             if (prefs && Object.prototype.hasOwnProperty.call(prefs, columnName)) {
                 return prefs[columnName] === 1;
             }
-            return isDiamondFamilyTab ? false : true;
+            return true;
         }
         // Main page + modal each have a column dropdown (#modalTableSettingsDropdown / #modalTableSettingsDropdownModal)
         var dropdowns = getStockJournalColumnDropdowns();
@@ -8632,6 +8724,21 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             sjUpdateAllSubColumnDisabledStates(d);
         });
         sjSyncAllGroupCheckboxStatesEverywhere();
+        tables.forEach(function(table) {
+            var groupHeaderRow = table.querySelector('thead tr:first-child');
+            if (!groupHeaderRow) return;
+            ['diamond-group', 'cert-spec-group'].forEach(function(gk) {
+                var gh = groupHeaderRow.querySelector('th[data-group="' + gk + '"]');
+                if (!gh) return;
+                if (isDiamondFamilyTab) {
+                    gh.style.display = '';
+                    gh.classList.remove('hidden');
+                } else {
+                    gh.style.display = 'none';
+                    gh.classList.add('hidden');
+                }
+            });
+        });
         (function sjHideProductCategoryOnDiamondFamilyMetalTabs() {
             var btn = document.querySelector('.product-category-tabs .category-tab-btn.active') || document.querySelector('.category-tab-btn.active');
             var mname = btn ? (btn.getAttribute('data-metal-name') || '').trim() : '';
@@ -8885,7 +8992,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             final_wt: getValue('final-wt'),
             net_wt: getValue('net-wt'),
             pure_wt: getValue('purity-wt'),
-            rate: getValue('rate'),
+            rate: (function () {
+                var r = getValue('rate');
+                var mr = getValue('metal-rate');
+                return (Math.abs(r) > 1e-9) ? r : mr;
+            })(),
+            metal_rate: getValue('metal-rate'),
             metal_value: getValue('metal-value'),
             amount: getValue('amount'),
             discount: getValue('discount'),
@@ -9127,10 +9239,14 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             row.setAttribute('data-barcode-digits', String(_mbd));
         }
         try {
-            // Product opening: always allocate a new server serial per new line. Else reuse modal barcode when set, or fetch next.
+            // Product opening: new server serial per line unless Excel supplied a barcode; empty Excel cells get prefix+digits.
             let barcode = '';
-            var forceNewBarcodeSerial = newLinePOpeningBarcode;
-            if (!forceNewBarcodeSerial && modalRowData.barcode && modalRowData.barcode.trim() !== '') {
+            var excelBarcode = (modalRowData.from_excel && modalRowData.barcode && String(modalRowData.barcode).trim() !== '')
+                ? String(modalRowData.barcode).trim() : '';
+            var forceNewBarcodeSerial = newLinePOpeningBarcode && !excelBarcode;
+            if (excelBarcode) {
+                barcode = excelBarcode;
+            } else if (!forceNewBarcodeSerial && modalRowData.barcode && modalRowData.barcode.trim() !== '') {
                 barcode = modalRowData.barcode.trim();
             } else {
                 var _sjBcRule = (typeof sjResolveBarcodePrefixDigitForNewLine === 'function')
@@ -9254,6 +9370,11 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             
             tbody.appendChild(row);
             console.log('Row added to table from modal:', rowId);
+            if (modalRowData.extra_fields && typeof modalRowData.extra_fields === 'object' && Object.keys(modalRowData.extra_fields).length) {
+                try {
+                    row.setAttribute('data-sj-extra-fields', JSON.stringify(modalRowData.extra_fields));
+                } catch (e) {}
+            }
             
             // Images: copy from modal row and show first image in Photo column
             window.stockJournalRowImages = window.stockJournalRowImages || {};
@@ -13666,6 +13787,20 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         product.temp_image_paths = parsed;
                     }
                 } catch (e) {}
+            }
+            const sjEfAttr = row.getAttribute('data-sj-extra-fields');
+            if (sjEfAttr) {
+                try {
+                    const efParsed = JSON.parse(sjEfAttr);
+                    if (efParsed && typeof efParsed === 'object') {
+                        product.extra_fields = efParsed;
+                    }
+                } catch (e) {}
+            } else if (typeof window.auragoldCollectExtraFieldsFromRow === 'function') {
+                const efRow = window.auragoldCollectExtraFieldsFromRow(row);
+                if (efRow && typeof efRow === 'object' && Object.keys(efRow).length) {
+                    product.extra_fields = efRow;
+                }
             }
             
             products.push(product);

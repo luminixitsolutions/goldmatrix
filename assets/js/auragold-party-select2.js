@@ -72,6 +72,9 @@
             if (window.AURAGOLD_PARTY_SELECT2 && typeof window.AURAGOLD_PARTY_SELECT2.onClear === 'function') {
                 window.AURAGOLD_PARTY_SELECT2.onClear();
             }
+            if (typeof loadCustomerBalance === 'function') {
+                loadCustomerBalance();
+            }
             return;
         }
 
@@ -91,10 +94,11 @@
             window.AURAGOLD_PARTY_SELECT2.onPick(cid, partyName, meta || {});
         }
 
+        if (typeof loadCustomerBalance === 'function') {
+            loadCustomerBalance();
+        }
+
         setTimeout(function () {
-            if (typeof loadCustomerBalance === 'function') {
-                loadCustomerBalance();
-            }
             if (typeof window.auragoldSaleInvoiceRefreshGstForAllRows === 'function') {
                 window.auragoldSaleInvoiceRefreshGstForAllRows();
             }
@@ -186,17 +190,43 @@
             }
         });
 
+        var skipNextPartyChange = false;
+
+        $s.on('select2:select.auragoldParty', function (e) {
+            var row = (e && e.params && e.params.data) ? e.params.data : {};
+            var pid = String(row.id || $s.val() || '').trim();
+            var pname = row.name || row.text || '';
+            skipNextPartyChange = true;
+            if ($s.hasClass('select2-hidden-accessible')) {
+                $s.select2('close');
+            }
+            runAfterPick(pid, pname, row);
+        });
+
+        $s.on('select2:clear.auragoldParty', function () {
+            skipNextPartyChange = true;
+            runAfterPick('', '', {});
+        });
+
+        // Programmatic value changes (edit load, new customer save) — skip when user pick already handled.
         $s.on('change.auragoldParty', function () {
+            if (skipNextPartyChange) {
+                skipNextPartyChange = false;
+                return;
+            }
             var data = $s.select2('data');
             var row = (data && data.length) ? data[0] : null;
             var pid = String($s.val() || '').trim();
+            if (!pid) {
+                runAfterPick('', '', {});
+                return;
+            }
             var pname = row ? (row.name || row.text || '') : '';
             if (!pname && pid) {
                 var opt = el.options[el.selectedIndex];
                 pname = opt ? String(opt.text || '').trim() : '';
             }
             runAfterPick(pid, pname, row || {});
-            $s.trigger('change');
         });
 
         jQuery('.top-navbar').off('mouseenter.auragoldParty').on('mouseenter.auragoldParty', function () {

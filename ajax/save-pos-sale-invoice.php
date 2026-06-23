@@ -17,6 +17,8 @@ if (function_exists('auragold_ensure_pos_sale_invoice_tables')) {
     auragold_ensure_pos_sale_invoice_tables($conn);
 }
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
+require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
 
 header('Content-Type: application/json');
 ob_start();
@@ -441,7 +443,9 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
             if ($dep_raw === '' && (($pt === 'metal_exchange') || strpos($pt, 'metal-exchange') !== false || strpos($pt, 'm. exch') !== false || (strpos($pt, 'metal') !== false && strpos($pt, 'exch') !== false))) {
                 $dep_raw = 'Metal Exchange';
             }
-            if ($dep_raw !== '') {
+            if (auragold_payment_is_cheque_type($pt)) {
+                $party_against_parts[] = auragold_cheque_payment_against_label($line_amt, 'receivable');
+            } elseif ($dep_raw !== '') {
                 $party_against_parts[] = $dep_raw . '(' . number_format($line_amt, 2) . 'Dr)';
             }
         }
@@ -578,6 +582,9 @@ if (!function_exists('sale_invoice_create_auto_receipt_voucher_and_post_ledger')
                 $dep_raw = 'Metal Exchange';
             }
             if ($line_amt <= 0.00001 || $dep_raw === '') {
+                continue;
+            }
+            if (auragold_payment_is_cheque_type($pt_raw)) {
                 continue;
             }
             $dep_esc = esc($dep_raw);
@@ -1464,6 +1471,9 @@ try {
                 $mw_val = $tbl_pos_sale_invoice_items_has_metal_weight ? ", $metal_weight" : "";
                 $mg_col = $tbl_pos_sale_invoice_items_has_merge_group_index ? ", merge_group_index" : "";
                 $mg_val = $tbl_pos_sale_invoice_items_has_merge_group_index ? ", " . $merge_group_index_sql : "";
+                $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_pos_sale_invoice_items', $item);
+                $ef_col = $ef_parts['columns'];
+                $ef_val = $ef_parts['values'];
                 // Insert invoice item
                 $item_sql = "
                     INSERT INTO tbl_pos_sale_invoice_items (
@@ -1471,7 +1481,7 @@ try {
                         carat, quantity, gross_weight, less_weight, purity, purity_weight,
                         final_weight, net_weight, pure_weight, rate,
                         making_amount, amount, tax_amount, net_amount, net_amt_with_tax$mg_col,
-                        design_no, location_id, status, created_at $diamond_cat_col $metal_rate_col $calc_col $da_col $sa_col $sw_col $mv_col $mq_col $mw_col
+                        design_no, location_id, status, created_at $diamond_cat_col $metal_rate_col $calc_col $da_col $sa_col $sw_col $mv_col $mq_col $mw_col$ef_col
                     ) VALUES (
                         $invoice_id, $sort_order_val $product_id, " . ($characteristic_id ? $characteristic_id : "NULL") . ",
                         " . ($barcode ? "'$barcode'" : "NULL") . ",
@@ -1482,7 +1492,7 @@ try {
                         $making_amount, $amount, $tax, $net_amount, $net_amt_with_tax$mg_val,
                         " . ($design_no ? "'$design_no'" : "NULL") . ",
                         " . ($location_id ? $location_id : "NULL") . ",
-                        1, NOW() $diamond_cat_val $metal_rate_val $calc_val $da_val $sa_val $sw_val $mv_val $mq_val $mw_val
+                        1, NOW() $diamond_cat_val $metal_rate_val $calc_val $da_val $sa_val $sw_val $mv_val $mq_val $mw_val$ef_val
                     )
                 ";
                 
@@ -2495,7 +2505,11 @@ try {
 
                     $is_scrap_payment_line = (strpos($pay_type_raw, 'scrap') !== false);
                     $pay_crdr = $is_scrap_payment_line ? 'Dr' : 'Cr';
-                    $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                    if (auragold_payment_is_cheque_type($pay_type_raw)) {
+                        $payment_against_ledger = auragold_cheque_payment_against_label($current_order_amount, 'receivable');
+                    } else {
+                        $payment_against_ledger = $deposit_into . '(' . number_format($current_order_amount, 2) . $pay_crdr . ')';
+                    }
 
                     $pay_desc_suffix = ($pay_cg > 0.00001 || $pay_cgp > 0.00001 || $pay_cs > 0.00001) ? ' — Metal Exchange' : '';
                     $pay_desc = mysqli_real_escape_string($conn, 'Payment for Sale Invoice: ' . $invoice_no . $pay_desc_suffix);
@@ -2553,7 +2567,7 @@ try {
                     }
                     
                     // Cash/Bank ledger entry (customer pays us → Cash increases: debit, same pattern as purchase but reversed)
-                    if (!empty($deposit_into)) {
+                    if (!empty($deposit_into) && auragold_payment_should_post_deposit_ledger($pay_type_raw)) {
                         $cash_balance_record = getRecord("
                             SELECT balance_amount 
                             FROM tbl_customer_ledger 
@@ -2872,6 +2886,20 @@ try {
     if ((int) $invoice_id > 0) {
         require_once __DIR__ . '/../includes/auragold_voucher_pending_diamond_stone.php';
         auragold_voucher_apply_pending_diamond_stone_from_post($conn, 'pos_sale_invoice', (int) $invoice_id, $invoice_no, $invoice_date);
+    }
+
+    require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
+    if (function_exists('auragold_sync_voucher_cheque_entries')) {
+        auragold_sync_voucher_cheque_entries($conn, [
+            'voucher_no' => $invoice_no,
+            'voucher_type' => 'POS Sale Invoice',
+            'voucher_date' => $invoice_date,
+            'account_ledger' => $customer_name,
+            'transaction_id' => (int) $invoice_id,
+            'user_id' => (int) $user_id,
+            'payments' => isset($payments) && is_array($payments) ? $payments : [],
+            'pdc_direction' => 'receivable',
+        ]);
     }
 
     mysqli_commit($conn);

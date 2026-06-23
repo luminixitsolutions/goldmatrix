@@ -92,6 +92,124 @@ function auragold_um_normalize_branch_ids_list(array $ids)
 }
 
 /**
+ * Main branch rows with active sub-branches for the User Management picker.
+ * Scoped like branches.php: one main + its subs when not superadmin at registry.
+ *
+ * @return array<int, array{main: array{id:int,name:string}, subs: array<int, array{id:int,name:string}>}>
+ */
+function auragold_um_branch_picker_groups($conn, $conn_master)
+{
+    $brConn = $conn_master;
+    $useMaster = true;
+    if ($conn && $conn instanceof mysqli) {
+        $tb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_branches'");
+        if ($tb && mysqli_num_rows($tb) > 0) {
+            $brConn = $conn;
+            $useMaster = false;
+        }
+        if ($tb) {
+            mysqli_free_result($tb);
+        }
+    }
+    if (!$brConn || !($brConn instanceof mysqli)) {
+        return [];
+    }
+
+    $fetchList = static function ($sql) use ($useMaster, $brConn) {
+        if ($useMaster && function_exists('getListMaster')) {
+            $rows = getListMaster($sql);
+        } elseif (function_exists('getList')) {
+            $rows = getList($sql);
+        } else {
+            $rows = [];
+        }
+
+        return is_array($rows) ? $rows : [];
+    };
+
+    if (!function_exists('auragold_branches_page_list_scope_main_id')) {
+        require_once __DIR__ . '/branch_working_context.php';
+    }
+
+    $scopeMain = auragold_branches_page_list_scope_main_id();
+    $statusSql = "(status = 1 OR status = '1')";
+    $hiddenUserSql = "LOWER(TRIM(IFNULL(username,''))) <> 'superbranch'";
+
+    if ($scopeMain > 0) {
+        $allMains = $fetchList(
+            'SELECT id, name FROM tbl_branches WHERE main_branch_id = 0 AND id = ' . (int) $scopeMain
+            . ' AND ' . $statusSql . ' ORDER BY id ASC'
+        );
+        $allSubs = $fetchList(
+            'SELECT id, name, main_branch_id FROM tbl_branches WHERE main_branch_id = ' . (int) $scopeMain
+            . ' AND ' . $statusSql . ' AND ' . $hiddenUserSql . ' ORDER BY id ASC'
+        );
+    } else {
+        $allMains = $fetchList(
+            'SELECT id, name FROM tbl_branches WHERE main_branch_id = 0 AND ' . $statusSql
+            . ' AND ' . $hiddenUserSql . ' ORDER BY id ASC'
+        );
+        $allSubs = $fetchList(
+            'SELECT id, name, main_branch_id FROM tbl_branches b WHERE b.main_branch_id > 0 '
+            . 'AND ' . $statusSql . ' AND LOWER(TRIM(IFNULL(b.username,\'\'))) <> \'superbranch\' '
+            . 'AND EXISTS (SELECT 1 FROM tbl_branches m WHERE m.id = b.main_branch_id AND IFNULL(m.main_branch_id, 0) = 0) '
+            . 'ORDER BY b.main_branch_id ASC, b.id ASC'
+        );
+    }
+
+    $subsByMain = [];
+    foreach ($allSubs as $sub) {
+        $mid = (int) ($sub['main_branch_id'] ?? 0);
+        if ($mid <= 0) {
+            continue;
+        }
+        if (!isset($subsByMain[$mid])) {
+            $subsByMain[$mid] = [];
+        }
+        $subsByMain[$mid][] = $sub;
+    }
+
+    $groups = [];
+    foreach ($allMains as $main) {
+        $mainId = (int) ($main['id'] ?? 0);
+        $mainName = trim((string) ($main['name'] ?? ''));
+        if ($mainId <= 0 || $mainName === '') {
+            continue;
+        }
+
+        $subs = [];
+        foreach ($subsByMain[$mainId] ?? [] as $sub) {
+            $subId = (int) ($sub['id'] ?? 0);
+            $subName = trim((string) ($sub['name'] ?? ''));
+            if ($subId <= 0 || $subName === '') {
+                continue;
+            }
+            $subs[] = ['id' => $subId, 'name' => $subName];
+        }
+
+        $groups[] = [
+            'main' => ['id' => $mainId, 'name' => $mainName],
+            'subs' => $subs,
+        ];
+    }
+
+    if (empty($groups)) {
+        if (!function_exists('auragold_registry_main_branch_id_for_login')) {
+            require_once __DIR__ . '/auragold_branch_data_scope.php';
+        }
+        $fallbackMainId = auragold_registry_main_branch_id_for_login();
+        if ($fallbackMainId > 0) {
+            $groups[] = [
+                'main' => ['id' => $fallbackMainId, 'name' => 'Main Branch'],
+                'subs' => [],
+            ];
+        }
+    }
+
+    return $groups;
+}
+
+/**
  * Resolve display string for User Management "Branch" column.
  *
  * @param mysqli $conn Master/registry connection.

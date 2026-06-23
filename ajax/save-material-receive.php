@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -246,7 +247,8 @@ if ($jwo_id > 0) {
         $barcode_sql = $barcode !== '' ? "'$barcode'" : 'NULL';
         $design_sql = $design_no !== '' ? "'$design_no'" : 'NULL';
         $carat_sql = $carat !== '' ? "'$carat'" : 'NULL';
-        $ins_item = "INSERT INTO tbl_material_receive_items (material_receive_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax, status, created_at) VALUES ($jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax, 1, NOW())";
+        $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_material_receive_items', $item);
+        $ins_item = "INSERT INTO tbl_material_receive_items (material_receive_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax{$ef_parts['columns']}, status, created_at) VALUES ($jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax{$ef_parts['values']}, 1, NOW())";
         mysqli_query($conn, $ins_item);
         $mr_line_id = (int) mysqli_insert_id($conn);
         require_once dirname(__DIR__) . '/includes/stock_history_audit_journal.php';
@@ -439,7 +441,8 @@ foreach ($items as $item) {
     $design_sql = $design_no !== '' ? "'$design_no'" : 'NULL';
     $carat_sql = $carat !== '' ? "'$carat'" : 'NULL';
 
-    $ins_item = "INSERT INTO tbl_material_receive_items (material_receive_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax, status, created_at) VALUES ($new_jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax, 1, NOW())";
+    $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_material_receive_items', $item);
+    $ins_item = "INSERT INTO tbl_material_receive_items (material_receive_id, product_id, product_characteristic_id, barcode, product_name, design_no, carat, quantity, gross_weight, less_weight, purity, purity_weight, final_weight, net_weight, pure_weight, rate, making_amount, amount, tax_amount, net_amount, net_amt_with_tax{$ef_parts['columns']}, status, created_at) VALUES ($new_jwo_id, $product_id, $char_sql, $barcode_sql, '$product_name', $design_sql, $carat_sql, $quantity, $gross_weight, $less_weight, $purity, $purity_weight, $final_weight, $net_weight, $pure_weight, $rate, $making_amount, $amount, $tax_amount, $net_amount, $net_amt_with_tax{$ef_parts['values']}, 1, NOW())";
     mysqli_query($conn, $ins_item);
     $mr_line_id = (int) mysqli_insert_id($conn);
     require_once dirname(__DIR__) . '/includes/stock_history_audit_journal.php';

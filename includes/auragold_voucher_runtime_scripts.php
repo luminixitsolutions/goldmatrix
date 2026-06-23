@@ -5,7 +5,12 @@
 if (!isset($auragold_voucher_runtime_client) || !is_array($auragold_voucher_runtime_client)) {
     $auragold_voucher_runtime_client = [];
 }
+require_once __DIR__ . '/auragold_extra_fields_product_modal_bootstrap.php';
+require_once __DIR__ . '/auragold_product_modal_catalog_design_assets.php';
+$prd_detail_js = __DIR__ . '/../assets/js/product-modal-row-detail-view.js';
+$prd_detail_ver = is_file($prd_detail_js) ? (int) filemtime($prd_detail_js) : time();
 ?>
+<script src="assets/js/product-modal-row-detail-view.js?v=<?php echo $prd_detail_ver; ?>"></script>
 <script src="assets/js/auragold-voucher-runtime-apply.js"></script>
 <script>
 window.AURAGOLD_VOUCHER_RUNTIME = <?php echo json_encode($auragold_voucher_runtime_client, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;

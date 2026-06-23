@@ -5,6 +5,12 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/includes/session_init.php';
 require_once 'config.php';
+if (function_exists('auragold_ensure_sale_invoice_against_id')) {
+    auragold_ensure_sale_invoice_against_id($conn);
+}
+if (function_exists('auragold_ensure_sale_invoice_item_source_so_id')) {
+    auragold_ensure_sale_invoice_item_source_so_id($conn);
+}
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
 require_once __DIR__ . '/includes/branch_profile_schema.php';
 if (!empty($conn_master) && $conn_master instanceof mysqli) {
@@ -170,6 +176,7 @@ if (!empty($edit_order_id)) {
             $edit_order['against_of'] = '';
         }
         $edit_order['against_of'] = $edit_order['against_of'] ?? '';
+        $edit_order['against_id'] = (int)($edit_order['against_id'] ?? 0);
         $edit_order['supplier_name'] = $edit_order['customer_name'] ?? $edit_order['supplier_name'] ?? '';
         $edit_order['supplier_id'] = $edit_order['customer_id'] ?? $edit_order['supplier_id'] ?? 0;
         $edit_order['invoice_date'] = $edit_order['invoice_date'] ?? '';
@@ -2829,15 +2836,35 @@ text-transform: uppercase;
             height: auto;
             min-height: 100vh;
             min-height: 100dvh;
-            overflow-x: hidden;
-            overflow-y: visible;
+            overflow: visible !important;
+        }
+        .layout-inner,
+        .layout-container {
+            overflow: visible !important;
         }
         .layout-content {
             height: auto !important;
             min-height: 0;
             overflow-x: hidden;
             overflow-y: visible !important;
-            padding-bottom: 88px !important;
+            padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
+        }
+
+        .company-header {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            right: 0;
+            width: 100% !important;
+            max-width: 100vw;
+            z-index: 1300 !important;
+        }
+        .layout-content > .container-fluid {
+            padding-top: calc(58px + env(safe-area-inset-top, 0px)) !important;
+        }
+
+        .layout-footer {
+            display: none !important;
         }
 
         .invoice-content-row.row {
@@ -3561,6 +3588,47 @@ text-transform: uppercase;
     </div>
 </div>
 
+<!-- Sale Order: choose which lines to invoice (partial invoicing) -->
+<div class="modal fade" id="siSoItemPickModal" tabindex="-1" role="dialog" aria-labelledby="siSoItemPickModalLabel" aria-hidden="true" data-backdrop="static">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header" style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+                <h5 class="modal-title" id="siSoItemPickModalLabel">Select Sale Order Items</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-2" id="siSoItemPickHint">Choose items to add to this sale invoice. Already invoiced items are not shown.</p>
+                <div class="table-responsive" style="max-height: min(65vh, 560px); overflow-y: auto;">
+                    <table class="table table-sm table-hover table-bordered mb-0">
+                        <thead class="thead-light" style="position: sticky; top: 0; z-index: 1; background-color: #1e3a5f;">
+                            <tr>
+                                <th style="width: 40px; color: #fff;"><input type="checkbox" id="siSoItemPickSelectAll" checked title="Select all"></th>
+                                <th style="color: #fff;">Barcode</th>
+                                <th style="color: #fff;">Design No.</th>
+                                <th style="color: #fff;">Product</th>
+                                <th style="color: #fff;">Qty</th>
+                                <th style="color: #fff;">Gross Wt.</th>
+                                <th style="color: #fff;">Net Wt.</th>
+                                <th style="color: #fff;">Rate</th>
+                                <th style="color: #fff;">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="siSoItemPickTbody">
+                            <tr><td colspan="9" class="text-center text-muted py-4">No items</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-3 text-right">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="siSoItemPickDoneBtn">Add Selected</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php $common_modal_show_group_single_item_checkbox = true; ?>
 <?php include 'includes/common-modal.php'; ?>
 <?php include __DIR__ . '/includes/customer-creation-modal-only.php'; ?>
@@ -3573,7 +3641,6 @@ text-transform: uppercase;
 <link rel="stylesheet" href="assets/libs/select2/select2.css">
 <script src="assets/libs/select2/select2.js"></script>
 <script src="assets/js/sale-invoice-customer-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/sale-invoice-customer-select2.js'); ?>"></script>
-<script src="assets/js/product-modal-catalog-design-no.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-catalog-design-no.js'); ?>"></script>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
@@ -3641,6 +3708,7 @@ window.PB_PAGE_CONFIG = {
             'supplier_name' => $edit_order['supplier_name'] ?? '',
             'customer_name' => $edit_order['supplier_name'] ?? '',
             'against_of' => $edit_order['against_of'] ?? '',
+            'against_id' => (int)($edit_order['against_id'] ?? 0),
             'currency' => $edit_order['currency'] ?? 'AED',
             'ref_no' => $edit_order['ref_no'] ?? '',
             'purchase_person' => $edit_order['purchase_person'] ?? '',
@@ -4212,7 +4280,9 @@ window.PB_PAGE_CONFIG = {
                     if (lastMid && typeof switchToMetalTab === 'function') {
                         switchToMetalTab(lastMid);
                     }
-                    if (barcodeInput) {
+                    if (typeof auragoldClearModalProductBarcodeInput === 'function') {
+                        auragoldClearModalProductBarcodeInput(barcodeInput);
+                    } else if (barcodeInput) {
                         barcodeInput.value = '';
                         barcodeInput.style.borderColor = '';
                         barcodeInput.focus();
@@ -4242,7 +4312,9 @@ window.PB_PAGE_CONFIG = {
                     }
                     function addSiblingSequential(idx, list) {
                         if (!list || idx >= list.length) {
-                            if (barcodeInput) {
+                            if (typeof auragoldClearModalProductBarcodeInput === 'function') {
+                                auragoldClearModalProductBarcodeInput(barcodeInput);
+                            } else if (barcodeInput) {
                                 barcodeInput.value = '';
                                 barcodeInput.style.borderColor = '';
                                 barcodeInput.focus();
@@ -4286,7 +4358,9 @@ window.PB_PAGE_CONFIG = {
                     if (data.sibling_barcodes && data.sibling_barcodes.length) {
                         addSiblingSequential(0, data.sibling_barcodes);
                     } else {
-                        if (barcodeInput) {
+                        if (typeof auragoldClearModalProductBarcodeInput === 'function') {
+                            auragoldClearModalProductBarcodeInput(barcodeInput);
+                        } else if (barcodeInput) {
                             barcodeInput.value = '';
                             barcodeInput.style.borderColor = '';
                             barcodeInput.focus();
@@ -4316,6 +4390,9 @@ window.PB_PAGE_CONFIG = {
                 modalProductBarcodeFetchInFlight = false;
                 modalProductBarcodeLastFetchDoneBarcode = trimmed;
                 modalProductBarcodeLastFetchDoneTime = Date.now();
+                if (typeof auragoldModalBarcodeBatchOnFetchComplete === 'function') {
+                    auragoldModalBarcodeBatchOnFetchComplete();
+                }
             });
     }
     
@@ -4325,21 +4402,28 @@ window.PB_PAGE_CONFIG = {
     function triggerModalProductBarcodeCheck(input, fromBlur) {
         fromBlur = !!fromBlur;
         var $input = $(input);
-        var barcode = $input.val().trim();
-        if (!barcode) {
+        var raw = $input.val().trim();
+        if (!raw) {
             modalProductBarcodeLastCheck = '';
             return;
         }
-        if (shouldSuppressModalProductBarcodeCheck(barcode, fromBlur)) {
+        var barcodes = typeof auragoldParseModalBarcodeTokens === 'function'
+            ? auragoldParseModalBarcodeTokens(raw)
+            : raw.split(/\s+/).filter(function (s) { return s.length > 0; });
+        if (shouldSuppressModalProductBarcodeCheck(barcodes.length > 1 ? raw : (barcodes[0] || raw), fromBlur)) {
             return;
         }
         var t = Date.now();
-        if (barcode === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
+        if (raw === modalProductBarcodeLastCheck && (t - modalProductBarcodeLastCheckTime) < 250) {
             return;
         }
-        modalProductBarcodeLastCheck = barcode;
+        modalProductBarcodeLastCheck = raw;
         modalProductBarcodeLastCheckTime = t;
-        fetchProductByBarcodeAndAdd(barcode);
+        if (barcodes.length > 1 && typeof auragoldStartModalBarcodeBatch === 'function') {
+            auragoldStartModalBarcodeBatch(barcodes, input, fetchProductByBarcodeAndAdd);
+            return;
+        }
+        fetchProductByBarcodeAndAdd(barcodes[0] || raw);
     }
     
     // Handle Add Product Icon Click
@@ -4553,7 +4637,15 @@ window.PB_PAGE_CONFIG = {
             } catch (eSi) { excludeInvoiceId = 0; }
             var url = 'ajax/list-quotation-against-documents.php?type=' + encodeURIComponent(type) + '&customer_id=' + encodeURIComponent(cid) + (q ? '&q=' + encodeURIComponent(q) : '') + (excludeInvoiceId > 0 ? '&exclude_invoice_id=' + encodeURIComponent(excludeInvoiceId) : '');
             fetch(url)
-                .then(function(r) { return r.json(); })
+                .then(function(r) {
+                    return r.text().then(function(text) {
+                        try {
+                            return JSON.parse(text);
+                        } catch (parseErr) {
+                            throw new Error((text && text.trim()) ? text.trim().substring(0, 180) : 'Invalid server response');
+                        }
+                    });
+                })
                 .then(function(data) {
                     if (data.status === 'error') {
                         tbody.innerHTML = '<tr><td colspan="10" class="text-center text-warning py-3">' + (data.message || 'Could not load') + '</td></tr>';
@@ -4591,8 +4683,9 @@ window.PB_PAGE_CONFIG = {
                     });
                     tbody.innerHTML = html;
                 })
-                .catch(function() {
-                    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Failed to load list</td></tr>';
+                .catch(function(err) {
+                    var msg = (err && err.message) ? String(err.message) : 'Failed to load list';
+                    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">' + msg.replace(/</g, '&lt;') + '</td></tr>';
                 });
         }
 
@@ -4618,6 +4711,131 @@ window.PB_PAGE_CONFIG = {
             siAgainstOrderSearchTimeout = setTimeout(siLoadAgainstOrderList, 300);
         });
 
+        function siGetExcludeInvoiceIdForAgainst() {
+            var excludeInvoiceId = 0;
+            try {
+                var _upSi = new URLSearchParams(window.location.search);
+                excludeInvoiceId = parseInt(_upSi.get('id') || '0', 10) || 0;
+            } catch (eSi) { excludeInvoiceId = 0; }
+            return excludeInvoiceId;
+        }
+
+        function siLoadAgainstItemsIntoTable(items) {
+            var productTableBody = document.getElementById('productTableBody');
+            if (!productTableBody) return false;
+            productTableBody.innerHTML = '';
+            var productListBody = document.getElementById('productListBody');
+            if (productListBody) {
+                var emptyRow = productListBody.querySelector('tr:not(.product-row)');
+                if (emptyRow) emptyRow.remove();
+                productListBody.innerHTML = '';
+            }
+            if (items.length > 0 && typeof savedItemToModalRowData === 'function') {
+                var itemList = items.filter(Boolean);
+                var rowGroups = typeof partitionSaleInvoiceItemsForProductRows === 'function'
+                    ? partitionSaleInvoiceItemsForProductRows(itemList)
+                    : itemList.map(function(it) { return [it]; });
+                rowGroups.forEach(function(groupItems) {
+                    var modalRowsData = groupItems.map(function(item) { return savedItemToModalRowData(item); });
+                    if (typeof addMergedProductsToTable === 'function') {
+                        addMergedProductsToTable(modalRowsData, undefined, { fromSavedInvoice: true });
+                    } else if (typeof addProductToTableFromModalRow === 'function') {
+                        modalRowsData.forEach(function(rowData) { addProductToTableFromModalRow(rowData, undefined, { fromSavedInvoice: true }); });
+                    }
+                });
+                if (productTableBody.querySelectorAll('tr:not(.no-drag)').length === 0 && typeof addProductToTableFromModalRow === 'function') {
+                    itemList.forEach(function(item) { addProductToTableFromModalRow(savedItemToModalRowData(item), undefined, { fromSavedInvoice: true }); });
+                }
+            }
+            if (productTableBody.querySelectorAll('tr:not(.no-drag)').length === 0) {
+                productTableBody.innerHTML = '<tr class="no-drag"><td colspan="' + saleInvoiceProductListEmptyColspan() + '" class="text-center text-muted py-4" id="emptyRowCell">No Rows To Show</td></tr>';
+                return false;
+            }
+            return true;
+        }
+
+        function siApplyAgainstDocumentSelection(selectedId, docNo, items) {
+            if (!siLoadAgainstItemsIntoTable(items)) {
+                return;
+            }
+            var againstIdEl = document.getElementById('againstId');
+            if (againstIdEl) againstIdEl.value = selectedId;
+            var refHidden = document.getElementById('againstOfRef');
+            if (refHidden) refHidden.value = docNo;
+            var refNoEl = document.getElementById('refNo');
+            if (refNoEl) refNoEl.value = docNo;
+            if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
+            if (typeof refreshProductListBarcodeGroups === 'function') refreshProductListBarcodeGroups();
+        }
+
+        var siPendingSoPick = { selectedId: '', docNo: '', items: [] };
+
+        function siFormatSoPickCell(val) {
+            if (val == null || val === '') return '—';
+            var n = parseFloat(val);
+            if (!isNaN(n) && String(val).trim() !== '') {
+                if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+                return n.toFixed(3).replace(/\.?0+$/, function(m) { return m === '.000' ? '' : m; });
+            }
+            return String(val);
+        }
+
+        function siOpenSoItemPickModal(selectedId, docNo, items) {
+            siPendingSoPick = { selectedId: selectedId, docNo: docNo, items: items || [] };
+            var tbody = document.getElementById('siSoItemPickTbody');
+            if (!tbody) return;
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No remaining items</td></tr>';
+            } else {
+                tbody.innerHTML = items.map(function(item, idx) {
+                    var bc = item.barcode || item.barcode_no || '';
+                    var dn = item.design_no || '';
+                    var pn = item.product_name || item.name || '';
+                    var qty = item.quantity != null ? item.quantity : '';
+                    var gw = item.gross_weight != null ? item.gross_weight : (item.gross_wt != null ? item.gross_wt : '');
+                    var nw = item.net_weight != null ? item.net_weight : (item.net_wt != null ? item.net_wt : '');
+                    var rate = item.rate != null ? item.rate : (item.metal_rate != null ? item.metal_rate : '');
+                    var amt = item.amount != null ? item.amount : (item.net_amount != null ? item.net_amount : (item.net_amt != null ? item.net_amt : ''));
+                    return '<tr>' +
+                        '<td class="text-center"><input type="checkbox" class="si-so-item-pick-cb" data-item-index="' + idx + '" checked></td>' +
+                        '<td>' + (bc ? String(bc).replace(/</g, '&lt;') : '—') + '</td>' +
+                        '<td>' + (dn ? String(dn).replace(/</g, '&lt;') : '—') + '</td>' +
+                        '<td>' + (pn ? String(pn).replace(/</g, '&lt;') : '—') + '</td>' +
+                        '<td class="text-right">' + siFormatSoPickCell(qty) + '</td>' +
+                        '<td class="text-right">' + siFormatSoPickCell(gw) + '</td>' +
+                        '<td class="text-right">' + siFormatSoPickCell(nw) + '</td>' +
+                        '<td class="text-right">' + siFormatSoPickCell(rate) + '</td>' +
+                        '<td class="text-right">' + siFormatSoPickCell(amt) + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
+            var hint = document.getElementById('siSoItemPickHint');
+            if (hint) hint.textContent = 'Order ' + (docNo || selectedId) + ': choose items to add. Already invoiced lines are hidden.';
+            var selAll = document.getElementById('siSoItemPickSelectAll');
+            if (selAll) selAll.checked = true;
+            $('#againstOrderModal').modal('hide');
+            $('#siSoItemPickModal').modal('show');
+        }
+
+        $(document).on('change', '#siSoItemPickSelectAll', function() {
+            var checked = this.checked;
+            document.querySelectorAll('#siSoItemPickTbody .si-so-item-pick-cb').forEach(function(cb) { cb.checked = checked; });
+        });
+
+        $('#siSoItemPickDoneBtn').on('click', function() {
+            var picked = [];
+            document.querySelectorAll('#siSoItemPickTbody .si-so-item-pick-cb:checked').forEach(function(cb) {
+                var idx = parseInt(cb.getAttribute('data-item-index') || '-1', 10);
+                if (idx >= 0 && siPendingSoPick.items[idx]) picked.push(siPendingSoPick.items[idx]);
+            });
+            if (picked.length === 0) {
+                alert('Please select at least one item.');
+                return;
+            }
+            siApplyAgainstDocumentSelection(siPendingSoPick.selectedId, siPendingSoPick.docNo, picked);
+            $('#siSoItemPickModal').modal('hide');
+        });
+
         $('#againstOrderDoneBtn').on('click', function() {
             var radio = document.querySelector('input[name="againstOrderRadio"]:checked');
             if (!radio || !radio.value) {
@@ -4628,6 +4846,10 @@ window.PB_PAGE_CONFIG = {
             var docNo = radio.getAttribute('data-doc-no') || '';
             var type = siResolveAgainstDocumentType();
             var url = 'ajax/get-order-items-by-type.php?order_id=' + encodeURIComponent(selectedId) + '&type=' + encodeURIComponent(type);
+            if (type === 'Sale Order') {
+                var excludeInvoiceId = siGetExcludeInvoiceIdForAgainst();
+                url += '&for_sale_invoice=1' + (excludeInvoiceId > 0 ? '&exclude_invoice_id=' + encodeURIComponent(excludeInvoiceId) : '');
+            }
             fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -4636,45 +4858,15 @@ window.PB_PAGE_CONFIG = {
                         return;
                     }
                     var items = (data && data.items) ? data.items : [];
-                    var productTableBody = document.getElementById('productTableBody');
-                    if (!productTableBody) { $('#againstOrderModal').modal('hide'); return; }
-                    productTableBody.innerHTML = '';
-                    var productListBody = document.getElementById('productListBody');
-                    if (productListBody) {
-                        var emptyRow = productListBody.querySelector('tr:not(.product-row)');
-                        if (emptyRow) emptyRow.remove();
-                        productListBody.innerHTML = '';
-                    }
-                    if (items.length > 0 && typeof savedItemToModalRowData === 'function') {
-                        var itemList = items.filter(Boolean);
-                        var rowGroups = typeof partitionSaleInvoiceItemsForProductRows === 'function'
-                            ? partitionSaleInvoiceItemsForProductRows(itemList)
-                            : itemList.map(function(it) { return [it]; });
-                        var added = false;
-                        rowGroups.forEach(function(groupItems) {
-                            var modalRowsData = groupItems.map(function(item) { return savedItemToModalRowData(item); });
-                            if (typeof addMergedProductsToTable === 'function') {
-                                addMergedProductsToTable(modalRowsData, undefined, { fromSavedInvoice: true });
-                            } else if (typeof addProductToTableFromModalRow === 'function') {
-                                modalRowsData.forEach(function(rowData) { addProductToTableFromModalRow(rowData, undefined, { fromSavedInvoice: true }); });
-                            }
-                        });
-                        added = productTableBody.querySelectorAll('tr:not(.no-drag)').length > 0;
-                        if (!added && typeof addProductToTableFromModalRow === 'function') {
-                            itemList.forEach(function(item) { addProductToTableFromModalRow(savedItemToModalRowData(item), undefined, { fromSavedInvoice: true }); });
+                    if (type === 'Sale Order') {
+                        if (items.length === 0) {
+                            alert('All items of this Sale Order are already invoiced.');
+                            return;
                         }
+                        siOpenSoItemPickModal(selectedId, docNo, items);
+                        return;
                     }
-                    if (productTableBody.querySelectorAll('tr:not(.no-drag)').length === 0) {
-                        productTableBody.innerHTML = '<tr class="no-drag"><td colspan="' + saleInvoiceProductListEmptyColspan() + '" class="text-center text-muted py-4" id="emptyRowCell">No Rows To Show</td></tr>';
-                    }
-                    var againstIdEl = document.getElementById('againstId');
-                    if (againstIdEl) againstIdEl.value = selectedId;
-                    var refHidden = document.getElementById('againstOfRef');
-                    if (refHidden) refHidden.value = docNo;
-                    var refNoEl = document.getElementById('refNo');
-                    if (refNoEl) refNoEl.value = docNo;
-                    if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
-                    if (typeof refreshProductListBarcodeGroups === 'function') refreshProductListBarcodeGroups();
+                    siApplyAgainstDocumentSelection(selectedId, docNo, items);
                     $('#againstOrderModal').modal('hide');
                 })
                 .catch(function() {
@@ -6387,7 +6579,7 @@ window.PB_PAGE_CONFIG = {
                 right: 0;
                 bottom: 0;
                 background: rgba(0,0,0,0.5);
-                z-index: 10000;
+                z-index: 10700;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -6552,6 +6744,9 @@ window.PB_PAGE_CONFIG = {
         function applyFullProduct(full) {
             populateRowWithProduct(row, full);
             closeProductSearchModal();
+            if (typeof window.refreshMobileInlineProductFormIfOpen === 'function') {
+                window.refreshMobileInlineProductFormIfOpen(row);
+            }
             setTimeout(function() {
                 const locationSelect = row.querySelector('[data-column="location"] select, .location-select');
                 if (locationSelect) locationSelect.focus();
@@ -6806,10 +7001,18 @@ window.PB_PAGE_CONFIG = {
         opts = opts || {};
         const fromBarcode = !!opts.fromBarcode;
         // Update product name
-        const productInput = row.querySelector('[data-column="product"] input');
+        const productInput = row.querySelector('td[data-column="product"] input, [data-column="product"] input');
+        var pName = String(product.name || product.product_name || product.alternate_name || '').trim();
+        var metalSuffix = product.metal_name ? (' - ' + product.metal_name) : '';
+        const productName = pName ? (pName + metalSuffix) : String(metalSuffix).replace(/^\s*-\s*/, '').trim();
         if (productInput) {
-            const productName = product.name + (product.metal_name ? ' - ' + product.metal_name : '');
             productInput.value = productName;
+            productInput.readOnly = true;
+        }
+        if (productName) {
+            row.setAttribute('data-product-name', productName);
+        } else {
+            row.removeAttribute('data-product-name');
         }
         
         // Update row data attributes
@@ -7572,6 +7775,7 @@ window.PB_PAGE_CONFIG = {
             'other-charge-group': 'Other Charge (group)',
             'cert-spec-group': 'Certificate & spec',
             'hallmark': 'Hallmark',
+            'extra-fields-group': 'Extra Fields',
             'net-reverse': 'Net Amt+Tax / Reverse'
         };
 
@@ -8236,6 +8440,11 @@ window.PB_PAGE_CONFIG = {
             row.setAttribute('data-stock-journal-id', String(modalRowData.stock_journal_id).trim());
         } else {
             row.removeAttribute('data-stock-journal-id');
+        }
+        if (modalRowData.source_sale_order_item_id != null && String(modalRowData.source_sale_order_item_id).trim() !== '') {
+            row.setAttribute('data-source-sale-order-item-id', String(modalRowData.source_sale_order_item_id).trim());
+        } else {
+            row.removeAttribute('data-source-sale-order-item-id');
         }
         
         // Ensure barcode is not empty - if still empty, use a placeholder
@@ -9639,90 +9848,113 @@ window.PB_PAGE_CONFIG = {
     }
     
     // Modal Add Button - Add all products directly to table (no checkbox required)
-    const modalAddBtn = document.getElementById('modalAddBtn');
-    if (modalAddBtn) {
-        modalAddBtn.addEventListener('click', function() {
-            // Get all product rows (not just checked ones)
-            const allProductRows = document.querySelectorAll('#productListBody .product-row');
-            
-            if (allProductRows.length === 0) {
-                alert('No products available to add');
-                return;
-            }
-            
-            // Check if we're in edit mode
-            if (currentEditingRowId) {
-                if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-                if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-                const mainRow = document.getElementById(currentEditingRowId);
-                const groupItemsJson = mainRow ? mainRow.getAttribute('data-group-items') : null;
-                if (groupItemsJson) {
-                    // Merged row: re-merge all modal rows and update main row
-                    const modalRowsData = [];
-                    allProductRows.forEach(function(r) { modalRowsData.push(getModalRowDataFromRow(r, true)); });
-                    if (modalRowsData.length > 0) {
-                        updateMergedRowFromModalRows(currentEditingRowId, modalRowsData);
-                    }
-                } else {
-                    // Single row: update from first modal row
-                    const firstRow = allProductRows[0];
-                    if (firstRow) {
-                        updateProductListRowFromModalRow(currentEditingRowId, firstRow);
-                    }
+    function commitProductSelectionModalToMainTable(opts) {
+        opts = opts || {};
+        var notifyEmpty = opts.notifyEmpty !== false;
+        var closeModal = !!opts.closeModal;
+
+        const allProductRows = document.querySelectorAll('#productListBody .product-row');
+
+        if (allProductRows.length === 0) {
+            if (notifyEmpty) alert('No products available to add');
+            return { ok: false, reason: 'no_products' };
+        }
+
+        if (typeof window.saleInvoiceHasCustomerSelected === 'function' && !window.saleInvoiceHasCustomerSelected()) {
+            if (notifyEmpty) alert('Please select a customer before adding items.');
+            return { ok: false, reason: 'no_customer' };
+        }
+
+        if (currentEditingRowId) {
+            if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
+            if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+            const mainRow = document.getElementById(currentEditingRowId);
+            const groupItemsJson = mainRow ? mainRow.getAttribute('data-group-items') : null;
+            if (groupItemsJson) {
+                const modalRowsData = [];
+                allProductRows.forEach(function(r) { modalRowsData.push(getModalRowDataFromRow(r, true)); });
+                if (modalRowsData.length > 0) {
+                    updateMergedRowFromModalRows(currentEditingRowId, modalRowsData);
                 }
-                hideProductModal();
-                currentEditingRowId = null;
-                updateSummaryPanel();
-                return;
+            } else {
+                const firstRow = allProductRows[0];
+                if (firstRow) {
+                    updateProductListRowFromModalRow(currentEditingRowId, firstRow);
+                }
             }
-            
-            // Add mode: Only add rows that are visible (current tab); ignore hidden rows from other tabs
-            const productRows = Array.from(allProductRows).filter(function(row) {
+            hideProductModal();
+            currentEditingRowId = null;
+            updateSummaryPanel();
+            return { ok: true, reason: 'edit_saved', mainRowsAdded: 0 };
+        }
+
+        const productRows = typeof window.getCommitProductModalRows === 'function'
+            ? window.getCommitProductModalRows(allProductRows)
+            : Array.from(allProductRows).filter(function(row) {
                 if (!row) return false;
                 return row.style.display !== 'none';
             });
-            if (productRows.length === 0) {
+        if (productRows.length === 0) {
+            if (notifyEmpty) {
                 alert('No products in current tab. Switch to the tab with products you want to add, or add a product first.');
-                return;
             }
-            if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
-            if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
-            try {
-                // Run modal row calculation so making-amount (and other calculated fields) are up to date before reading
-                if (typeof window.calculateModalRowNetWeight === 'function') {
-                    productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
-                }
-                var byMetal = {};
-                productRows.forEach(function(row) {
-                    var metalId = row.getAttribute('data-metal-id') || '';
-                    if (!byMetal[metalId]) byMetal[metalId] = [];
-                    byMetal[metalId].push(row);
-                });
-                Object.keys(byMetal).forEach(function(metalId) {
-                    var rows = byMetal[metalId];
-                    var modalRowsData = [];
-                    rows.forEach(function(r) {
-                        modalRowsData.push(getModalRowDataFromRow(r, false));
-                    });
-                    if (modalRowsData.length === 0) return;
-                    if (typeof auragoldAddModalRowsToProductTable === 'function') {
-                        auragoldAddModalRowsToProductTable(modalRowsData, metalId);
-                    } else if (typeof addMergedProductsToTable === 'function') {
-                        addMergedProductsToTable(modalRowsData, metalId);
-                    }
-                });
-            } finally {
-                // Always clear modal product list after add so user can add more products (modal stays open)
-                const productListBody = document.getElementById('productListBody');
-                if (productListBody) {
-                    productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
-                }
-                var groupNameInput = document.getElementById('modalGroupName');
-                if (groupNameInput) groupNameInput.value = '';
-                var commentInput = document.getElementById('modalComment');
-                if (commentInput) commentInput.value = '';
+            return { ok: false, reason: 'no_visible' };
+        }
+
+        var mainRowsAdded = 0;
+        if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone();
+        if (typeof updateJewelleryNetAmountAndFinal === 'function') updateJewelleryNetAmountAndFinal();
+        try {
+            if (typeof window.calculateModalRowNetWeight === 'function') {
+                productRows.forEach(function(r) { window.calculateModalRowNetWeight(r); });
             }
-            updateSummaryPanel();
+            var byMetal = {};
+            productRows.forEach(function(row) {
+                var metalId = row.getAttribute('data-metal-id') || '';
+                var setIdx = row.getAttribute('data-catalogue-set-index');
+                var groupKey = (setIdx !== null && setIdx !== '')
+                    ? (metalId + '::catalogue-set::' + setIdx)
+                    : metalId;
+                if (!byMetal[groupKey]) byMetal[groupKey] = [];
+                byMetal[groupKey].push(row);
+            });
+            Object.keys(byMetal).forEach(function(groupKey) {
+                var rows = byMetal[groupKey];
+                var metalId = rows.length ? (rows[0].getAttribute('data-metal-id') || '') : '';
+                var modalRowsData = [];
+                rows.forEach(function(r) {
+                    modalRowsData.push(getModalRowDataFromRow(r, false));
+                });
+                if (modalRowsData.length === 0) return;
+                if (typeof auragoldAddModalRowsToProductTable === 'function') {
+                    auragoldAddModalRowsToProductTable(modalRowsData, metalId);
+                } else if (typeof addMergedProductsToTable === 'function') {
+                    addMergedProductsToTable(modalRowsData, metalId);
+                }
+                mainRowsAdded++;
+            });
+        } finally {
+            const productListBody = document.getElementById('productListBody');
+            if (productListBody) {
+                productListBody.innerHTML = '<tr><td colspan="73" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td></tr>';
+            }
+            var groupNameInput = document.getElementById('modalGroupName');
+            if (groupNameInput) groupNameInput.value = '';
+            var commentInput = document.getElementById('modalComment');
+            if (commentInput) commentInput.value = '';
+        }
+        updateSummaryPanel();
+        if (closeModal && typeof hideProductModal === 'function') {
+            hideProductModal();
+        }
+        return { ok: true, mainRowsAdded: mainRowsAdded };
+    }
+    window.commitProductSelectionModalToMainTable = commitProductSelectionModalToMainTable;
+
+    const modalAddBtn = document.getElementById('modalAddBtn');
+    if (modalAddBtn) {
+        modalAddBtn.addEventListener('click', function() {
+            commitProductSelectionModalToMainTable({ closeModal: false, notifyEmpty: true });
         });
     }
     
@@ -9960,7 +10192,7 @@ window.PB_PAGE_CONFIG = {
             'modalProductBarcode': '',
             'modalProductCode': '',
             'modalProductDesignNo': '',
-            'modalProductQty': '1',
+            'modalProductQty': '',
             'modalMetalUnfix': false,
             'modalUnfix': false,
             'modalGroupSingleItem': true,
@@ -10344,6 +10576,7 @@ window.PB_PAGE_CONFIG = {
                     }
                 });
             }
+            window.refreshProductModalGroupSortable = refreshProductModalGroupSortable;
 
             function loadAndApplyModalColumnOrder() {
                 $.ajax({
@@ -10731,6 +10964,7 @@ window.PB_PAGE_CONFIG = {
             eway_from_pincode: (document.getElementById('ewayFromPincode')?.value || '').trim(),
             eway_to_pincode: (document.getElementById('ewayToPincode')?.value || '').trim(),
             against_of: document.getElementById('againstOf')?.value || '',
+            against_id: parseInt(document.getElementById('againstId')?.value || '0', 10) || 0,
             currency: document.getElementById('currency')?.value || 'AED',
             ref_no: document.getElementById('refNo')?.value || '',
             sales_person: document.getElementById('salesPerson')?.value || '',
@@ -10885,7 +11119,8 @@ window.PB_PAGE_CONFIG = {
                                 sale_amount: parseFloat(d.sale_amount) || 0,
                                 sale_amount_with: parseFloat(d.sale_amount_with) || 0,
                                 reverse: parseFloat(d.reverse) || 0,
-                                merge_group_index: mergeGroupSeq
+                                merge_group_index: mergeGroupSeq,
+                                source_sale_order_item_id: (d.source_sale_order_item_id != null && d.source_sale_order_item_id !== '') ? (parseInt(d.source_sale_order_item_id, 10) || d.source_sale_order_item_id) : ''
                             });
                         });
                         mergeGroupSeq++;
@@ -10936,6 +11171,7 @@ window.PB_PAGE_CONFIG = {
                 const metalWeightEl = row.querySelector('[data-column="metal-weight"] input');
                 const metalWeight = metalWeightEl ? (parseFloat(metalWeightEl.value) || 0) : 0;
                 const barcode = row.getAttribute('data-barcode') || row.querySelector('[data-column="barcode"]')?.textContent?.trim() || '';
+                const sourceSoItemId = row.getAttribute('data-source-sale-order-item-id') || '';
                 const groupImage = row.getAttribute('data-group-image') || '';
                 const metalId = row.getAttribute('data-metal-id') || '';
                 const calculationSelect = row.querySelector('[data-column="calculation"] select');
@@ -10992,13 +11228,14 @@ window.PB_PAGE_CONFIG = {
                     sale_amount: saleAmount,
                     sale_amount_with: saleAmountWith,
                     reverse: reverse,
-                    merge_group_index: mergeGroupSeq
+                    merge_group_index: mergeGroupSeq,
+                    source_sale_order_item_id: sourceSoItemId ? (parseInt(sourceSoItemId, 10) || sourceSoItemId) : ''
                 });
                 mergeGroupSeq++;
             }
         });
         
-        orderData.items = items;
+        orderData.items = (typeof auragoldEnrichVoucherItemsExtraFields === 'function' ? auragoldEnrichVoucherItemsExtraFields(items) : items);
 
         // Hedging: full sale invoice total is kept; server creates purchase fixing from sum of line metal_cost
 
@@ -11918,6 +12155,12 @@ window.PB_PAGE_CONFIG = {
         }
         if (document.getElementById('refNo')) {
             document.getElementById('refNo').value = order.ref_no || '';
+        }
+        if (document.getElementById('againstId')) {
+            document.getElementById('againstId').value = (order.against_id != null && order.against_id !== '') ? String(order.against_id) : '';
+        }
+        if (document.getElementById('againstOfRef')) {
+            document.getElementById('againstOfRef').value = order.ref_no || '';
         }
         (function setSalesPersonField() {
             var sel = document.getElementById('salesPerson');

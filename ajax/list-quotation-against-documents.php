@@ -4,11 +4,12 @@
  * GET: type, customer_id (required), q (optional), exclude_quotation_id (optional, for Sale Quotation),
  *      exclude_invoice_id (optional; Sale Invoice list + Sale Order list: ignore this invoice when excluding “already used” orders).
  */
-session_start();
-require_once '../config.php';
+require_once __DIR__ . '/../includes/session_init.php';
+require_once __DIR__ . '/../config.php';
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
+try {
 $type = isset($_GET['type']) ? trim((string) $_GET['type']) : '';
 $customer_id = isset($_GET['customer_id']) ? (int) $_GET['customer_id'] : 0;
 $search_term = isset($_GET['q']) ? trim((string) $_GET['q']) : '';
@@ -193,6 +194,12 @@ if ($type === 'Consignment In') {
     ";
     $results = sq_quotation_format_rows(getList($sql) ?: []);
 } elseif ($type === 'Sale Order') {
+    if (function_exists('auragold_ensure_sale_invoice_item_source_so_id')) {
+        auragold_ensure_sale_invoice_item_source_so_id($conn);
+    }
+    if (function_exists('auragold_ensure_sale_invoice_against_id')) {
+        auragold_ensure_sale_invoice_against_id($conn);
+    }
     $where = "o.customer_id = $cid AND (o.status IS NULL OR o.status = '' OR LOWER(TRIM(o.status)) NOT IN ('deleted','cancelled'))";
     if ($q_esc !== '') {
         $where .= " AND o.order_no LIKE '%$q_esc%'";
@@ -209,33 +216,13 @@ if ($type === 'Consignment In') {
         WHERE $where
         ORDER BY o.id DESC LIMIT 50
     ";
-    $results = sq_quotation_format_rows(getList($sql) ?: []);
-    // Remove sale orders already used on a sale invoice (against_of = Sale Order, ref_no = order no.).
-    // PHP-side filter avoids fragile correlated NOT EXISTS SQL across MySQL versions.
-    $ex_si = (int) $exclude_invoice_id;
-    $blk_where = 'customer_id = ' . (int) $cid . "
-        AND LOWER(TRIM(IFNULL(against_of,''))) = 'sale order'
-        AND IFNULL(TRIM(ref_no),'') <> ''
-        AND (status IS NULL OR status = '' OR LOWER(TRIM(status)) NOT IN ('deleted','cancelled'))";
-    if ($ex_si > 0) {
-        $blk_where .= ' AND id != ' . $ex_si;
-    }
-    $blk_rows = getList('SELECT DISTINCT TRIM(ref_no) AS ref_no FROM tbl_sale_invoices WHERE ' . $blk_where);
-    $blocked = [];
-    if (is_array($blk_rows)) {
-        foreach ($blk_rows as $br) {
-            $rk = strtolower(trim((string) ($br['ref_no'] ?? '')));
-            if ($rk !== '') {
-                $blocked[$rk] = true;
-            }
-        }
-    }
-    if (!empty($blocked) && !empty($results)) {
-        $results = array_values(array_filter($results, function ($row) use ($blocked) {
-            $k = strtolower(trim((string) ($row['order_no'] ?? '')));
-            return $k === '' || empty($blocked[$k]);
+    $raw_rows = getList($sql) ?: [];
+    if (function_exists('auragold_sale_order_has_pending_invoice_items') && !empty($raw_rows)) {
+        $raw_rows = array_values(array_filter($raw_rows, function ($row) use ($conn, $exclude_invoice_id) {
+            return auragold_sale_order_has_pending_invoice_items($conn, (int) ($row['id'] ?? 0), $exclude_invoice_id);
         }));
     }
+    $results = sq_quotation_format_rows($raw_rows);
 } elseif ($type === 'Sale Invoice') {
     $where = "o.customer_id = $cid AND (o.status IS NULL OR o.status = '' OR LOWER(TRIM(o.status)) NOT IN ('deleted','cancelled'))";
     if ($exclude_invoice_id > 0) {
@@ -369,3 +356,10 @@ echo json_encode([
     'status' => 'success',
     'orders' => $results,
 ]);
+} catch (Throwable $e) {
+    echo json_encode([
+        'status'  => 'error',
+        'message' => $e->getMessage(),
+        'orders'  => [],
+    ]);
+}

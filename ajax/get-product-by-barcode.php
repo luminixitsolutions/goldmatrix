@@ -198,15 +198,22 @@ function auragold_gpb_stock_row_from_net_balance($conn, string $barcode_esc, int
     if (!$conn || $barcode_esc === '' || $branch_id <= 0) {
         return null;
     }
+    require_once dirname(__DIR__) . '/includes/gold_silver_stock_list_fetch.php';
     $gpb_bsql = auragold_gpb_tbl_stock_branch_sql_fragment($conn, $branch_id);
     $gas_stk_in_types_sql = "'opening','purchase','stock_journal','balance','sale_return'";
+    $in_qty = gas_stock_inward_qty_expr('s');
+    $in_wt = gas_stock_inward_wt_expr('s');
     $agg = getRecord("
         SELECT
-            (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)
+            (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN $in_qty ELSE 0 END)
              - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_qty, 0), s.opening_qty, 0) ELSE 0 END)) AS bal_qty,
-            (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)
+            (SUM(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN $in_wt ELSE 0 END)
              - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(NULLIF(s.current_weight, 0), s.opening_weight, 0) ELSE 0 END)) AS bal_wt,
-            COALESCE(MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN s.id END), MAX(s.id)) AS pick_id
+            COALESCE(
+                MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) AND ($in_wt) > 0.00001 THEN s.id END),
+                MAX(CASE WHEN s.stock_type IN ($gas_stk_in_types_sql) THEN s.id END),
+                MAX(s.id)
+            ) AS pick_id
         FROM tbl_stock s
         WHERE s.status = 1
         AND s.barcode = '$barcode_esc'
@@ -237,6 +244,81 @@ function auragold_gpb_stock_row_from_net_balance($conn, string $barcode_esc, int
     $stock_check['current_weight'] = isset($agg['bal_wt']) ? (float) $agg['bal_wt'] : (float) ($stock_check['current_weight'] ?? 0);
 
     return $stock_check;
+}
+
+/**
+ * Stock-journal merge sets current_* to 0 on line barcodes while opening_* keeps the tag weight.
+ *
+ * @param array<string,mixed> $stock_row
+ * @return array<string,mixed>
+ */
+function auragold_gpb_enrich_zeroed_stock_row(array $stock_row, string $barcode_esc): array {
+    $cq = (float) ($stock_row['current_qty'] ?? 0);
+    $cw = (float) ($stock_row['current_weight'] ?? 0);
+    $oq = (float) ($stock_row['opening_qty'] ?? 0);
+    $ow = (float) ($stock_row['opening_weight'] ?? 0);
+    if ($cq <= 0 && $oq > 0) {
+        $stock_row['current_qty'] = $oq;
+    }
+    if ($cw <= 0 && $ow > 0) {
+        $stock_row['current_weight'] = $ow;
+    }
+    if ($cq <= 0 || $cw <= 0) {
+        $sj = getRecord("
+            SELECT quantity, gross_weight, net_weight
+            FROM tbl_stock_journal
+            WHERE barcode = '$barcode_esc' AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        if ($sj) {
+            if ($cq <= 0 && isset($sj['quantity']) && (float) $sj['quantity'] > 0) {
+                $stock_row['current_qty'] = (float) $sj['quantity'];
+            }
+            $sj_wt = 0.0;
+            if (isset($sj['gross_weight']) && (float) $sj['gross_weight'] > 0) {
+                $sj_wt = (float) $sj['gross_weight'];
+            } elseif (isset($sj['net_weight']) && (float) $sj['net_weight'] > 0) {
+                $sj_wt = (float) $sj['net_weight'];
+            }
+            if ($cw <= 0 && $sj_wt > 0) {
+                $stock_row['current_weight'] = $sj_wt;
+            }
+        }
+    }
+
+    return $stock_row;
+}
+
+/**
+ * Line barcode cleared after stock-journal merge but still listed on a pooled outward row.
+ *
+ * @param mysqli|null $conn
+ * @return array<string,mixed>|null
+ */
+function auragold_gpb_stock_row_from_pooled_reference($conn, string $barcode_esc, int $branch_id): ?array {
+    if (!$conn || $barcode_esc === '' || $branch_id <= 0) {
+        return null;
+    }
+    if (!auragold_gpb_barcode_in_pooled_outward($conn, $barcode_esc, $branch_id)) {
+        return null;
+    }
+    $gpb_bsql = auragold_gpb_tbl_stock_branch_sql_fragment($conn, $branch_id);
+    $stock_row = getRecord("
+        SELECT s.id, s.product_id, s.product_characteristic_id, s.barcode, s.metal_id,
+               s.current_qty, s.current_weight, s.final_weight, s.rate, s.value,
+               s.opening_purity, s.opening_weight, s.opening_qty
+        FROM tbl_stock s
+        WHERE s.barcode = '$barcode_esc' AND s.status = 1
+        $gpb_bsql
+        ORDER BY s.id DESC
+        LIMIT 1
+    ");
+    if (!$stock_row) {
+        return null;
+    }
+
+    return auragold_gpb_enrich_zeroed_stock_row($stock_row, $barcode_esc);
 }
 
 /**
@@ -680,7 +762,7 @@ if (!$stock_check && !$allow_non_stock_barcode) {
         $r_cw = (float) ($stock_relaxed['current_weight'] ?? 0);
         $pool_branch = $working_branch_id > 0 ? $working_branch_id : 0;
         if ($r_cq <= 0 && $r_cw <= 0 && $pool_branch > 0 && auragold_gpb_barcode_in_pooled_outward($conn, $barcode_esc, $pool_branch)) {
-            $stock_check = $stock_relaxed;
+            $stock_check = auragold_gpb_enrich_zeroed_stock_row($stock_relaxed, $barcode_esc);
         }
     }
 }
@@ -688,6 +770,11 @@ if (!$stock_check && !$allow_non_stock_barcode) {
 // Same net on-hand as gold-and-silver.php (aggregate inward − outward); single-row current_* can all be zero.
 if (!$stock_check && !$allow_non_stock_barcode && $working_branch_id > 0) {
     $stock_check = auragold_gpb_stock_row_from_net_balance($conn, $barcode_esc, $working_branch_id);
+}
+
+// Pooled outward (reference_barcodes) when per-line rows were zeroed but tag is still in the pool.
+if (!$stock_check && !$allow_non_stock_barcode && $working_branch_id > 0) {
+    $stock_check = auragold_gpb_stock_row_from_pooled_reference($conn, $barcode_esc, $working_branch_id);
 }
 
 if ($stock_check) {

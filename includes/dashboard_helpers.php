@@ -715,6 +715,71 @@ if (!function_exists('auragold_dashboard_sale_status_where')) {
     }
 
     /**
+     * Extra stock dashboard: branch count, recent journal lines, metal weights.
+     *
+     * @return array<string,mixed>
+     */
+    function auragold_stock_dashboard_extras() {
+        $out = [
+            'branch_count' => 0,
+            'low_stock_count' => 0,
+            'recent_journal' => [],
+            'gold_weight' => 0.0,
+            'silver_weight' => 0.0,
+        ];
+        if (!function_exists('getRecord') || !function_exists('getList')) {
+            return $out;
+        }
+
+        $stkBr = function_exists('auragold_dashboard_stock_branch_sql') ? auragold_dashboard_stock_branch_sql('s') : '';
+        $stkBrS2 = function_exists('auragold_dashboard_stock_branch_sql') ? auragold_dashboard_stock_branch_sql('s2') : '';
+
+        if (auragold_table_exists('tbl_stock')) {
+            $rBr = getRecord(
+                "SELECT COUNT(DISTINCT s.branch_id) AS c FROM tbl_stock s
+                 WHERE s.status = 1 AND s.branch_id IS NOT NULL $stkBr"
+            );
+            $out['branch_count'] = $rBr ? (int) ($rBr['c'] ?? 0) : 0;
+
+            $rLow = getRecord(
+                "SELECT COUNT(DISTINCT CONCAT(COALESCE(s.branch_id,0), '-', s.product_id)) AS c
+                 FROM tbl_stock s
+                 WHERE s.status = 1 $stkBr
+                 AND (COALESCE(s.current_qty,0) <= 1 OR COALESCE(s.current_weight,0) <= 0)"
+            );
+            $out['low_stock_count'] = $rLow ? (int) ($rLow['c'] ?? 0) : 0;
+
+            $rGold = getRecord(
+                "SELECT COALESCE(SUM(s.current_weight),0) AS w FROM tbl_stock s
+                 WHERE s.status = 1 AND s.metal_id = 1 $stkBr"
+            );
+            $out['gold_weight'] = $rGold ? (float) ($rGold['w'] ?? 0) : 0.0;
+
+            $rSilver = getRecord(
+                "SELECT COALESCE(SUM(s.current_weight),0) AS w FROM tbl_stock s
+                 WHERE s.status = 1 AND s.metal_id = 2 $stkBr"
+            );
+            $out['silver_weight'] = $rSilver ? (float) ($rSilver['w'] ?? 0) : 0.0;
+        }
+
+        if (auragold_table_exists('tbl_stock_journal')) {
+            $sjX = function_exists('auragold_dashboard_sj_extra_sql') ? auragold_dashboard_sj_extra_sql('sj') : '';
+            $out['recent_journal'] = getList(
+                "SELECT sj.id, sj.sj_invoice_no, sj.sj_date, sj.product_name, sj.barcode,
+                        sj.gross_weight, sj.metal_type, sj.voucher_type,
+                        COALESCE(NULLIF(TRIM(sj.voucher_type), ''), 'Stock') AS type_label
+                 FROM tbl_stock_journal sj
+                 WHERE sj.status IS NULL OR LOWER(TRIM(sj.status)) NOT IN ('cancelled','void','canceled')
+                 $sjX
+                 ORDER BY sj.sj_date DESC, sj.id DESC
+                 LIMIT 10"
+            ) ?: [];
+        }
+
+        return $out;
+    }
+
+    /**
      * Human label for customer type code (for page titles).
      */
     function auragold_customer_type_label($code) {
@@ -917,12 +982,203 @@ if (!function_exists('auragold_dashboard_sale_status_where')) {
     }
 
     /**
+     * Extra retailer dashboard lists: recent invoices, pending orders, month totals.
+     *
+     * @return array<string,mixed>
+     */
+    function auragold_retailer_dashboard_extras() {
+        $out = [
+            'recent_invoices' => [],
+            'pending_orders' => [],
+            'sales_month' => 0.0,
+            'sales_week' => 0.0,
+            'customers_count' => 0,
+        ];
+        if (!function_exists('getRecord') || !function_exists('getList')) {
+            return $out;
+        }
+
+        $tid = auragold_customer_type_id_by_code('CUSTOMER');
+        $st  = auragold_dashboard_sale_status_where('si');
+        $ot  = auragold_dashboard_order_status_where('so');
+        $siX = function_exists('auragold_dashboard_si_extra_sql') ? auragold_dashboard_si_extra_sql('si') : '';
+        $soX = function_exists('auragold_dashboard_so_extra_sql') ? auragold_dashboard_so_extra_sql('so') : '';
+
+        $saleJoin = '';
+        $saleWhereExtra = '';
+        $orderExtra = '';
+        if ($tid > 0) {
+            $saleJoin = ' INNER JOIN tbl_customers c ON si.customer_id = c.id ';
+            $saleWhereExtra = " AND c.customer_type_id = $tid ";
+            $orderExtra = " AND (so.customer_id IS NULL OR EXISTS (SELECT 1 FROM tbl_customers cx WHERE cx.id = so.customer_id AND cx.customer_type_id = $tid))";
+        }
+
+        $monthStart = date('Y-m-01');
+        $rMonth = getRecord(
+            "SELECT COALESCE(SUM(si.grand_total),0) AS t FROM tbl_sale_invoices si
+             $saleJoin WHERE si.invoice_date >= '$monthStart' $saleWhereExtra $st $siX"
+        );
+        $out['sales_month'] = $rMonth ? (float) ($rMonth['t'] ?? 0) : 0.0;
+
+        $weekStart = date('Y-m-d', strtotime('-6 days'));
+        $rWeek = getRecord(
+            "SELECT COALESCE(SUM(si.grand_total),0) AS t FROM tbl_sale_invoices si
+             $saleJoin WHERE si.invoice_date >= '$weekStart' $saleWhereExtra $st $siX"
+        );
+        $out['sales_week'] = $rWeek ? (float) ($rWeek['t'] ?? 0) : 0.0;
+
+        if ($tid > 0 && auragold_table_exists('tbl_customers')) {
+            $rCust = getRecord("SELECT COUNT(*) AS c FROM tbl_customers WHERE status = 1 AND customer_type_id = $tid");
+            $out['customers_count'] = $rCust ? (int) ($rCust['c'] ?? 0) : 0;
+        }
+
+        if (auragold_table_exists('tbl_sale_invoices')) {
+            $out['recent_invoices'] = getList(
+                "SELECT si.id, si.invoice_no, si.customer_name, si.invoice_date, si.grand_total, si.status
+                 FROM tbl_sale_invoices si $saleJoin
+                 WHERE 1=1 $saleWhereExtra $st $siX
+                 ORDER BY si.invoice_date DESC, si.id DESC
+                 LIMIT 8"
+            ) ?: [];
+        }
+
+        if (auragold_table_exists('tbl_sale_orders')) {
+            $out['pending_orders'] = getList(
+                "SELECT so.id, so.order_no, so.customer_name, so.order_date, so.status,
+                        COALESCE(so.grand_total, 0) AS grand_total
+                 FROM tbl_sale_orders so
+                 WHERE LOWER(TRIM(IFNULL(so.status,''))) NOT IN ('completed','done','closed','delivered','fulfilled','cancelled','void')
+                 AND TRIM(IFNULL(so.status,'')) <> '' $ot $orderExtra $soX
+                 ORDER BY so.order_date DESC, so.id DESC
+                 LIMIT 6"
+            ) ?: [];
+        }
+
+        return $out;
+    }
+
+    /**
      * Wholesaler (WHOLESALER type) — same layout/KPI logic as retailer, filtered by wholesaler customers.
      *
      * @return array<string,mixed>
      */
     function auragold_wholesaler_dashboard_kpis() {
         return auragold_segment_retail_dashboard_kpis('WHOLESALER');
+    }
+
+    /**
+     * Extra wholesaler dashboard lists: recent invoices, purchases, orders, consignments.
+     *
+     * @return array<string,mixed>
+     */
+    function auragold_wholesaler_dashboard_extras() {
+        $out = [
+            'recent_invoices' => [],
+            'recent_purchases' => [],
+            'pending_orders' => [],
+            'active_consignments' => [],
+            'sales_month' => 0.0,
+            'sales_week' => 0.0,
+            'purchases_month' => 0.0,
+            'customers_count' => 0,
+        ];
+        if (!function_exists('getRecord') || !function_exists('getList')) {
+            return $out;
+        }
+
+        $tid = auragold_customer_type_id_by_code('WHOLESALER');
+        $st  = auragold_dashboard_sale_status_where('si');
+        $pt  = auragold_dashboard_purchase_status_where('pi');
+        $ot  = auragold_dashboard_order_status_where('so');
+        $siX = function_exists('auragold_dashboard_si_extra_sql') ? auragold_dashboard_si_extra_sql('si') : '';
+        $piX = function_exists('auragold_dashboard_pi_extra_sql') ? auragold_dashboard_pi_extra_sql('pi') : '';
+        $soX = function_exists('auragold_dashboard_so_extra_sql') ? auragold_dashboard_so_extra_sql('so') : '';
+
+        $saleJoin = '';
+        $saleWhereExtra = '';
+        $orderExtra = '';
+        $consJoin = '';
+        $consExtra = '';
+        if ($tid > 0) {
+            $saleJoin = ' INNER JOIN tbl_customers c ON si.customer_id = c.id ';
+            $saleWhereExtra = " AND c.customer_type_id = $tid ";
+            $orderExtra = " AND (so.customer_id IS NULL OR EXISTS (SELECT 1 FROM tbl_customers cx WHERE cx.id = so.customer_id AND cx.customer_type_id = $tid))";
+            $consJoin = ' INNER JOIN tbl_customers c ON co.customer_id = c.id ';
+            $consExtra = " AND c.customer_type_id = $tid ";
+        }
+
+        $monthStart = date('Y-m-01');
+        $rMonth = getRecord(
+            "SELECT COALESCE(SUM(si.grand_total),0) AS t FROM tbl_sale_invoices si
+             $saleJoin WHERE si.invoice_date >= '$monthStart' $saleWhereExtra $st $siX"
+        );
+        $out['sales_month'] = $rMonth ? (float) ($rMonth['t'] ?? 0) : 0.0;
+
+        $weekStart = date('Y-m-d', strtotime('-6 days'));
+        $rWeek = getRecord(
+            "SELECT COALESCE(SUM(si.grand_total),0) AS t FROM tbl_sale_invoices si
+             $saleJoin WHERE si.invoice_date >= '$weekStart' $saleWhereExtra $st $siX"
+        );
+        $out['sales_week'] = $rWeek ? (float) ($rWeek['t'] ?? 0) : 0.0;
+
+        if (auragold_table_exists('tbl_purchase_invoices')) {
+            $rPurMonth = getRecord(
+                "SELECT COALESCE(SUM(pi.grand_total),0) AS t FROM tbl_purchase_invoices pi
+                 WHERE pi.invoice_date >= '$monthStart' $pt $piX"
+            );
+            $out['purchases_month'] = $rPurMonth ? (float) ($rPurMonth['t'] ?? 0) : 0.0;
+        }
+
+        if ($tid > 0 && auragold_table_exists('tbl_customers')) {
+            $rCust = getRecord("SELECT COUNT(*) AS c FROM tbl_customers WHERE status = 1 AND customer_type_id = $tid");
+            $out['customers_count'] = $rCust ? (int) ($rCust['c'] ?? 0) : 0;
+        }
+
+        if (auragold_table_exists('tbl_sale_invoices')) {
+            $out['recent_invoices'] = getList(
+                "SELECT si.id, si.invoice_no, si.customer_name, si.invoice_date, si.grand_total, si.status
+                 FROM tbl_sale_invoices si $saleJoin
+                 WHERE 1=1 $saleWhereExtra $st $siX
+                 ORDER BY si.invoice_date DESC, si.id DESC
+                 LIMIT 8"
+            ) ?: [];
+        }
+
+        if (auragold_table_exists('tbl_purchase_invoices')) {
+            $out['recent_purchases'] = getList(
+                "SELECT pi.id, pi.invoice_no, pi.supplier_name, pi.invoice_date, pi.grand_total, pi.status
+                 FROM tbl_purchase_invoices pi
+                 WHERE 1=1 $pt $piX
+                 ORDER BY pi.invoice_date DESC, pi.id DESC
+                 LIMIT 8"
+            ) ?: [];
+        }
+
+        if (auragold_table_exists('tbl_sale_orders')) {
+            $out['pending_orders'] = getList(
+                "SELECT so.id, so.order_no, so.customer_name, so.order_date, so.status,
+                        COALESCE(so.grand_total, 0) AS grand_total
+                 FROM tbl_sale_orders so
+                 WHERE LOWER(TRIM(IFNULL(so.status,''))) NOT IN ('completed','done','closed','delivered','fulfilled','cancelled','void')
+                 AND TRIM(IFNULL(so.status,'')) <> '' $ot $orderExtra $soX
+                 ORDER BY so.order_date DESC, so.id DESC
+                 LIMIT 6"
+            ) ?: [];
+        }
+
+        if (auragold_table_exists('tbl_consignment_out')) {
+            $out['active_consignments'] = getList(
+                "SELECT co.id, co.consignment_no, co.customer_name, co.consignment_date, co.grand_total, co.status
+                 FROM tbl_consignment_out co $consJoin
+                 WHERE LOWER(TRIM(IFNULL(co.status,''))) IN ('active','open','pending')
+                 OR (TRIM(IFNULL(co.status,'')) <> '' AND LOWER(TRIM(co.status)) NOT IN ('cancelled','void','canceled','returned','closed','completed'))
+                 $consExtra
+                 ORDER BY co.consignment_date DESC, co.id DESC
+                 LIMIT 6"
+            ) ?: [];
+        }
+
+        return $out;
     }
 
     /**
@@ -941,6 +1197,57 @@ if (!function_exists('auragold_dashboard_sale_status_where')) {
             mysqli_free_result($r);
         }
         return $ok;
+    }
+
+    /**
+     * Extra manufacturing dashboard metrics.
+     *
+     * @return array<string,mixed>
+     */
+    function auragold_manufacturing_dashboard_extras() {
+        $out = [
+            'jobs_due_week' => 0,
+            'jobs_completed_month' => 0,
+            'pending_sale_orders' => 0,
+        ];
+        if (!function_exists('getRecord')) {
+            return $out;
+        }
+
+        $jw  = 'tbl_jobwork_orders';
+        $jwoX = function_exists('auragold_dashboard_jwo_extra_sql') ? auragold_dashboard_jwo_extra_sql('j') : '';
+        $soX  = function_exists('auragold_dashboard_so_extra_sql') ? auragold_dashboard_so_extra_sql('so') : '';
+        $ot   = auragold_dashboard_order_status_where('so');
+        $stDone = " LOWER(TRIM(IFNULL(j.status,''))) IN ('cancelled','void','canceled','completed','done','closed') ";
+        $stOpen = " NOT ($stDone) ";
+
+        if (auragold_table_exists($jw)) {
+            $weekEnd = date('Y-m-d', strtotime('+6 days'));
+            $rDue = getRecord(
+                "SELECT COUNT(*) AS c FROM $jw j WHERE 1=1 $jwoX AND $stOpen
+                 AND j.due_date IS NOT NULL AND j.due_date >= CURDATE() AND j.due_date <= '$weekEnd'"
+            );
+            $out['jobs_due_week'] = $rDue ? (int) ($rDue['c'] ?? 0) : 0;
+
+            $monthStart = date('Y-m-01');
+            $rDone = getRecord(
+                "SELECT COUNT(*) AS c FROM $jw j WHERE 1=1 $jwoX
+                 AND LOWER(TRIM(IFNULL(j.status,''))) IN ('completed','done','closed')
+                 AND j.order_date >= '$monthStart'"
+            );
+            $out['jobs_completed_month'] = $rDone ? (int) ($rDone['c'] ?? 0) : 0;
+        }
+
+        if (auragold_table_exists('tbl_sale_orders')) {
+            $rPending = getRecord(
+                "SELECT COUNT(*) AS c FROM tbl_sale_orders so
+                 WHERE LOWER(TRIM(IFNULL(so.status,''))) NOT IN ('completed','done','closed','delivered','fulfilled','cancelled','void')
+                 AND TRIM(IFNULL(so.status,'')) <> '' $ot $soX"
+            );
+            $out['pending_sale_orders'] = $rPending ? (int) ($rPending['c'] ?? 0) : 0;
+        }
+
+        return $out;
     }
 
     /**
@@ -1216,6 +1523,60 @@ if (!function_exists('auragold_dashboard_sale_status_where')) {
             'kpi_end' => $kpiEnd->format('Y-m-d'),
             'period_key' => 'month',
         ];
+    }
+
+    /**
+     * Extra salesperson dashboard: recent invoices, averages, team size.
+     *
+     * @return array<string,mixed>
+     */
+    function auragold_salesperson_dashboard_extras($selectedSp, $period) {
+        $out = [
+            'recent_invoices' => [],
+            'avg_ticket' => 0.0,
+            'team_count' => 0,
+        ];
+        if (!function_exists('getRecord') || !function_exists('getList')) {
+            return $out;
+        }
+
+        $st  = auragold_dashboard_sale_status_where('si');
+        $spf = auragold_salesperson_sql_filter($selectedSp, 'si');
+        $siX = function_exists('auragold_dashboard_si_extra_sql') ? auragold_dashboard_si_extra_sql('si') : '';
+        $bounds = auragold_salesperson_period_bounds($period);
+        $start = $bounds['start'];
+        $kpiEnd = $bounds['kpi_end'];
+        $rngKpi = function_exists('auragold_dashboard_si_scope_for_range_sql')
+            ? auragold_dashboard_si_scope_for_range_sql('si', $start, $kpiEnd)
+            : '';
+
+        if (auragold_table_exists('tbl_sale_invoices')) {
+            $out['recent_invoices'] = getList(
+                "SELECT si.id, si.invoice_no, si.customer_name, si.invoice_date, si.grand_total,
+                        TRIM(si.sales_person) AS sales_person
+                 FROM tbl_sale_invoices si
+                 WHERE 1=1 $spf $st $rngKpi $siX
+                 ORDER BY si.invoice_date DESC, si.id DESC
+                 LIMIT 10"
+            ) ?: [];
+
+            $rAvg = getRecord(
+                "SELECT COALESCE(AVG(si.grand_total),0) AS a, COUNT(DISTINCT si.id) AS c
+                 FROM tbl_sale_invoices si
+                 WHERE 1=1 $spf $st $rngKpi $siX"
+            );
+            $out['avg_ticket'] = $rAvg ? (float) ($rAvg['a'] ?? 0) : 0.0;
+
+            $rTeam = getRecord(
+                "SELECT COUNT(DISTINCT TRIM(si.sales_person)) AS c
+                 FROM tbl_sale_invoices si
+                 WHERE TRIM(IFNULL(si.sales_person,'')) <> ''
+                 $st $rngKpi $siX"
+            );
+            $out['team_count'] = $rTeam ? (int) ($rTeam['c'] ?? 0) : 0;
+        }
+
+        return $out;
     }
 
     /**

@@ -18,6 +18,7 @@ error_reporting(0);
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 require_once __DIR__ . '/../includes/old_jewelry_scrap_stock_balance.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/next_product_stock_barcode.php';
@@ -410,6 +411,9 @@ try {
             $ins_cols .= ', less_wt';
             $ins_vals .= ", $less_wt_it";
         }
+        $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_old_jewelry_scrap_invoice_items', $it);
+        $ins_cols .= $ef_parts['columns'];
+        $ins_vals .= $ef_parts['values'];
         $qi = "INSERT INTO tbl_old_jewelry_scrap_invoice_items ($ins_cols) VALUES ($ins_vals)";
         if (!mysqli_query($conn, $qi)) {
             throw new Exception('Item insert failed: ' . mysqli_error($conn));

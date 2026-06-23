@@ -539,6 +539,287 @@ function auragold_sale_return_pending_quotation_item_predicate_sql($exclude_retu
 }
 
 /**
+ * Partial sale invoice against Sale Order: link invoice header to SO PK and lines to tbl_sale_order_items.id.
+ */
+function auragold_ensure_sale_invoice_core_tables($conn) {
+    static $done = [];
+    $key = is_object($conn) ? spl_object_hash($conn) : 'default';
+    if (!empty($done[$key])) {
+        return;
+    }
+    $done[$key] = true;
+
+    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS `tbl_sale_invoices` (
+      `id` int(11) NOT NULL AUTO_INCREMENT,
+      `invoice_no` varchar(50) NOT NULL,
+      `customer_id` int(11) DEFAULT NULL,
+      `customer_name` varchar(255) NOT NULL,
+      `against_of` varchar(100) DEFAULT NULL,
+      `currency` varchar(10) DEFAULT 'AED',
+      `ref_no` varchar(100) DEFAULT NULL,
+      `sales_person` varchar(255) DEFAULT NULL,
+      `invoice_date` date NOT NULL,
+      `due_date` date DEFAULT NULL,
+      `layaways_id` int(11) DEFAULT NULL,
+      `fixing_type` varchar(50) DEFAULT 'Standard',
+      `previous_balance` decimal(15,2) DEFAULT 0.00,
+      `previous_gold` decimal(15,2) DEFAULT 0.00,
+      `previous_silver` decimal(15,2) DEFAULT 0.00,
+      `subtotal` decimal(15,2) DEFAULT 0.00,
+      `additional_amt` decimal(15,2) DEFAULT 0.00,
+      `net_total` decimal(15,2) DEFAULT 0.00,
+      `reward_points` decimal(15,2) DEFAULT 0.00,
+      `coupon_code` varchar(50) DEFAULT NULL,
+      `coupon_discount` decimal(15,2) DEFAULT 0.00,
+      `discount_amt` decimal(15,2) DEFAULT 0.00,
+      `redeem_points` decimal(15,2) DEFAULT 0.00,
+      `grand_total` decimal(15,2) DEFAULT 0.00,
+      `advance_payment` decimal(15,2) DEFAULT 0.00,
+      `metal_amt` decimal(15,2) DEFAULT 0.00,
+      `round_off` decimal(15,2) DEFAULT 0.00,
+      `paid_amt` decimal(15,2) DEFAULT 0.00,
+      `balance_amt` decimal(15,2) DEFAULT 0.00,
+      `group_name` varchar(255) DEFAULT NULL,
+      `comment` text DEFAULT NULL,
+      `status` varchar(20) DEFAULT 'draft',
+      `created_by` int(11) DEFAULT NULL,
+      `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      UNIQUE KEY `invoice_no` (`invoice_no`),
+      KEY `customer_id` (`customer_id`),
+      KEY `invoice_date` (`invoice_date`),
+      KEY `status` (`status`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS `tbl_sale_invoice_items` (
+      `id` int(11) NOT NULL AUTO_INCREMENT,
+      `invoice_id` int(11) NOT NULL,
+      `product_id` int(11) NOT NULL,
+      `product_characteristic_id` int(11) DEFAULT NULL,
+      `barcode` varchar(100) DEFAULT NULL,
+      `product_name` varchar(255) NOT NULL,
+      `carat` varchar(50) DEFAULT NULL,
+      `quantity` decimal(10,2) DEFAULT 1.00,
+      `gross_weight` decimal(10,3) DEFAULT 0.000,
+      `less_weight` decimal(10,3) DEFAULT 0.000,
+      `purity` decimal(10,2) DEFAULT 0.00,
+      `purity_weight` decimal(10,3) DEFAULT 0.000,
+      `final_weight` decimal(10,3) DEFAULT 0.000,
+      `net_weight` decimal(10,3) DEFAULT 0.000,
+      `pure_weight` decimal(10,3) DEFAULT 0.000,
+      `rate` decimal(15,2) DEFAULT 0.00,
+      `making_amount` decimal(15,2) DEFAULT 0.00,
+      `amount` decimal(15,2) DEFAULT 0.00,
+      `tax_amount` decimal(15,2) DEFAULT 0.00,
+      `net_amount` decimal(15,2) DEFAULT 0.00,
+      `net_amt_with_tax` decimal(15,2) DEFAULT 0.00,
+      `design_no` varchar(100) DEFAULT NULL,
+      `location_id` int(11) DEFAULT NULL,
+      `status` tinyint(1) DEFAULT 1,
+      `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      KEY `invoice_id` (`invoice_id`),
+      KEY `product_id` (`product_id`),
+      KEY `product_characteristic_id` (`product_characteristic_id`),
+      KEY `barcode` (`barcode`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS `tbl_sale_invoice_payments` (
+      `id` int(11) NOT NULL AUTO_INCREMENT,
+      `invoice_id` int(11) NOT NULL,
+      `payment_type` varchar(50) NOT NULL,
+      `deposit_into` varchar(100) DEFAULT NULL,
+      `transaction_no` varchar(100) DEFAULT NULL,
+      `cheque_date` date DEFAULT NULL,
+      `purity_carat` varchar(50) DEFAULT NULL,
+      `amount` decimal(15,2) NOT NULL,
+      `previous_balance_amount` decimal(15,2) DEFAULT 0.00,
+      `current_order_amount` decimal(15,2) DEFAULT 0.00,
+      `diamond_category` varchar(100) DEFAULT NULL,
+      `quantity` decimal(10,2) DEFAULT 0.00,
+      `status` tinyint(1) DEFAULT 1,
+      `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      KEY `invoice_id` (`invoice_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function auragold_ensure_sale_invoice_against_id($conn) {
+    auragold_ensure_sale_invoice_core_tables($conn);
+    static $done = [];
+    $key = is_object($conn) ? spl_object_hash($conn) : 'default';
+    if (!empty($done[$key])) {
+        return;
+    }
+    $done[$key] = true;
+    $c = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_invoices LIKE 'against_id'");
+    if (!$c) {
+        return;
+    }
+    if (mysqli_num_rows($c) === 0) {
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_invoices ADD COLUMN against_id INT(11) NULL DEFAULT NULL COMMENT 'Sale Order PK when against_of = Sale Order' AFTER against_of");
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_invoices ADD KEY idx_si_against_id (against_id)");
+    }
+    mysqli_free_result($c);
+}
+
+function auragold_ensure_sale_invoice_item_source_so_id($conn) {
+    auragold_ensure_sale_invoice_core_tables($conn);
+    static $done = [];
+    $key = is_object($conn) ? spl_object_hash($conn) : 'default';
+    if (!empty($done[$key])) {
+        return;
+    }
+    $done[$key] = true;
+    $c = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_invoice_items LIKE 'source_sale_order_item_id'");
+    if (!$c) {
+        return;
+    }
+    if (mysqli_num_rows($c) === 0) {
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_invoice_items ADD COLUMN source_sale_order_item_id INT(11) NULL DEFAULT NULL COMMENT 'tbl_sale_order_items.id when invoiced from SO' AFTER invoice_id");
+        @mysqli_query($conn, "ALTER TABLE tbl_sale_invoice_items ADD KEY idx_sii_source_so_item_id (source_sale_order_item_id)");
+    }
+    mysqli_free_result($c);
+}
+
+/**
+ * Sale invoices already linked to this sale order: invoiced line ids + legacy barcodes.
+ *
+ * @return array{ids: array<int, true>, barcodes: array<string, true>}
+ */
+function auragold_sale_invoice_invoiced_so_item_map($conn, $order_id, $exclude_invoice_id = 0) {
+    $order_id = (int) $order_id;
+    $exclude_invoice_id = (int) $exclude_invoice_id;
+    $empty = ['ids' => [], 'barcodes' => []];
+    if ($order_id <= 0 || !($conn instanceof mysqli)) {
+        return $empty;
+    }
+    if (function_exists('auragold_ensure_sale_invoice_item_source_so_id')) {
+        auragold_ensure_sale_invoice_item_source_so_id($conn);
+    }
+    if (function_exists('auragold_ensure_sale_invoice_against_id')) {
+        auragold_ensure_sale_invoice_against_id($conn);
+    }
+
+    $so = getRecord("SELECT TRIM(COALESCE(order_no,'')) AS order_no FROM tbl_sale_orders WHERE id = $order_id LIMIT 1");
+    $order_no_esc = mysqli_real_escape_string($conn, trim((string) ($so['order_no'] ?? '')));
+
+    $against_parts = ['(si.against_id IS NOT NULL AND si.against_id > 0 AND si.against_id = ' . $order_id . ')'];
+    if ($order_no_esc !== '') {
+        $against_parts[] = "(LOWER(TRIM(COALESCE(si.against_of,''))) = 'sale order' AND TRIM(COALESCE(si.ref_no,'')) = '$order_no_esc')";
+    }
+    $against_sql = '(' . implode(' OR ', $against_parts) . ')';
+    $status_sql = "(si.status IS NULL OR si.status = '' OR LOWER(TRIM(si.status)) NOT IN ('deleted','cancelled'))";
+    $ex_sql = ($exclude_invoice_id > 0) ? ' AND si.id != ' . $exclude_invoice_id . ' ' : '';
+
+    $ids = [];
+    $id_rows = getList("
+        SELECT DISTINCT sii.source_sale_order_item_id AS sid
+        FROM tbl_sale_invoice_items sii
+        INNER JOIN tbl_sale_invoices si ON si.id = sii.invoice_id
+        WHERE $against_sql
+          AND $status_sql
+          $ex_sql
+          AND sii.source_sale_order_item_id IS NOT NULL
+          AND sii.source_sale_order_item_id > 0
+    ");
+    if (is_array($id_rows)) {
+        foreach ($id_rows as $r) {
+            $sid = (int) ($r['sid'] ?? 0);
+            if ($sid > 0) {
+                $ids[$sid] = true;
+            }
+        }
+    }
+
+    $barcodes = [];
+    $bc_rows = getList("
+        SELECT DISTINCT TRIM(sii.barcode) AS bc
+        FROM tbl_sale_invoice_items sii
+        INNER JOIN tbl_sale_invoices si ON si.id = sii.invoice_id
+        WHERE $against_sql
+          AND $status_sql
+          $ex_sql
+          AND (sii.source_sale_order_item_id IS NULL OR sii.source_sale_order_item_id = 0)
+          AND TRIM(COALESCE(sii.barcode,'')) <> ''
+    ");
+    if (is_array($bc_rows)) {
+        foreach ($bc_rows as $r) {
+            $bc = strtolower(trim((string) ($r['bc'] ?? '')));
+            if ($bc !== '') {
+                $barcodes[$bc] = true;
+            }
+        }
+    }
+
+    return ['ids' => $ids, 'barcodes' => $barcodes];
+}
+
+/** Whether a sale order line is already on a sale invoice (by source id or legacy barcode). */
+function auragold_sale_order_so_line_is_invoiced(array $so_line, array $invoiced_map) {
+    $sid = (int) ($so_line['id'] ?? $so_line['source_sale_order_item_id'] ?? 0);
+    if ($sid > 0 && !empty($invoiced_map['ids'][$sid])) {
+        return true;
+    }
+    $bc = strtolower(trim((string) ($so_line['barcode'] ?? $so_line['barcode_no'] ?? '')));
+    return ($bc !== '' && !empty($invoiced_map['barcodes'][$bc]));
+}
+
+/** True when the sale order has at least one line not yet on a sale invoice. */
+function auragold_sale_order_has_pending_invoice_items($conn, $order_id, $exclude_invoice_id = 0) {
+    $order_id = (int) $order_id;
+    if ($order_id <= 0) {
+        return false;
+    }
+    $lines = getList("SELECT id, barcode FROM tbl_sale_order_items WHERE order_id = $order_id");
+    if (empty($lines)) {
+        return false;
+    }
+    $invoiced = auragold_sale_invoice_invoiced_so_item_map($conn, $order_id, $exclude_invoice_id);
+    foreach ($lines as $line) {
+        if (!auragold_sale_order_so_line_is_invoiced($line, $invoiced)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Keep only sale order lines that are not yet invoiced. */
+function auragold_sale_order_filter_pending_invoice_items($conn, $order_id, array $items, $exclude_invoice_id = 0) {
+    $order_id = (int) $order_id;
+    if ($order_id <= 0 || empty($items)) {
+        return [];
+    }
+    $invoiced = auragold_sale_invoice_invoiced_so_item_map($conn, $order_id, $exclude_invoice_id);
+    $out = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        if (!auragold_sale_order_so_line_is_invoiced($item, $invoiced)) {
+            $out[] = $item;
+        }
+    }
+    return $out;
+}
+
+/** Save-time check: sale order line still available to invoice. */
+function auragold_sale_order_so_item_still_pending($conn, $so_item_id, $order_id, $exclude_invoice_id = 0) {
+    $so_item_id = (int) $so_item_id;
+    $order_id = (int) $order_id;
+    if ($so_item_id <= 0 || $order_id <= 0) {
+        return false;
+    }
+    $line = getRecord("SELECT id, barcode FROM tbl_sale_order_items WHERE id = $so_item_id AND order_id = $order_id LIMIT 1");
+    if (!$line) {
+        return false;
+    }
+    $invoiced = auragold_sale_invoice_invoiced_so_item_map($conn, $order_id, $exclude_invoice_id);
+    return !auragold_sale_order_so_line_is_invoiced($line, $invoiced);
+}
+
+/**
  * Account ledger "Against Ledger" on Cash/Bank lines when paying a party:
  * e.g. RK Jewellers(Bank - 200.00Dr), RK Jewellers(UPI - 800.00Dr)
  */
@@ -1647,6 +1928,201 @@ function getRepairOrderBillSeriesConfig($conn) {
         'from_series_table' => true,
         'voucher_type_id' => $vtId,
     ];
+}
+
+/**
+ * Bill series for Cheque / PDC entry numbers from bill-series.php.
+ * Receivable cheques: voucher type "PDC Receivable" (e.g. PR63-1).
+ * Payable cheques: voucher type "PDC Payable". Fallbacks: PDC Entry, Cheque Entry. Legacy: PDC-1.
+ *
+ * @param string $direction receivable|payable
+ * @return array{prefix:string,suffix:string,start_count:int,from_series_table:bool,voucher_type_id?:int}
+ */
+function getPdcEntryBillSeriesConfig($conn, $direction = 'receivable') {
+    $legacy = ['prefix' => 'PDC-', 'suffix' => '', 'start_count' => 1, 'from_series_table' => false];
+    $direction = strtolower(trim((string) $direction)) === 'payable' ? 'payable' : 'receivable';
+    $names = $direction === 'payable'
+        ? ['PDC Payable', 'PDC Entry', 'Cheque Entry', 'PDC entry', 'Cheque entry']
+        : ['PDC Receivable', 'PDC Entry', 'Cheque Entry', 'PDC entry', 'Cheque entry'];
+    $vtId = 0;
+    foreach ($names as $name) {
+        $esc = mysqli_real_escape_string($conn, $name);
+        $r = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(name)) = LOWER(TRIM('$esc')) LIMIT 1");
+        if ($r && !empty($r['id'])) {
+            $vtId = (int) $r['id'];
+            break;
+        }
+        $r2 = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(COALESCE(type_of_voucher,''))) = LOWER(TRIM('$esc')) LIMIT 1");
+        if ($r2 && !empty($r2['id'])) {
+            $vtId = (int) $r2['id'];
+            break;
+        }
+    }
+    $tableCheck = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_bill_series'");
+    if (!$tableCheck || mysqli_num_rows($tableCheck) === 0) {
+        if ($tableCheck) {
+            mysqli_free_result($tableCheck);
+        }
+        return $legacy;
+    }
+    mysqli_free_result($tableCheck);
+    if ($vtId <= 0) {
+        return $legacy;
+    }
+    if (!function_exists('auragold_bill_series_row_for_voucher_type')) {
+        return $legacy;
+    }
+    $series = auragold_bill_series_row_for_voucher_type($conn, $vtId);
+    if (!$series || trim((string) ($series['prefix'] ?? '')) === '') {
+        return $legacy;
+    }
+    return [
+        'prefix' => (string) $series['prefix'],
+        'suffix' => (string) ($series['suffix'] ?? ''),
+        'start_count' => (int) ($series['start_count'] ?? 0),
+        'from_series_table' => true,
+        'voucher_type_id' => $vtId,
+    ];
+}
+
+/**
+ * Next PDC number for tbl_cheque_entry from bill series (prefix + number + suffix).
+ *
+ * @param string $direction receivable|payable
+ */
+function getNextPdcEntryNo($conn, $direction = 'receivable') {
+    $cfg = getPdcEntryBillSeriesConfig($conn, $direction);
+    $prefix = $cfg['prefix'];
+    $suffix = $cfg['suffix'];
+    $start = (int) ($cfg['start_count'] ?? 0);
+    $startEff = max(1, $start);
+
+    if (function_exists('auragold_ensure_tbl_cheque_entry')) {
+        auragold_ensure_tbl_cheque_entry($conn);
+    }
+    $prefix_esc = mysqli_real_escape_string($conn, $prefix);
+    $rows = getList("SELECT pdc_no FROM `tbl_cheque_entry` WHERE record_status = 1 AND pdc_no LIKE '$prefix_esc%'");
+    if (!is_array($rows)) {
+        $rows = [];
+    }
+
+    $maxNum = 0;
+    $regex = '/^' . preg_quote($prefix, '/') . '(\d+)' . preg_quote($suffix, '/') . '$/';
+    foreach ($rows as $row) {
+        $pdc = (string) ($row['pdc_no'] ?? '');
+        if (preg_match($regex, $pdc, $m)) {
+            $maxNum = max($maxNum, (int) $m[1]);
+        }
+    }
+    $nextNum = max($maxNum + 1, $startEff);
+    return $prefix . $nextNum . $suffix;
+}
+
+/**
+ * Increment a PDC number matching current bill series (collision handling).
+ */
+function bumpPdcEntryNo($conn, $pdc_no, array $cfg) {
+    $prefix = $cfg['prefix'];
+    $suffix = $cfg['suffix'];
+    $regex = '/^' . preg_quote($prefix, '/') . '(\d+)' . preg_quote($suffix, '/') . '$/';
+    if (preg_match($regex, (string) $pdc_no, $m)) {
+        return $prefix . ((int) $m[1] + 1) . $suffix;
+    }
+    return getNextPdcEntryNo($conn, 'receivable');
+}
+
+/**
+ * Bill series for PDC Clearance vouchers (voucher type "PDC Clearance" in bill-series.php).
+ *
+ * @return array{prefix:string,suffix:string,start_count:int,from_series_table:bool,voucher_type_id?:int}
+ */
+function getPdcClearanceBillSeriesConfig($conn) {
+    $legacy = ['prefix' => 'PC-', 'suffix' => '', 'start_count' => 1, 'from_series_table' => false];
+    $vtId = 0;
+    $names = ['PDC Clearance', 'PDC clearance', 'Cheque Clearance'];
+    foreach ($names as $name) {
+        $esc = mysqli_real_escape_string($conn, $name);
+        $r = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(name)) = LOWER(TRIM('$esc')) LIMIT 1");
+        if ($r && !empty($r['id'])) {
+            $vtId = (int) $r['id'];
+            break;
+        }
+        $r2 = getRecord("SELECT id FROM tbl_voucher_types WHERE status = 1 AND LOWER(TRIM(COALESCE(type_of_voucher,''))) = LOWER(TRIM('$esc')) LIMIT 1");
+        if ($r2 && !empty($r2['id'])) {
+            $vtId = (int) $r2['id'];
+            break;
+        }
+    }
+    $tableCheck = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_bill_series'");
+    if (!$tableCheck || mysqli_num_rows($tableCheck) === 0) {
+        if ($tableCheck) {
+            mysqli_free_result($tableCheck);
+        }
+        return $legacy;
+    }
+    mysqli_free_result($tableCheck);
+    if ($vtId <= 0) {
+        return $legacy;
+    }
+    if (!function_exists('auragold_bill_series_row_for_voucher_type')) {
+        return $legacy;
+    }
+    $series = auragold_bill_series_row_for_voucher_type($conn, $vtId);
+    if (!$series || trim((string) ($series['prefix'] ?? '')) === '') {
+        return $legacy;
+    }
+    return [
+        'prefix' => (string) $series['prefix'],
+        'suffix' => (string) ($series['suffix'] ?? ''),
+        'start_count' => (int) ($series['start_count'] ?? 0),
+        'from_series_table' => true,
+        'voucher_type_id' => $vtId,
+    ];
+}
+
+/**
+ * Next PDC Clearance number (PC-1, PC-2) from bill series and ledger usage.
+ */
+function getNextPdcClearanceNo($conn) {
+    $cfg = getPdcClearanceBillSeriesConfig($conn);
+    $prefix = $cfg['prefix'];
+    $suffix = $cfg['suffix'];
+    $start = (int) ($cfg['start_count'] ?? 0);
+    $startEff = max(1, $start);
+
+    $prefix_esc = mysqli_real_escape_string($conn, $prefix);
+    $rows = getList(
+        "SELECT transaction_no FROM tbl_customer_ledger
+         WHERE status = 1 AND transaction_type = 'pdc_clearance'
+         AND transaction_no LIKE '$prefix_esc%'"
+    );
+    if (!is_array($rows)) {
+        $rows = [];
+    }
+
+    $maxNum = 0;
+    $regex = '/^' . preg_quote($prefix, '/') . '(\d+)' . preg_quote($suffix, '/') . '$/';
+    foreach ($rows as $row) {
+        $no = (string) ($row['transaction_no'] ?? '');
+        if (preg_match($regex, $no, $m)) {
+            $maxNum = max($maxNum, (int) $m[1]);
+        }
+    }
+    $nextNum = max($maxNum + 1, $startEff);
+    return $prefix . $nextNum . $suffix;
+}
+
+/**
+ * Increment a PDC clearance number matching current bill series.
+ */
+function bumpPdcClearanceNo($conn, $clearance_no, array $cfg) {
+    $prefix = $cfg['prefix'];
+    $suffix = $cfg['suffix'];
+    $regex = '/^' . preg_quote($prefix, '/') . '(\d+)' . preg_quote($suffix, '/') . '$/';
+    if (preg_match($regex, (string) $clearance_no, $m)) {
+        return $prefix . ((int) $m[1] + 1) . $suffix;
+    }
+    return getNextPdcClearanceNo($conn);
 }
 
 /**
@@ -3825,6 +4301,39 @@ function getInvoicePrintSettingsForDocument($document_type) {
 }
 
 /**
+ * Email message template (subject + HTML body) for a document type from print settings.
+ *
+ * @return array{subject:string,body:string}
+ */
+function getInvoicePrintEmailMessageTemplate($document_type) {
+    $s = getInvoicePrintSettingsForDocument($document_type);
+    return [
+        'subject' => trim((string) ($s['email_message_subject'] ?? '')),
+        'body' => (string) ($s['email_message_body'] ?? ''),
+    ];
+}
+
+/**
+ * Replace {placeholders} in email subject/body. Unknown keys become empty.
+ *
+ * @param string $text
+ * @param array<string,string|float|int|null> $vars
+ */
+function auragold_invoice_email_template_render($text, array $vars) {
+    return preg_replace_callback('/\{([a-z0-9_]+)\}/i', static function ($m) use ($vars) {
+        $k = strtolower((string) ($m[1] ?? ''));
+        if (!array_key_exists($k, $vars)) {
+            return '';
+        }
+        $v = $vars[$k];
+        if ($v === null) {
+            return '';
+        }
+        return (string) $v;
+    }, (string) $text);
+}
+
+/**
  * Default values for invoice print settings (when table missing or key missing).
  */
 function getInvoicePrintSettingsDefaults() {
@@ -3884,6 +4393,8 @@ function getInvoicePrintSettingsDefaults() {
         't7_bank_account_no' => '',
         't7_bank_ifsc' => '',
         'custom_print_css' => '',
+        'email_message_subject' => '',
+        'email_message_body' => '',
     ];
 }
 

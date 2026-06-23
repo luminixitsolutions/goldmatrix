@@ -30,6 +30,7 @@ require_once __DIR__ . '/includes/auragold_ui_font_settings.php';
     <link rel="stylesheet" href="assets/css/product-list-invoice-layout.css?v=5">
     <link rel="stylesheet" href="assets/css/column-drag-icons.css">
     <link rel="stylesheet" href="assets/css/fs-financial-toolbar.css">
+    <link rel="stylesheet" href="assets/css/auragold-mobile-chrome.css">
     <?php if (!empty($AURAGOLD_REPORT_PAGE)): ?>
     <link rel="stylesheet" href="assets/css/report-pages-mobile.css">
     <?php endif; ?>

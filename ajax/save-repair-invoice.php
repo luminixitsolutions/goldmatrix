@@ -225,6 +225,20 @@ try {
         }
     }
 
+    require_once __DIR__ . '/../includes/auragold_voucher_cheque_entry_sync.php';
+    if (function_exists('auragold_sync_voucher_cheque_entries')) {
+        auragold_sync_voucher_cheque_entries($conn, [
+            'voucher_no' => $repair_invoice_no,
+            'voucher_type' => 'Repair Invoice',
+            'voucher_date' => $repair_invoice_date,
+            'account_ledger' => $customer_name,
+            'transaction_id' => (int) $repair_invoice_id,
+            'user_id' => (int) $user_id,
+            'payments' => isset($payments) && is_array($payments) ? $payments : [],
+            'pdc_direction' => 'receivable',
+        ]);
+    }
+
     mysqli_commit($conn);
     echo json_encode([
         'status' => 'success',

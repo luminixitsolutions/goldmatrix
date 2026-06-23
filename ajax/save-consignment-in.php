@@ -2,6 +2,7 @@
 session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -273,6 +274,7 @@ try {
         $net_amount = isset($item['net_amount']) ? (float)$item['net_amount'] : 0;
         $net_amt_with_tax = isset($item['net_amt_with_tax']) ? (float)$item['net_amt_with_tax'] : 0;
         
+        $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_consignment_in_items', $item);
         $insert_item = "
             INSERT INTO tbl_consignment_in_items (
                 consignment_id, product_id, product_characteristic_id, barcode, product_name,
@@ -281,7 +283,7 @@ try {
                 wastage_percent, wastage_weight, final_weight, pure_weight, rate, metal_value, amount,
                 making_type, making_rate, making_amount, stone_weight, stone_rate, stone_amount,
                 diamond_amount, other_amount, discount_percent, discount_amount, tax_percent, tax_amount,
-                net_amount, net_amt_with_tax, status, created_at
+                net_amount, net_amt_with_tax{$ef_parts['columns']}, status, created_at
             ) VALUES (
                 $consignment_id,
                 " . ($product_id > 0 ? $product_id : 'NULL') . ",
@@ -321,7 +323,7 @@ try {
                 $tax_percent,
                 $item_tax_amount,
                 $net_amount,
-                $net_amt_with_tax,
+                $net_amt_with_tax{$ef_parts['values']},
                 1,
                 NOW()
             )

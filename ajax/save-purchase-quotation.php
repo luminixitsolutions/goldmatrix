@@ -4,6 +4,7 @@ require_once '../config.php';
 require_once __DIR__ . '/../includes/invoice_item_unique_barcode.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
 header('Content-Type: application/json');
 
@@ -375,6 +376,7 @@ try {
         $mq_val = $pq_has_metal_qty ? ", $metal_qty" : '';
         $mw_col = $pq_has_metal_weight ? ', metal_weight' : '';
         $mw_val = $pq_has_metal_weight ? ", $metal_weight" : '';
+        $ef_parts = auragold_extra_fields_item_insert_sql_parts($conn, 'tbl_purchase_quotation_items', $item);
         $item_sql = "
             INSERT INTO tbl_purchase_quotation_items (
                 quotation_id, product_id, product_characteristic_id, barcode, product_name,
@@ -382,7 +384,7 @@ try {
                 net_weight, pure_weight, making_amount, tax_amount,
                 amount, net_amount, net_amt_weight,
                 diamond_weight, gemstone_weight, diamond_amount, design_no,
-                status, created_at $mq_col $mw_col
+                status, created_at $mq_col $mw_col{$ef_parts['columns']}
             ) VALUES (
                 $quotation_id, $product_id, " . ($characteristic_id ? $characteristic_id : 'NULL') . ',
                 ' . ($barcode ? "'$barcode'" : 'NULL') . ",
@@ -394,7 +396,7 @@ try {
                 $amount, $net_amount, $net_amt_weight,
                 $diamond_weight, $gemstone_weight, $diamond_amount,
                 " . ($design_no ? "'$design_no'" : 'NULL') . ",
-                1, NOW() $mq_val $mw_val
+                1, NOW() $mq_val $mw_val{$ef_parts['values']}
             )
         ";
         if (!mysqli_query($conn, $item_sql)) {
