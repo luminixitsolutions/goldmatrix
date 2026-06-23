@@ -149,3 +149,22 @@ if (!function_exists('auragold_drop_branch_database_if_configured')) {
         return ['ok' => false, 'message' => $err];
     }
 }
+
+if (!function_exists('auragold_branch_uses_dedicated_database')) {
+    /**
+     * True when branch has its own MySQL schema (prod); DROP DATABASE removes app data.
+     */
+    function auragold_branch_uses_dedicated_database(?string $dbName): bool {
+        $dbName = trim((string) $dbName);
+        if ($dbName === '' || !function_exists('auragold_branch_mysql_identifier_ok') || !auragold_branch_mysql_identifier_ok($dbName)) {
+            return false;
+        }
+        if (defined('AURAGOLD_REGISTRY_DB') && strcasecmp($dbName, (string) AURAGOLD_REGISTRY_DB) === 0) {
+            return false;
+        }
+        if (defined('DB_NAME') && strcasecmp($dbName, (string) DB_NAME) === 0) {
+            return false;
+        }
+        return true;
+    }
+}

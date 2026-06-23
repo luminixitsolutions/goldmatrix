@@ -151,8 +151,12 @@ if (!function_exists('auragold_branch_delete_sub_branch_core')) {
             unset($_SESSION['branch_id']);
         }
 
+        $dbNameRaw = isset($target['db_name']) ? (string) $target['db_name'] : '';
+        $usesDedicatedDb = function_exists('auragold_branch_uses_dedicated_database')
+            && auragold_branch_uses_dedicated_database($dbNameRaw);
+
         $appReport = ['tables' => [], 'errors' => []];
-        if (!empty($conn) && $conn instanceof mysqli) {
+        if (!$usesDedicatedDb && !empty($conn) && $conn instanceof mysqli) {
             mysqli_begin_transaction($conn);
             $appReport = auragold_branch_delete_all_app_rows_for_branch($conn, $branchId);
             if (!empty($appReport['errors'])) {
@@ -173,7 +177,15 @@ if (!function_exists('auragold_branch_delete_sub_branch_core')) {
         if (!function_exists('auragold_drop_branch_database_if_configured')) {
             require_once __DIR__ . '/branch_db_auto_credentials.php';
         }
-        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, isset($target['db_name']) ? (string) $target['db_name'] : null);
+        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, $dbNameRaw !== '' ? $dbNameRaw : null);
+        if ($usesDedicatedDb && is_array($dbDrop) && empty($dbDrop['ok'])) {
+            return [
+                'ok'      => false,
+                'message' => 'Could not drop branch database: ' . ($dbDrop['message'] ?? 'unknown error'),
+                'appReport' => $appReport,
+                'db_drop'   => $dbDrop,
+            ];
+        }
 
         $delOk = mysqli_query(
             $conn_master,
@@ -247,8 +259,12 @@ if (!function_exists('auragold_branch_delete_main_branch_cascade')) {
             unset($_SESSION['branch_id']);
         }
 
+        $mainDbName = (string) ($mainRow['db_name'] ?? '');
+        $mainUsesDedicatedDb = function_exists('auragold_branch_uses_dedicated_database')
+            && auragold_branch_uses_dedicated_database($mainDbName);
+
         $appReport = ['tables' => [], 'errors' => []];
-        if (!empty($conn) && $conn instanceof mysqli) {
+        if (!$mainUsesDedicatedDb && !empty($conn) && $conn instanceof mysqli) {
             mysqli_begin_transaction($conn);
             $appReport = auragold_branch_delete_all_app_rows_for_branch($conn, $mainId);
             if (!empty($appReport['errors'])) {
@@ -270,7 +286,15 @@ if (!function_exists('auragold_branch_delete_main_branch_cascade')) {
         if (!function_exists('auragold_drop_branch_database_if_configured')) {
             require_once __DIR__ . '/branch_db_auto_credentials.php';
         }
-        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, (string) ($mainRow['db_name'] ?? ''));
+        $dbDrop = auragold_drop_branch_database_if_configured($conn_master, $mainDbName);
+        if ($mainUsesDedicatedDb && is_array($dbDrop) && empty($dbDrop['ok'])) {
+            return [
+                'ok'      => false,
+                'message' => 'Could not drop main branch database: ' . ($dbDrop['message'] ?? 'unknown error'),
+                'subs'    => $subsReport,
+                'db_drop' => $dbDrop,
+            ];
+        }
 
         $delOk = mysqli_query(
             $conn_master,

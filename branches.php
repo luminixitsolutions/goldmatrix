@@ -715,7 +715,24 @@ if (!is_array($branch_add_countries)) {
                     body: body,
                     credentials: 'same-origin'
                 })
-                    .then(function (r) { return r.json(); })
+                    .then(function (r) {
+                        return r.text().then(function (text) {
+                            var d = null;
+                            try {
+                                d = text ? JSON.parse(text) : null;
+                            } catch (parseErr) {
+                                var snippet = (text && text.trim()) ? text.trim().substring(0, 220) : '';
+                                var err = new Error(snippet || ('HTTP ' + r.status));
+                                err.httpStatus = r.status;
+                                throw err;
+                            }
+                            if (!r.ok && (!d || d.ok !== true)) {
+                                var msg = (d && d.message) ? d.message : ('Request failed (HTTP ' + r.status + ')');
+                                throw new Error(msg);
+                            }
+                            return d;
+                        });
+                    })
                     .then(function (d) {
                         if (d && d.ok) {
                             if (d.warning) {
@@ -730,10 +747,14 @@ if (!is_array($branch_add_countries)) {
                         btn.disabled = false;
                         alert((d && d.message) ? d.message : 'Could not delete branch');
                     })
-                    .catch(function () {
+                    .catch(function (err) {
                         setBranchDeleteLoading(false);
                         btn.disabled = false;
-                        alert('Network error');
+                        var msg = (err && err.message) ? String(err.message) : 'Network error';
+                        if (/timed?\s*out|504|502|gateway/i.test(msg)) {
+                            msg = 'Delete timed out on the server. The branch may still be deleting — refresh the page in a minute and check before trying again.';
+                        }
+                        alert(msg);
                     });
             });
         });
