@@ -340,6 +340,10 @@ foreach ($dashboard_metals as $mq_key => $mq_dm) {
     $dash_marquee_blocks[] = '<span class="dash-mq-section"><span class="dash-mq-metal">' . $dash_mq_h($__sec_lab) . '</span>' . $dash_mq_join_pairs($__pairs_x) . '</span>';
 }
 $dash_marquee_html = implode('<span class="dash-mq-pipe" aria-hidden="true">|</span>', $dash_marquee_blocks);
+
+/** Dashboard has no DataTables tables — skip heavy CDN table libraries on this page. */
+$AURAGOLD_USE_DATATABLES = false;
+$AURAGOLD_USE_DATATABLE_BUTTONS = false;
 ?>
 <!DOCTYPE html>
 <html lang="en" class="default-style">
@@ -1535,7 +1539,7 @@ $dash_metal_icons = [
 </div>
 
 <?php include 'footer-script.php'; ?>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <script>
 window.AURAGOLD_DASH_CURRENCY = <?= json_encode($dash_currency_payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.AURAGOLD_DASH_BASE_LABEL = <?= json_encode($base_currency_label, JSON_UNESCAPED_UNICODE) ?>;

@@ -8,6 +8,13 @@
 if (!defined('AURAGOLD_DASHBOARD_SHELL')) {
     define('AURAGOLD_DASHBOARD_SHELL', true);
 }
+/** Dashboard shell pages do not use DataTables — skip heavy table CDN bundles. */
+if (!isset($AURAGOLD_USE_DATATABLES)) {
+    $AURAGOLD_USE_DATATABLES = false;
+}
+if (!isset($AURAGOLD_USE_DATATABLE_BUTTONS)) {
+    $AURAGOLD_USE_DATATABLE_BUTTONS = false;
+}
 if (!isset($DASHBOARD_PAGE_TITLE) || trim((string) $DASHBOARD_PAGE_TITLE) === '') {
     $DASHBOARD_PAGE_TITLE = 'Dashboard';
 }

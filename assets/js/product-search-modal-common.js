@@ -23,6 +23,8 @@ function openProductSearchModal(row) {
         // Keep metal = current tab (Diamond & Stones). Products like Gold Bar have Jewellery on their Diamond & Stones characteristic, not on Gold metal.
     }
     window.productSearchMetalId = metalIdForSearch;
+
+    var searchModalZ = document.body.classList.contains('product-row-detail-modal-open') ? 10900 : 10700;
     
     // Create modal HTML
     const modalHtml = `
@@ -33,7 +35,7 @@ function openProductSearchModal(row) {
             right: 0;
             bottom: 0;
             background: rgba(0,0,0,0.5);
-            z-index: 10700;
+            z-index: ${searchModalZ};
             display: flex;
             align-items: center;
             justify-content: center;
@@ -670,6 +672,9 @@ function populateRowWithProduct(row, product, opts) {
     }
     if (typeof window.auragoldApplyJournalImagesToModalRowPhoto === 'function') {
         window.auragoldApplyJournalImagesToModalRowPhoto(row, product);
+    }
+    if (typeof window.refreshProductRowDetailFormIfOpen === 'function') {
+        window.refreshProductRowDetailFormIfOpen(row);
     }
 }
 

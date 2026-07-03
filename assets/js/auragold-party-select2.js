@@ -72,9 +72,7 @@
             if (window.AURAGOLD_PARTY_SELECT2 && typeof window.AURAGOLD_PARTY_SELECT2.onClear === 'function') {
                 window.AURAGOLD_PARTY_SELECT2.onClear();
             }
-            if (typeof loadCustomerBalance === 'function') {
-                loadCustomerBalance();
-            }
+            scheduleLoadCustomerBalance();
             return;
         }
 
@@ -94,9 +92,7 @@
             window.AURAGOLD_PARTY_SELECT2.onPick(cid, partyName, meta || {});
         }
 
-        if (typeof loadCustomerBalance === 'function') {
-            loadCustomerBalance();
-        }
+        scheduleLoadCustomerBalance();
 
         setTimeout(function () {
             if (typeof window.auragoldSaleInvoiceRefreshGstForAllRows === 'function') {
@@ -265,13 +261,91 @@
         }
     }
 
-    function getAuragoldPartySearchTerm() {
-        var c = cfg();
-        var openField = document.querySelector('.' + c.wrapClass + ' .select2-container--open .select2-search__field');
-        if (openField) {
-            return String(openField.value || '').trim();
+    function partySelectElement() {
+        var el = document.querySelector(cfg().partyId);
+        return (el && el.tagName === 'SELECT') ? el : null;
+    }
+
+    function partySelect2Instance() {
+        var el = partySelectElement();
+        if (!el || typeof jQuery === 'undefined' || !jQuery(el).hasClass('select2-hidden-accessible')) {
+            return null;
         }
-        return '';
+        var inst = jQuery(el).data('select2');
+        return (inst && typeof inst.isOpen === 'function' && inst.isOpen()) ? inst : null;
+    }
+
+    /** Open Select2 container for the configured party select. */
+    function partySelect2OpenContainer() {
+        var inst = partySelect2Instance();
+        return (inst && inst.$container && inst.$container.length) ? inst.$container[0] : null;
+    }
+
+    function isPartySelect2SearchField(fieldEl) {
+        var inst = partySelect2Instance();
+        if (!inst || !fieldEl || !inst.$dropdown || !inst.$dropdown.length) return false;
+        return jQuery.contains(inst.$dropdown[0], fieldEl);
+    }
+
+    function partySelectHasSelectableHighlight() {
+        var inst = partySelect2Instance();
+        if (!inst || !inst.$results || !inst.$results.length) return false;
+        var hl = inst.$results.find('.select2-results__option--highlighted').first();
+        if (!hl.length) return false;
+        if (hl.hasClass('select2-results__message')) return false;
+        if (hl.attr('aria-disabled') === 'true') return false;
+        return true;
+    }
+
+    function getAuragoldPartySearchTerm() {
+        var inst = partySelect2Instance();
+        if (!inst || !inst.$dropdown || !inst.$dropdown.length) return '';
+        var $field = inst.$dropdown.find('.select2-search__field');
+        return $field.length ? String($field.val() || '').trim() : '';
+    }
+
+    function openNewPartyModalWithName(term) {
+        term = String(term || '').trim();
+        if (!term || !document.getElementById('customerCreationModal')) return;
+        var $s = $partySel();
+        if ($s && $s.hasClass('select2-hidden-accessible')) {
+            $s.select2('close');
+        }
+        if (typeof window.openCustomerModalForAdd === 'function') {
+            window.openCustomerModalForAdd();
+        } else if (typeof initNewLedgerModalDefaults === 'function') {
+            initNewLedgerModalDefaults();
+            jQuery('#customerCreationModal').modal('show');
+        } else {
+            jQuery('#customerCreationModal').modal('show');
+        }
+        setTimeout(function () {
+            var ledgerNameField = jQuery('#ledgerName');
+            if (ledgerNameField.length) {
+                ledgerNameField.val(term);
+                if (typeof handleNameInput === 'function') {
+                    handleNameInput(ledgerNameField[0]);
+                }
+                ledgerNameField.focus();
+            }
+        }, 300);
+    }
+
+    function scheduleLoadCustomerBalance() {
+        function attempt(retry) {
+            if (typeof window.loadCustomerBalance === 'function') {
+                window.loadCustomerBalance();
+                return;
+            }
+            if (window.PrevBalanceUI && typeof window.PrevBalanceUI.loadImmediate === 'function') {
+                window.PrevBalanceUI.loadImmediate(window.PB_PAGE_CONFIG || {});
+                return;
+            }
+            if (retry < 30) {
+                setTimeout(function () { attempt(retry + 1); }, 50);
+            }
+        }
+        setTimeout(function () { attempt(0); }, 0);
     }
 
     function preloadFromHiddenFields() {
@@ -285,34 +359,57 @@
         }
     }
 
-    function bindEnterOpensCustomerModal() {
-        var c = cfg();
-        jQuery(document).off('keydown.auragoldPartyEnter').on('keydown.auragoldPartyEnter', '.' + c.wrapClass + ' .select2-search__field', function (e) {
+    function bindLegacyCustomerNameTextEnter() {
+        jQuery(document).off('keydown.auragoldPartyTextEnter').on('keydown.auragoldPartyTextEnter', '#customerName', function (e) {
             if (e.key !== 'Enter') return;
-            var term = getAuragoldPartySearchTerm();
-            var el = document.querySelector(c.partyId);
-            var pid = el ? String(el.value || '').trim() : '';
+            var input = this;
+            if (!input || input.tagName !== 'INPUT' || input.type === 'hidden' || input.readOnly || input.disabled) {
+                return;
+            }
+            var c = cfg();
+            var partyEl = document.querySelector(c.partyId);
+            if (partyEl && partyEl.tagName === 'SELECT' && hasSelect2() && jQuery(partyEl).hasClass('select2-hidden-accessible')) {
+                return;
+            }
+            var term = String(input.value || '').trim();
+            var cidEl = document.querySelector('#customerId');
+            var pid = cidEl ? String(cidEl.value || '').trim() : '';
             if (pid || !term) return;
+            var suggestions = document.getElementById('customerSuggestions');
+            if (suggestions && suggestions.style.display !== 'none') {
+                var focused = suggestions.querySelector('.customer-suggestion-item.focused');
+                if (focused) return;
+                if (suggestions.querySelectorAll('.customer-suggestion-item').length > 0) {
+                    return;
+                }
+            }
             if (!document.getElementById('customerCreationModal')) return;
             e.preventDefault();
-            var $s = $partySel();
-            if ($s && $s.hasClass('select2-hidden-accessible')) {
-                $s.select2('close');
+            e.stopPropagation();
+            if (suggestions) {
+                suggestions.style.display = 'none';
             }
-            if (typeof initNewLedgerModalDefaults === 'function') {
-                initNewLedgerModalDefaults();
+            openNewPartyModalWithName(term);
+        });
+    }
+
+    function bindEnterOpensCustomerModal() {
+        jQuery(document).off('keydown.auragoldPartyEnter').on('keydown.auragoldPartyEnter', '.select2-container--open .select2-search__field', function (e) {
+            if (e.key !== 'Enter') return;
+            if (!isPartySelect2SearchField(this)) return;
+            var term = String(this.value || '').trim() || getAuragoldPartySearchTerm();
+            var el = partySelectElement();
+            var pid = el ? String(el.value || '').trim() : '';
+            if (pid || !term) return;
+            if (partySelectHasSelectableHighlight()) return;
+            if (!document.getElementById('customerCreationModal')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (window.AURAGOLD_PARTY_SELECT2 && typeof window.AURAGOLD_PARTY_SELECT2.onEnterNewParty === 'function') {
+                window.AURAGOLD_PARTY_SELECT2.onEnterNewParty(term);
+                return;
             }
-            jQuery('#customerCreationModal').modal('show');
-            setTimeout(function () {
-                var ledgerNameField = jQuery('#ledgerName');
-                if (ledgerNameField.length) {
-                    ledgerNameField.val(term);
-                    if (typeof handleNameInput === 'function') {
-                        handleNameInput(ledgerNameField[0]);
-                    }
-                    ledgerNameField.focus();
-                }
-            }, 300);
+            openNewPartyModalWithName(term);
         });
     }
 
@@ -320,6 +417,7 @@
     window.destroyAuragoldPartySelect2 = destroyAuragoldPartySelect2;
     window.setAuragoldPartyValue = setAuragoldPartyValue;
     window.getAuragoldPartySearchTerm = getAuragoldPartySearchTerm;
+    window.openNewPartyModalWithName = openNewPartyModalWithName;
     window.setSaleInvoiceCustomerValue = setAuragoldPartyValue;
     window.getSaleInvoiceCustomerSearchTerm = getAuragoldPartySearchTerm;
     window.initSaleInvoiceCustomerSelect2 = initAuragoldPartySelect2;
@@ -334,6 +432,7 @@
             initAuragoldPartySelect2();
             preloadFromHiddenFields();
             bindEnterOpensCustomerModal();
+            bindLegacyCustomerNameTextEnter();
         });
     }
 

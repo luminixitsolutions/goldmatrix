@@ -27,7 +27,8 @@ try {
         throw new RuntimeException('Database unavailable.');
     }
 
-    $result = auragold_jewelry_catalogue_get_for_modal($conn, $designNo, $catalogueId);
+    $siteUrl = isset($SiteUrl) ? (string) $SiteUrl : '';
+    $result = auragold_jewelry_catalogue_get_for_modal($conn, $designNo, $catalogueId, $siteUrl);
     if (!$result) {
         throw new RuntimeException('Catalogue not found for this Design No.');
     }
@@ -40,6 +41,7 @@ try {
         'metal_id' => (int) ($result['metal_id'] ?? 0),
         'weight' => (string) ($result['weight'] ?? ''),
         'amount' => (string) ($result['amount'] ?? ''),
+        'group_image' => (string) ($result['group_image'] ?? ''),
     ];
 
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);

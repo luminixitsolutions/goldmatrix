@@ -41,6 +41,50 @@
         }
     }
 
+    function jwoDeptUserSelect2Instance() {
+        var el = document.getElementById('jwoDepartmentUser');
+        if (!el || el.tagName !== 'SELECT' || !hasSelect2()) return null;
+        var inst = jQuery(el).data('select2');
+        return (inst && typeof inst.isOpen === 'function' && inst.isOpen()) ? inst : null;
+    }
+
+    function jwoDeptUserHasSelectableHighlight(inst) {
+        if (!inst || !inst.$results || !inst.$results.length) return false;
+        var hl = inst.$results.find('.select2-results__option--highlighted').first();
+        if (!hl.length) return false;
+        if (hl.hasClass('select2-results__message')) return false;
+        if (hl.attr('aria-disabled') === 'true') return false;
+        return true;
+    }
+
+    function isJwoDeptUserSelect2SearchField(fieldEl) {
+        var inst = jwoDeptUserSelect2Instance();
+        if (!inst || !inst.$dropdown || !inst.$dropdown.length || !fieldEl) return false;
+        return jQuery.contains(inst.$dropdown[0], fieldEl);
+    }
+
+    function openJwoLedgerModalWithSearchTerm(term) {
+        term = String(term || '').trim();
+        var el = document.getElementById('jwoDepartmentUser');
+        if (el && hasSelect2() && jQuery(el).hasClass('select2-hidden-accessible')) {
+            jQuery(el).select2('close');
+        }
+        if (term) {
+            window._jwoDeptUserEnterSearchTerm = term;
+        }
+        if (typeof window.openJwoJobWorkerLedgerModalFromUi === 'function') {
+            window.openJwoJobWorkerLedgerModalFromUi();
+            return;
+        }
+        if (typeof window.openJwoJobWorkerLedgerModal === 'function') {
+            window.openJwoJobWorkerLedgerModal(term);
+            return;
+        }
+        if (typeof window.openNewPartyModalWithName === 'function') {
+            window.openNewPartyModalWithName(term);
+        }
+    }
+
     function initJwoDepartmentUserSelect2() {
         if (!window.jwoHasDepartmentUserTables) return;
         var el = document.getElementById('jwoDepartmentUser');
@@ -146,14 +190,61 @@
     }
 
     function getJwoDepartmentUserSearchTerm() {
-        var openField = document.querySelector('.jwo-dept-user-select2-wrap .select2-container--open .select2-search__field');
-        if (openField) {
-            return String(openField.value || '').trim();
+        if (window._jwoDeptUserEnterSearchTerm) {
+            var cached = String(window._jwoDeptUserEnterSearchTerm || '').trim();
+            window._jwoDeptUserEnterSearchTerm = '';
+            if (cached) return cached;
+        }
+        var inst = jwoDeptUserSelect2Instance();
+        if (inst && inst.$dropdown && inst.$dropdown.length) {
+            var $field = inst.$dropdown.find('.select2-search__field');
+            if ($field.length) {
+                return String($field.val() || '').trim();
+            }
         }
         var el = document.getElementById('jwoDepartmentUser');
         if (!el || el.tagName !== 'SELECT') return '';
         var opt = el.options[el.selectedIndex];
         return opt && opt.value ? String(opt.text || '').trim() : '';
+    }
+
+    function bindEnterOpensJwoLedgerModal() {
+        jQuery(document).off('keydown.jwoDeptUserEnter').on('keydown.jwoDeptUserEnter', '.select2-container--open .select2-search__field', function (e) {
+            if (!window.jwoHasDepartmentUserTables) return;
+            if (e.key !== 'Enter') return;
+            if (!isJwoDeptUserSelect2SearchField(this)) return;
+            var term = String(this.value || '').trim();
+            var el = document.getElementById('jwoDepartmentUser');
+            if (!el || el.value) return;
+            if (jwoDeptUserHasSelectableHighlight(jwoDeptUserSelect2Instance())) return;
+            if (!term) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openJwoLedgerModalWithSearchTerm(term);
+        });
+    }
+
+    function bindJwoDepartmentUserSearchTextEnter() {
+        jQuery(document).off('keydown.jwoDeptUserSearchEnter').on('keydown.jwoDeptUserSearchEnter', '#jwoDepartmentUserSearch', function (e) {
+            if (e.key !== 'Enter' || this.readOnly || this.disabled) return;
+            var term = String(this.value || '').trim();
+            var hid = document.getElementById('jwoDepartmentUser');
+            if (hid && String(hid.value || '').trim()) return;
+            var sugs = document.getElementById('jwoDepartmentUserSuggestions');
+            if (sugs && sugs.style.display !== 'none') {
+                if (sugs.querySelector('.customer-suggestion-item.focused, .jwo-dept-user-suggestion.focused')) {
+                    return;
+                }
+                if (sugs.querySelectorAll('.customer-suggestion-item, .jwo-dept-user-suggestion, [data-user-id]').length > 0) {
+                    return;
+                }
+            }
+            if (!term) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (sugs) sugs.style.display = 'none';
+            openJwoLedgerModalWithSearchTerm(term);
+        });
     }
 
     window.initJwoDepartmentUserSelect2 = initJwoDepartmentUserSelect2;
@@ -170,6 +261,8 @@
             if (window.jwoHasDepartmentUserTables) {
                 initJwoDepartmentUserSelect2();
             }
+            bindEnterOpensJwoLedgerModal();
+            bindJwoDepartmentUserSearchTextEnter();
         });
     }
 

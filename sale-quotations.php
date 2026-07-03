@@ -3643,8 +3643,9 @@ window.PB_PAGE_CONFIG = {
     }
 
     /**
-     * Jewellery catalogue → sale quotation: add checked barcodes to product list (modal row + main table).
-     * @param {Array<{barcode:string,current_qty?:number,current_weight?:number,metal_id?:number}>} catalogItems
+     * Jewellery catalogue → sale quotation: add checked items to product list.
+     * Catalogue-only designs load via get-jewelry-catalogue-for-modal.php; stock items use barcode lookup.
+     * @param {Array<{barcode:string,design_no?:string,catalogue_id?:number,is_catalogue_only?:boolean,current_qty?:number,current_weight?:number,metal_id?:number}>} catalogItems
      * @returns {Promise<{added:number,failed:Array}>}
      */
     function loadJewelryCatalogItemsToSaleQuotation(catalogItems) {
@@ -3652,6 +3653,26 @@ window.PB_PAGE_CONFIG = {
         var added = 0;
         var failed = [];
         var idx = 0;
+
+        function catalogItemLabel(catItem) {
+            if (!catItem) return '';
+            return String(catItem.design_no || catItem.barcode || catItem.product_name || 'item').trim();
+        }
+
+        function applyCatalogWeightsToModalData(modalRowData, catItem) {
+            if (!modalRowData || !catItem) return;
+            var qty = parseFloat(catItem.current_qty);
+            var wt = parseFloat(catItem.current_weight);
+            if (isFinite(qty) && qty > 0.00001) {
+                modalRowData.quantity = qty;
+            }
+            if (isFinite(wt) && wt > 0.00001) {
+                modalRowData.gross_wt = wt;
+                modalRowData.net_wt = wt;
+                modalRowData.final_wt = wt;
+                modalRowData.pure_wt = wt;
+            }
+        }
 
         function applyCatalogWeightsToModalRow(row, catItem) {
             if (!row || !catItem) return;
@@ -3672,6 +3693,98 @@ window.PB_PAGE_CONFIG = {
             }
         }
 
+        function addCatalogueModalRowsToSaleQuotation(modalRows, catItem, data) {
+            if (!modalRows || !modalRows.length) {
+                return { ok: false, label: catalogItemLabel(catItem), message: 'Catalogue has no product lines' };
+            }
+            if (typeof addProductToTableFromModalRow !== 'function') {
+                return { ok: false, label: catalogItemLabel(catItem), message: 'Sale quotation product UI not ready' };
+            }
+            var designNo = String((catItem && catItem.design_no) || (data && data.design_no) || '').trim();
+            var mid = (catItem && catItem.metal_id) || (data && data.metal_id) || '';
+            modalRows.forEach(function (modalRowData) {
+                if (designNo && !modalRowData.design_no) {
+                    modalRowData.design_no = designNo;
+                }
+                applyCatalogWeightsToModalData(modalRowData, catItem);
+                addProductToTableFromModalRow(modalRowData, mid);
+            });
+            return { ok: true, label: catalogItemLabel(catItem) };
+        }
+
+        function fetchCatalogueModalRows(catItem) {
+            var designNo = String((catItem && catItem.design_no) || '').trim();
+            var catalogueId = parseInt(catItem && catItem.catalogue_id, 10) || 0;
+            var url = 'ajax/get-jewelry-catalogue-for-modal.php?';
+            if (catalogueId > 0) {
+                url += 'catalogue_id=' + encodeURIComponent(String(catalogueId));
+            } else if (designNo) {
+                url += 'design_no=' + encodeURIComponent(designNo);
+            } else {
+                return Promise.resolve(null);
+            }
+            return fetch(url, {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (r) { return r.json(); });
+        }
+
+        function addCatalogueOnlyItemToSaleQuotation(catItem) {
+            var label = catalogItemLabel(catItem);
+            return fetchCatalogueModalRows(catItem).then(function (data) {
+                if (!data || !data.success || !data.modal_rows || !data.modal_rows.length) {
+                    return {
+                        ok: false,
+                        label: label,
+                        message: (data && data.message) ? data.message : 'Catalogue not found'
+                    };
+                }
+                return addCatalogueModalRowsToSaleQuotation(data.modal_rows, catItem, data);
+            }).catch(function (err) {
+                return {
+                    ok: false,
+                    label: label,
+                    message: (err && err.message) ? err.message : 'Request failed'
+                };
+            });
+        }
+
+        function addStockBarcodeItemToSaleQuotation(catItem, bc) {
+            return fetch('ajax/get-product-by-barcode.php?barcode=' + encodeURIComponent(bc), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data || !data.success || !data.product) {
+                        var designNo = String((catItem && catItem.design_no) || '').trim();
+                        var catalogueId = parseInt(catItem && catItem.catalogue_id, 10) || 0;
+                        if (designNo || catalogueId > 0) {
+                            return addCatalogueOnlyItemToSaleQuotation(catItem);
+                        }
+                        return {
+                            ok: false,
+                            label: bc,
+                            message: (data && data.message) ? data.message : 'Not found'
+                        };
+                    }
+                    if (typeof addProductToProductSelectionTable !== 'function') {
+                        return { ok: false, label: bc, message: 'Sale quotation product UI not ready' };
+                    }
+                    addProductToProductSelectionTable(data.product);
+                    var tbody = document.getElementById('productListBody');
+                    var row = tbody ? tbody.querySelector('.product-row:last-of-type') : null;
+                    if (!row || typeof getModalRowDataFromRow !== 'function' || typeof addProductToTableFromModalRow !== 'function') {
+                        return { ok: false, label: bc, message: 'Could not add product row' };
+                    }
+                    applyCatalogWeightsToModalRow(row, catItem);
+                    var modalRowData = getModalRowDataFromRow(row, true);
+                    var mid = catItem.metal_id || data.product.metal_id || '';
+                    addProductToTableFromModalRow(modalRowData, mid);
+                    return { ok: true, label: bc };
+                });
+        }
+
         function processNext() {
             if (idx >= list.length) {
                 if (typeof updateSummaryPanel === 'function') {
@@ -3681,41 +3794,31 @@ window.PB_PAGE_CONFIG = {
             }
             var catItem = list[idx++];
             var bc = (catItem && catItem.barcode) ? String(catItem.barcode).trim() : '';
-            if (!bc) {
+            var designNo = String((catItem && catItem.design_no) || '').trim();
+            var catalogueId = parseInt(catItem && catItem.catalogue_id, 10) || 0;
+            if (!bc && !designNo && catalogueId <= 0) {
                 return processNext();
             }
-            return fetch('ajax/get-product-by-barcode.php?barcode=' + encodeURIComponent(bc), {
-                credentials: 'same-origin',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (!data || !data.success || !data.product) {
-                        failed.push({ barcode: bc, message: (data && data.message) ? data.message : 'Not found' });
-                        return processNext();
-                    }
-                    if (typeof addProductToProductSelectionTable !== 'function') {
-                        failed.push({ barcode: bc, message: 'Sale quotation product UI not ready' });
-                        return processNext();
-                    }
-                    addProductToProductSelectionTable(data.product);
-                    var tbody = document.getElementById('productListBody');
-                    var row = tbody ? tbody.querySelector('.product-row:last-of-type') : null;
-                    if (!row || typeof getModalRowDataFromRow !== 'function' || typeof addProductToTableFromModalRow !== 'function') {
-                        failed.push({ barcode: bc, message: 'Could not add product row' });
-                        return processNext();
-                    }
-                    applyCatalogWeightsToModalRow(row, catItem);
-                    var modalRowData = getModalRowDataFromRow(row, true);
-                    var mid = catItem.metal_id || data.product.metal_id || '';
-                    addProductToTableFromModalRow(modalRowData, mid);
+
+            var addPromise = (catItem && catItem.is_catalogue_only)
+                ? addCatalogueOnlyItemToSaleQuotation(catItem)
+                : addStockBarcodeItemToSaleQuotation(catItem, bc || designNo);
+
+            return addPromise.then(function (res) {
+                res = res || {};
+                if (res.ok) {
                     added++;
-                    return processNext();
-                })
-                .catch(function (err) {
-                    failed.push({ barcode: bc, message: (err && err.message) ? err.message : 'Request failed' });
-                    return processNext();
+                } else {
+                    failed.push({ barcode: res.label || bc || designNo, message: res.message || 'failed' });
+                }
+                return processNext();
+            }).catch(function (err) {
+                failed.push({
+                    barcode: catalogItemLabel(catItem) || bc || designNo,
+                    message: (err && err.message) ? err.message : 'Request failed'
                 });
+                return processNext();
+            });
         }
 
         return processNext();

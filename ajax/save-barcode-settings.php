@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // Validation helpers
 $label_size_preset = isset($_POST['label_size_preset']) ? trim($_POST['label_size_preset']) : '100x18';
-$valid_presets = ['100x18', '100x80', '100x25', '100x48', '120x50', '82x38_2box', '250x120', '64x25', '81x12', 'zebra-zpl', 'custom'];
+$valid_presets = ['100x18', '82x38_2box'];
 if (!in_array($label_size_preset, $valid_presets)) {
     $label_size_preset = '100x18';
 }

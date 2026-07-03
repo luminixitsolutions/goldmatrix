@@ -231,6 +231,101 @@ if (!function_exists('auragold_main_branch_reset_tbl_users_default_admin')) {
     }
 }
 
+if (!function_exists('auragold_tbl_users_append_branch_id')) {
+    /**
+     * Append a branch id to every tbl_users row (comma-separated user_branch_ids).
+     * Optionally append $branchLabel to branch_labels when that column exists.
+     *
+     * @return int Number of rows updated
+     */
+    function auragold_tbl_users_append_branch_id(mysqli $conn, int $branchId, string $branchLabel = ''): int {
+        $branchId = (int) $branchId;
+        if ($branchId <= 0) {
+            return 0;
+        }
+        if (!function_exists('auragold_tbl_has_column')) {
+            require_once __DIR__ . '/auragold_branch_data_scope.php';
+        }
+        auragold_ensure_user_management_columns($conn);
+        if (!auragold_tbl_has_column($conn, 'tbl_users', 'user_branch_ids')) {
+            return 0;
+        }
+        $hasLabels = auragold_tbl_has_column($conn, 'tbl_users', 'branch_labels');
+        $branchLabel = trim($branchLabel);
+
+        $rs = @mysqli_query($conn, 'SELECT id, user_branch_ids' . ($hasLabels ? ', branch_labels' : '') . ' FROM tbl_users');
+        if (!$rs) {
+            return 0;
+        }
+        $updated = 0;
+        while ($row = mysqli_fetch_assoc($rs)) {
+            $uid = (int) ($row['id'] ?? 0);
+            if ($uid <= 0) {
+                continue;
+            }
+            $ids = auragold_um_parse_branch_ids_string((string) ($row['user_branch_ids'] ?? ''));
+            $already = false;
+            foreach ($ids as $x) {
+                if ((int) $x === $branchId) {
+                    $already = true;
+                    break;
+                }
+            }
+            if ($already) {
+                continue;
+            }
+            $ids[] = $branchId;
+            $newIds = auragold_um_normalize_branch_ids_list($ids);
+            $sets   = ['`user_branch_ids` = ' . ($newIds !== '' ? "'" . mysqli_real_escape_string($conn, $newIds) . "'" : 'NULL')];
+            if ($hasLabels && $branchLabel !== '') {
+                $labels = array_values(array_filter(array_map('trim', explode(',', (string) ($row['branch_labels'] ?? ''))), static function ($s) {
+                    return $s !== '';
+                }));
+                $labels[] = $branchLabel;
+                $newLabels = implode(',', $labels);
+                $sets[]    = '`branch_labels` = ' . ($newLabels !== '' ? "'" . mysqli_real_escape_string($conn, $newLabels) . "'" : 'NULL');
+            }
+            if (@mysqli_query($conn, 'UPDATE tbl_users SET ' . implode(', ', $sets) . ' WHERE id = ' . $uid . ' LIMIT 1')) {
+                $updated++;
+            }
+        }
+        mysqli_free_result($rs);
+        return $updated;
+    }
+}
+
+if (!function_exists('auragold_new_sub_branch_append_branch_id_to_tbl_users')) {
+    /**
+     * After creating a sub-branch DB: append the new registry branch id to user_branch_ids on every tbl_users row.
+     */
+    function auragold_new_sub_branch_append_branch_id_to_tbl_users(
+        int $newBranchId,
+        string $dbName,
+        string $dbUser,
+        string $dbPass,
+        string $branchLabel = ''
+    ): int {
+        $newBranchId = (int) $newBranchId;
+        $dbName      = trim($dbName);
+        if ($newBranchId <= 0 || $dbName === '') {
+            return 0;
+        }
+        if (!function_exists('auragold_mysqli_connect_branch_or_registry')) {
+            require_once __DIR__ . '/branch_create_db_after_save.php';
+        }
+        $host = defined('DB_HOST') ? (string) DB_HOST : 'localhost';
+        $sub  = auragold_mysqli_connect_branch_or_registry($host, $dbName, $dbUser, $dbPass);
+        if (!$sub) {
+            error_log('AuraGold sub-branch tbl_users append: could not connect to `' . $dbName . '`: ' . mysqli_connect_error());
+            return 0;
+        }
+        mysqli_set_charset($sub, 'utf8mb4');
+        $updated = auragold_tbl_users_append_branch_id($sub, $newBranchId, $branchLabel);
+        mysqli_close($sub);
+        return $updated;
+    }
+}
+
 if (!function_exists('auragold_family_sync_default_admin_branch_assignments')) {
     /**
      * Update user_branch_ids + branch_labels for Username admin on every dedicated DB in the family.

@@ -690,16 +690,24 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
         background: #11294b;
         color: #fff;
     }
-    /* Create Scheme modal */
+    /* Create Scheme modal — keep header + Save visible (tall content was clipping top bar) */
+    #createSchemeModal {
+        padding-top: 56px;
+        padding-bottom: 12px;
+    }
     #createSchemeModal .modal-dialog {
         max-width: 96%;
         width: 96%;
-        margin: 1rem auto;
+        margin: 0.75rem auto;
+        max-height: calc(100vh - 72px);
     }
     #createSchemeModal .modal-content {
         border-radius: 10px;
         border: 1px solid #e2e8f0;
         overflow: hidden;
+        max-height: calc(100vh - 72px);
+        display: flex;
+        flex-direction: column;
     }
     #createSchemeModal .cs-modal-header {
         background: #11294b;
@@ -710,6 +718,23 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
         justify-content: space-between;
         flex-wrap: wrap;
         gap: 8px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+    #createSchemeModal .modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+    #createSchemeModal .cs-scheme-form-actions {
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+        border-top: 1px solid #e2e8f0;
+    }
+    #createSchemeModal .cs-scheme-form-actions .btn-cs-navy {
+        min-width: 110px;
     }
     #createSchemeModal .cs-modal-header h5 {
         margin: 0;
@@ -2394,7 +2419,7 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
 
 <!-- Create Scheme (investment / layaway schemes master) -->
 <div class="modal fade" id="createSchemeModal" tabindex="-1" role="dialog" aria-labelledby="createSchemeModalLabel" aria-hidden="true" data-backdrop="static">
-    <div class="modal-dialog modal-xl" role="document">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <div class="cs-modal-header">
                 <h5 id="createSchemeModalLabel">Create Scheme</h5>
@@ -2410,7 +2435,7 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                     <button type="button" class="btn btn-sm btn-light" data-dismiss="modal" aria-label="Close" style="font-weight: 700;">&times;</button>
                 </div>
             </div>
-            <div class="modal-body" style="padding: 18px 20px; max-height: calc(100vh - 120px); overflow-y: auto;">
+            <div class="modal-body" style="padding: 18px 20px;">
                 <div class="row">
                     <div class="col-lg-5 border-right-lg pr-lg-3 mb-3 mb-lg-0" style="border-color: #e2e8f0;">
                         <div class="cs-scheme-details-card">
@@ -2476,6 +2501,11 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                                             <label class="custom-control-label mb-0" for="csActive">Active</label>
                                         </div>
                                     </div>
+                                </div>
+                                <div class="cs-scheme-form-actions d-flex flex-wrap align-items-center" style="gap: 8px;">
+                                    <button type="button" class="btn btn-sm btn-cs-navy" id="csBtnSaveBottom">Save Scheme</button>
+                                    <button type="button" class="btn btn-sm btn-cs-new" id="csBtnNewBottom">New Scheme</button>
+                                    <small class="text-muted ml-1">Or use <strong>Save</strong> in the dark bar at the top of this window.</small>
                                 </div>
                             </form>
                         </div>
@@ -6132,6 +6162,19 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
         var from = total === 0 ? 0 : start + 1;
         var to = total === 0 ? 0 : Math.min(start + slice.length, total);
         if (info) info.textContent = 'Showing ' + from + ' to ' + to + ' of ' + total + ' entries';
+    }
+
+    var csBtnSaveBottomEl = document.getElementById('csBtnSaveBottom');
+    if (csBtnSaveBottomEl) {
+        csBtnSaveBottomEl.addEventListener('click', function () {
+            document.getElementById('csBtnSave').click();
+        });
+    }
+    var csBtnNewBottomEl = document.getElementById('csBtnNewBottom');
+    if (csBtnNewBottomEl) {
+        csBtnNewBottomEl.addEventListener('click', function () {
+            document.getElementById('csBtnNew').click();
+        });
     }
 
     document.getElementById('csBtnNew').addEventListener('click', function () {

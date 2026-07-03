@@ -85,11 +85,11 @@ if ($auragold_working_branch_id > 0 && !empty($conn_master)) {
     }
 }
 
-// Sub-branch: if no master rows yet for this branch, copy Metal / GST / Currency / Location / Unit from main (same DB, branch_id scoping).
+// Sub-branch: if no location master rows yet for this branch, copy GST / Currency / Location / Unit from main (same DB).
 if (!empty($conn) && $conn instanceof mysqli && $auragold_sub_branch_mode && $auragold_main_branch_id_for_catalog > 0 && $auragold_working_branch_id > 0
     && function_exists('auragold_seed_subbranch_masters_from_main')) {
-    $msc = @getRecord('SELECT COUNT(*) AS c FROM tbl_metal WHERE branch_id = ' . (int) $auragold_working_branch_id);
-    if (!$msc || (int) ($msc['c'] ?? 0) === 0) {
+    $locChk = @getRecord('SELECT COUNT(*) AS c FROM tbl_location WHERE branch_id = ' . (int) $auragold_working_branch_id);
+    if (!$locChk || (int) ($locChk['c'] ?? 0) === 0) {
         auragold_seed_subbranch_masters_from_main($conn, $auragold_main_branch_id_for_catalog, $auragold_working_branch_id);
     }
 }

@@ -55,7 +55,7 @@ $bs = $barcode_settings ?: [
 ];
 $bs_metal = $bs_load_metal !== '' ? $bs_load_metal : (isset($bs['metal_type']) ? trim((string) $bs['metal_type']) : '');
 /** Presets shown in Label Size dropdown — keep in sync with ajax/save-barcode-settings.php $valid_presets */
-$bs_label_preset_ui = ['100x18', '100x25', '100x48', '100x80', '64x25', '81x12', '120x50', '82x38_2box', '250x120', 'custom'];
+$bs_label_preset_ui = ['100x18', '82x38_2box'];
 /** When no DB row exists yet, honor ?barcode_label_size= so the dropdown matches the URL (e.g. 250x120, 120x50). */
 if (!$barcode_settings && $bs_load_label !== '') {
     $bs_hint_storage = auragold_barcode_label_storage_preset($bs_load_label);
@@ -97,6 +97,12 @@ if ($bs_load_label !== '' && in_array($bs_load_label, $bs_label_preset_ui, true)
     $bs['label_height_mm'] = $bs_url_h;
 } else {
     $bs_load_label_storage = $bs_label_storage_preset;
+}
+if (!in_array($bs_label_preset_for_select, $bs_label_preset_ui, true)) {
+    $bs_label_preset_for_select = '100x18';
+    $bs_load_label_storage = '100x18';
+    $bs['label_size_preset'] = '100x18';
+    [$bs['label_width_mm'], $bs['label_height_mm']] = auragold_barcode_label_mm_from_storage_preset('100x18');
 }
 $bs_design_layout = isset($bs['design_layout']) && $bs['design_layout'] !== '' && $bs['design_layout'] !== null ? $bs['design_layout'] : '';
 $bs_design_layout_decoded = $bs_design_layout ? @json_decode($bs_design_layout, true) : [];
@@ -708,16 +714,23 @@ html, body {
     box-sizing: border-box;
     overflow: hidden;
 }
-/* Allow purple resize handle to extend outside clip on all non-82×38 label sizes */
+/* Allow resize handle inside canvas; clip barcode so it cannot block drops below the label */
 .barcode-canvas:not(.barcode-82x38-dual-layout) .barcode-label-canvas {
-    overflow: visible;
+    overflow: hidden;
 }
 .barcode-canvas:not(.barcode-82x38-dual-layout) .barcode-default-white {
-    overflow: visible;
+    overflow: hidden;
 }
 .barcode-canvas:not(.barcode-82x38-dual-layout) #barcode1,
 .barcode-canvas:not(.barcode-82x38-dual-layout) #barcode2 {
     z-index: 50;
+    max-height: 100%;
+}
+.barcode-label-canvas.is-toolbox-dragging .barcode-print-wrap {
+    pointer-events: none;
+}
+body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
+    pointer-events: auto;
 }
 /* Visual guide: clipped to canvas; does not extend past barcode label box */
 .barcode-label-center-guide {
@@ -1135,6 +1148,41 @@ html, body {
     outline: 2px solid #5a3b8c;
     outline-offset: 1px;
 }
+/* QR mode: hide placeholder SVG so QR fills the draggable wrap (not pushed below outline) */
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode > svg,
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode > svg.barcode-svg-box1,
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode > svg.barcode-svg-box2 {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    max-width: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode {
+    overflow: hidden !important;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode .qr-code-preview {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 2;
+    box-sizing: border-box;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-inner-draggable.qr-graphic-mode .qr-preview-canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain;
+}
 .barcode-canvas.barcode-82x38-dual-layout .barcode-print-wrap svg,
 .barcode-canvas.barcode-82x38-dual-layout svg.barcode-svg-box1,
 .barcode-canvas.barcode-82x38-dual-layout svg.barcode-svg-box2 {
@@ -1222,14 +1270,35 @@ html, body {
     margin: 0;
     padding: 0;
     cursor: move;
-    min-height: 20px;
+    min-height: 0;
+    height: auto;
     display: block;
     box-sizing: border-box;
-    overflow: visible !important;
+    overflow: hidden;
     z-index: 5;
 }
-.barcode-print-wrap.barcode-selected {
-    z-index: 50;
+.barcode-canvas:not(.barcode-82x38-dual-layout) .barcode-print-wrap {
+    max-height: 100%;
+}
+.barcode-print-wrap.qr-graphic-mode .barcode-stripes,
+.barcode-print-wrap.qr-graphic-mode > svg.barcode-svg,
+.barcode-print-wrap.qr-graphic-mode > svg.barcode-svg-box1,
+.barcode-print-wrap.qr-graphic-mode > svg.barcode-svg-box2 {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+.barcode-print-wrap:not(.qr-graphic-mode) .qr-code-preview {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
 }
 .barcode-print-wrap .barcode-stripes {
     display: block;
@@ -1240,11 +1309,16 @@ html, body {
     overflow: hidden;
 }
 .barcode-print-wrap.barcode-selected {
+    outline: none;
+    box-shadow: none;
+}
+.barcode-print-wrap.barcode-selected .barcode-stripes,
+.barcode-print-wrap.barcode-selected .qr-code-preview {
     outline: 2px solid #5a3b8c;
     outline-offset: 1px;
 }
 .barcode-resize-handle {
-    display: block !important;
+    display: none !important;
     position: absolute !important;
     right: -5px !important;
     bottom: -5px;
@@ -1259,15 +1333,14 @@ html, body {
     box-sizing: border-box;
     box-shadow: 0 0 0 1px rgba(107, 70, 193, 0.35);
 }
+.barcode-print-wrap.barcode-selected .barcode-resize-handle {
+    display: block !important;
+}
 .barcode-resize-handle:hover {
     background: #5a3b8c !important;
 }
 .barcode-resize-handle.barcode-resize-handle--82x38 {
     cursor: se-resize !important;
-}
-.barcode-print-wrap:hover {
-    outline: 1px dashed rgba(90, 59, 140, 0.5);
-    outline-offset: 1px;
 }
 .barcode-text {
     margin-top: 2px;
@@ -1426,6 +1499,18 @@ html, body {
 .qr-code-preview svg {
     width: 50px;
     height: 50px;
+}
+
+.barcode-inner-draggable .qr-code-preview {
+    box-sizing: border-box;
+    overflow: hidden;
+    margin: 0;
+}
+
+.barcode-inner-draggable .qr-preview-canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
 }
 
 .barcode-qr-toggle {
@@ -1876,15 +1961,7 @@ html, body {
                         <label>Label Size</label>
                         <select id="barcodeLabelSize" data-saved-preset="<?php echo htmlspecialchars($bs_label_preset_for_select, ENT_QUOTES, 'UTF-8'); ?>">
                             <option value="100x18" <?php echo $bs_label_preset_for_select === '100x18' ? 'selected' : ''; ?>>100mm x 18mm</option>
-                            <option value="100x25" <?php echo $bs_label_preset_for_select === '100x25' ? 'selected' : ''; ?>>100mm x 25mm</option>
-                            <option value="100x48" <?php echo $bs_label_preset_for_select === '100x48' ? 'selected' : ''; ?>>100mm x 48mm</option>
-                            <option value="100x80" <?php echo $bs_label_preset_for_select === '100x80' ? 'selected' : ''; ?>>100mm x 80mm</option>
-                            <option value="64x25" <?php echo $bs_label_preset_for_select === '64x25' ? 'selected' : ''; ?>>64mm x 25mm</option>
-                            <option value="81x12" <?php echo $bs_label_preset_for_select === '81x12' ? 'selected' : ''; ?>>81mm x 12mm</option>
-                            <option value="120x50" <?php echo $bs_label_preset_for_select === '120x50' ? 'selected' : ''; ?>>120mm x 50mm</option>
                             <option value="82x38_2box" <?php echo $bs_label_preset_for_select === '82x38_2box' ? 'selected' : ''; ?>>82mm x 38mm - 2 Box</option>
-                            <option value="250x120" <?php echo $bs_label_preset_for_select === '250x120' ? 'selected' : ''; ?>>250mm x 120mm</option>
-                            <option value="custom" <?php echo $bs_label_preset_for_select === 'custom' ? 'selected' : ''; ?>>Custom</option>
                         </select>
                     </div>
                     <div class="barcode-control-group barcode-check-wrap">
@@ -2117,6 +2194,46 @@ html, body {
                             <input type="number" value="10" min="6" max="72" id="propFontSize">
                         </div>
                     </div>
+                    <div class="prop-row prop-row-barcode-size" id="propRowBarcodeSize">
+                        <label>Barcode size</label>
+                        <div class="barcode-size-buttons">
+                            <button type="button" class="btn-size" id="btnBarcodeDecrease" title="Smaller: stripe area, bar height, and line thickness" aria-label="Decrease barcode size">&#8722;</button>
+                            <button type="button" class="btn-size" id="btnBarcodeIncrease" title="Larger: stripe area, bar height, and line thickness" aria-label="Increase barcode size">+</button>
+                            <button type="button" class="btn-size" id="btnBarcodeCenter" title="Center barcode on label" aria-label="Center barcode">&#9675;</button>
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-barcode-bar" id="propRowBarcodeBar">
+                        <div class="prop-field">
+                            <label>Line thickness (px)</label>
+                            <input type="number" value="<?php echo (int)($bs['barcode_bar_width'] ?? 2); ?>" min="1" max="10" id="propBarcodeBarWidth" title="Thickness of each black bar (1 = thinnest lines)">
+                        </div>
+                        <div class="prop-field">
+                            <label>Bar height (px)</label>
+                            <input type="number" value="<?php echo (int)($bs['barcode_bar_height'] ?? 28); ?>" min="8" max="200" id="propBarcodeBarHeight" title="Height of barcode lines">
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-barcode-display" id="propRowBarcodeDisplay">
+                        <div class="prop-field">
+                            <label>Barcode width (px)</label>
+                            <input type="number" value="0" min="0" max="500" id="propBarcodeDisplayWidth" title="Overall barcode width on label. 0 = auto. Drag the purple handle on the barcode to resize.">
+                        </div>
+                        <div class="prop-field">
+                            <label>&nbsp;</label>
+                            <small class="prop-hint" style="display:block;margin-top:6px;color:#64748b;">Click barcode lines on label, then drag the purple corner handle or use −/+.</small>
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-qr-size" id="propRowQrSize" style="display: none;">
+                        <div class="prop-field">
+                            <label>QR width (px)</label>
+                            <input type="number" value="<?php echo (int)($bs['qr_width'] ?? 60); ?>" min="30" max="200" id="propQrWidth" title="QR code width (30–200)">
+                        </div>
+                        <div class="prop-field">
+                            <label>QR height (px)</label>
+                            <input type="number" value="<?php echo (int)($bs['qr_height'] ?? 60); ?>" min="30" max="200" id="propQrHeight" title="QR code height (30–200)">
+                        </div>
+                    </div>
+                    <small class="prop-hint prop-hint-barcode" id="propHintBarcode" style="margin-top: 2px;">Line thickness = each black bar width. Bar height = stripe height. Drag the purple corner handle to change width and height.</small>
+                    <small class="prop-hint prop-hint-qr" id="propHintQr" style="margin-top: 2px; display: none;">QR width/height = size of QR code. Click QR on label, then drag the purple corner handle or edit the values above.</small>
                     <div class="prop-row prop-row-cols">
                         <div class="prop-field">
                             <label>Label · Padding Top (px)</label>
@@ -2197,44 +2314,44 @@ html, body {
                                 <input type="hidden" value="25" id="propBoxHeightMm">
                             </div>
                         </div>
-                        <div class="prop-row prop-row-cols">
+                        <div class="prop-row prop-row-cols prop-82x38-barcode-wh">
                             <div class="prop-field">
-                                <label>Box 1 Barcode Width (mm)</label>
+                                <label data-82x38-label-barcode="Box 1 Barcode Width" data-82x38-label-suffix=" (mm)">Box 1 Barcode Width (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box1_barcode_width_mm'] ?? $bs_82x38_layout['barcode_width_mm'] ?? 18); ?>" min="4" max="40" step="0.1" id="propBox1BarcodeWidthMm">
                             </div>
                             <div class="prop-field">
-                                <label>Box 1 Barcode Height (mm)</label>
+                                <label data-82x38-label-barcode="Box 1 Barcode Height" data-82x38-label-suffix=" (mm)">Box 1 Barcode Height (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box1_barcode_height_mm'] ?? $bs_82x38_layout['barcode_height_mm'] ?? 7); ?>" min="3" max="30" step="0.1" id="propBox1BarcodeHeightMm">
                             </div>
                         </div>
-                        <div class="prop-row prop-row-cols">
+                        <div class="prop-row prop-row-cols prop-82x38-barcode-wh">
                             <div class="prop-field">
-                                <label>Box 2 Barcode Width (mm)</label>
+                                <label data-82x38-label-barcode="Box 2 Barcode Width" data-82x38-label-suffix=" (mm)">Box 2 Barcode Width (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box2_barcode_width_mm'] ?? $bs_82x38_layout['barcode_width_mm'] ?? 18); ?>" min="4" max="40" step="0.1" id="propBox2BarcodeWidthMm">
                             </div>
                             <div class="prop-field">
-                                <label>Box 2 Barcode Height (mm)</label>
+                                <label data-82x38-label-barcode="Box 2 Barcode Height" data-82x38-label-suffix=" (mm)">Box 2 Barcode Height (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box2_barcode_height_mm'] ?? $bs_82x38_layout['barcode_height_mm'] ?? 7); ?>" min="3" max="30" step="0.1" id="propBox2BarcodeHeightMm">
                             </div>
                         </div>
                         <div class="prop-row prop-row-cols">
                             <div class="prop-field">
-                                <label>Box 1 Barcode Left (mm)</label>
+                                <label data-82x38-label-barcode="Box 1 Barcode Left" data-82x38-label-suffix=" (mm)">Box 1 Barcode Left (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box1_barcode_left_mm'] ?? $bs_82x38_layout['barcode_left_mm'] ?? 2); ?>" min="0" max="20" step="0.1" id="propBox1BarcodeLeftMm">
                             </div>
                             <div class="prop-field">
-                                <label>Box 1 Barcode Top (mm)</label>
-                                <input type="number" value="<?php echo (float)($bs_82x38_layout['box1_barcode_top_mm'] ?? $bs_82x38_layout['barcode_top_mm'] ?? 3); ?>" min="0" max="20" step="0.1" id="propBox1BarcodeTopMm">
+                                <label data-82x38-label-barcode="Box 1 Barcode Top" data-82x38-label-suffix=" (mm)">Box 1 Barcode Top (mm)</label>
+                                <input type="number" value="<?php echo (float)($bs_82x38_layout['box1_barcode_top_mm'] ?? $bs_82x38_layout['barcode_top_mm'] ?? 3); ?>" min="0" max="24" step="0.1" id="propBox1BarcodeTopMm">
                             </div>
                         </div>
                         <div class="prop-row prop-row-cols">
                             <div class="prop-field">
-                                <label>Box 2 Barcode Left (mm)</label>
+                                <label data-82x38-label-barcode="Box 2 Barcode Left" data-82x38-label-suffix=" (mm)">Box 2 Barcode Left (mm)</label>
                                 <input type="number" value="<?php echo (float)($bs_82x38_layout['box2_barcode_left_mm'] ?? $bs_82x38_layout['barcode_left_mm'] ?? 2); ?>" min="0" max="20" step="0.1" id="propBox2BarcodeLeftMm">
                             </div>
                             <div class="prop-field">
-                                <label>Box 2 Barcode Top (mm)</label>
-                                <input type="number" value="<?php echo (float)($bs_82x38_layout['box2_barcode_top_mm'] ?? $bs_82x38_layout['barcode_top_mm'] ?? 3); ?>" min="0" max="20" step="0.1" id="propBox2BarcodeTopMm">
+                                <label data-82x38-label-barcode="Box 2 Barcode Top" data-82x38-label-suffix=" (mm)">Box 2 Barcode Top (mm)</label>
+                                <input type="number" value="<?php echo (float)($bs_82x38_layout['box2_barcode_top_mm'] ?? $bs_82x38_layout['barcode_top_mm'] ?? 3); ?>" min="0" max="24" step="0.1" id="propBox2BarcodeTopMm">
                             </div>
                         </div>
                         <div class="prop-row prop-row-cols">
@@ -2249,46 +2366,6 @@ html, body {
                         </div>
                         <small class="prop-hint">Inner boxes are fixed 20×25 mm: Box 1 bottom-left, Box 2 top-right. Only the barcode inside each box can be moved or resized.</small>
                     </div>
-                    <div class="prop-row prop-row-barcode-size">
-                        <label>Barcode size</label>
-                        <div class="barcode-size-buttons">
-                            <button type="button" class="btn-size" id="btnBarcodeDecrease" title="Smaller: stripe area, bar height, and line thickness" aria-label="Decrease barcode size">&#8722;</button>
-                            <button type="button" class="btn-size" id="btnBarcodeIncrease" title="Larger: stripe area, bar height, and line thickness" aria-label="Increase barcode size">+</button>
-                            <button type="button" class="btn-size" id="btnBarcodeCenter" title="Center barcode on label" aria-label="Center barcode">&#9675;</button>
-                        </div>
-                    </div>
-                    <div class="prop-row prop-row-cols prop-row-barcode-bar" id="propRowBarcodeBar">
-                        <div class="prop-field">
-                            <label>Line thickness (px)</label>
-                            <input type="number" value="<?php echo (int)($bs['barcode_bar_width'] ?? 2); ?>" min="1" max="10" id="propBarcodeBarWidth" title="Thickness of each black bar (1 = thinnest lines)">
-                        </div>
-                        <div class="prop-field">
-                            <label>Bar height (px)</label>
-                            <input type="number" value="<?php echo (int)($bs['barcode_bar_height'] ?? 28); ?>" min="8" max="200" id="propBarcodeBarHeight" title="Height of barcode lines">
-                        </div>
-                    </div>
-                    <div class="prop-row prop-row-cols prop-row-barcode-display" id="propRowBarcodeDisplay">
-                        <div class="prop-field">
-                            <label>Barcode width (px)</label>
-                            <input type="number" value="0" min="0" max="500" id="propBarcodeDisplayWidth" title="Overall barcode width on label. 0 = auto. Drag the purple handle on the barcode to resize.">
-                        </div>
-                        <div class="prop-field">
-                            <label>&nbsp;</label>
-                            <small class="prop-hint" style="display:block;margin-top:6px;color:#64748b;">Click barcode on label, then drag the corner handle or use −/+.</small>
-                        </div>
-                    </div>
-                    <div class="prop-row prop-row-cols prop-row-qr-size" id="propRowQrSize" style="display: none;">
-                        <div class="prop-field">
-                            <label>QR width (px)</label>
-                            <input type="number" value="<?php echo (int)($bs['qr_width'] ?? 60); ?>" min="30" max="200" id="propQrWidth" title="QR code width (30–200)">
-                        </div>
-                        <div class="prop-field">
-                            <label>QR height (px)</label>
-                            <input type="number" value="<?php echo (int)($bs['qr_height'] ?? 60); ?>" min="30" max="200" id="propQrHeight" title="QR code height (30–200)">
-                        </div>
-                    </div>
-                    <small class="prop-hint prop-hint-barcode" id="propHintBarcode" style="margin-top: 2px;">Line thickness = each black bar width (1 = thinnest). Barcode width = total size on label. Drag the barcode to move; drag the purple corner handle to change width.</small>
-                    <small class="prop-hint prop-hint-qr" id="propHintQr" style="margin-top: 2px; display: none;">QR width/height = size of QR code.</small>
                 </div>
             </div>
         </aside>
@@ -2807,78 +2884,209 @@ html, body {
         h = (isNaN(h) || h < 30) ? 60 : Math.min(200, h);
         return { width: w, height: h };
     }
+    function getQrSizeMmFor82x38Wrap(wrap) {
+        var qr = getQrSize();
+        var box = get82x38BoxElForBarcode(wrap);
+        var scale = get82x38ScaleFromBox(box);
+        var wMm = Math.round((qr.width / scale.x) * 10) / 10;
+        var hMm = Math.round((qr.height / scale.y) * 10) / 10;
+        return {
+            width_mm: Math.max(4, Math.min(BOX_82X38_WIDTH_MM, wMm)),
+            height_mm: Math.max(4, Math.min(BOX_82X38_HEIGHT_MM, hMm))
+        };
+    }
+    function get82x38GraphicDimsForBox(boxNum, bl, wrap) {
+        var prefix = boxNum === 2 ? 'box2' : 'box1';
+        var dims = {
+            left: bl[prefix + '_barcode_left_mm'],
+            top: bl[prefix + '_barcode_top_mm'],
+            width: bl[prefix + '_barcode_width_mm'],
+            height: bl[prefix + '_barcode_height_mm']
+        };
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            var qrMm = getQrSizeMmFor82x38Wrap(wrap);
+            dims.width = qrMm.width_mm;
+            dims.height = qrMm.height_mm;
+        }
+        return dims;
+    }
+    function syncQrPxFrom82x38WrapMm(wMm, hMm, box) {
+        if (typeof currentCodeType === 'undefined' || currentCodeType !== 'qr') return;
+        var scale = get82x38ScaleFromBox(box);
+        var qwEl = document.getElementById('propQrWidth');
+        var qhEl = document.getElementById('propQrHeight');
+        if (qwEl) qwEl.value = Math.max(30, Math.min(200, Math.round(wMm * scale.x)));
+        if (qhEl) qhEl.value = Math.max(30, Math.min(200, Math.round(hMm * scale.y)));
+    }
     function updatePropertiesPanelForCodeType() {
         var isBarcode = (currentCodeType === 'barcode');
         var barRow = document.getElementById('propRowBarcodeBar');
+        var barSizeRow = document.getElementById('propRowBarcodeSize');
+        var barDisplayRow = document.getElementById('propRowBarcodeDisplay');
         var qrRow = document.getElementById('propRowQrSize');
         var hintBar = document.getElementById('propHintBarcode');
         var hintQr = document.getElementById('propHintQr');
         if (barRow) barRow.style.display = isBarcode ? '' : 'none';
+        if (barSizeRow) barSizeRow.style.display = isBarcode ? '' : 'none';
+        if (barDisplayRow) barDisplayRow.style.display = isBarcode ? '' : 'none';
         if (qrRow) qrRow.style.display = isBarcode ? 'none' : '';
         if (hintBar) hintBar.style.display = isBarcode ? '' : 'none';
         if (hintQr) hintQr.style.display = isBarcode ? 'none' : '';
+        var isQr = !isBarcode;
+        document.querySelectorAll('[data-82x38-label-barcode]').forEach(function(el) {
+            var barcodeText = el.getAttribute('data-82x38-label-barcode') || 'Barcode';
+            var suffix = el.getAttribute('data-82x38-label-suffix') || '';
+            el.textContent = (isQr ? barcodeText.replace(/Barcode/g, 'QR') : barcodeText) + suffix;
+        });
+        document.querySelectorAll('.prop-82x38-barcode-wh').forEach(function(el) {
+            el.style.display = isQr ? 'none' : '';
+        });
+    }
+    function codeGraphicSampleForWrap(wrap) {
+        if (!wrap) return '00002';
+        if (wrap.id === 'barcode2' || wrap.getAttribute('data-barcode-index') === '2') {
+            return String(sampleBarcodeNumber2 || '00003').trim() || '00003';
+        }
+        return String(sampleBarcodeNumber || '00002').trim() || '00002';
+    }
+    function syncCodeTypeUiControls() {
+        var dpcEl = document.getElementById('defaultPrintCodeType');
+        if (dpcEl && dpcEl.value !== currentCodeType) dpcEl.value = currentCodeType;
+        document.querySelectorAll('.barcode-qr-toggle .toggle-option').forEach(function(o) {
+            o.classList.toggle('active', o.getAttribute('data-type') === currentCodeType);
+        });
+    }
+    function applyCodeTypeSwitch(nextType) {
+        if (!nextType || nextType === currentCodeType) return;
+        flushPendingCanvasPropsToDom();
+        flushCheckboxDomToPersisted();
+        try {
+            var pl = buildBarcodeFormPayload();
+            var lp = buildBarcodeLayoutPayloadObject(pl);
+            lp.layout_variant = (currentCodeType === 'qr') ? 'qr' : 'barcode';
+            if (currentCodeType === 'barcode') {
+                persistedLayoutBarcode = JSON.stringify(lp);
+            } else {
+                persistedLayoutQr = JSON.stringify(lp);
+            }
+        } catch (e) {}
+        currentCodeType = nextType;
+        applyCheckboxPersistToDom();
+        savedDesignLayout = (currentCodeType === 'qr') ? persistedLayoutQr : persistedLayoutBarcode;
+        try {
+            restoreSavedLayout();
+        } catch (e2) {}
+        updatePropertiesPanelForCodeType();
+        if (currentCodeType === 'qr') {
+            updateBarcodeQrDisplay();
+            updateBarcodeResizeHandleLabels();
+            if (is82x38TwoBoxPreset() && typeof render82x38PreviewPipeline === 'function') {
+                render82x38PreviewPipeline({ skipBoxLayout: true });
+            }
+        } else {
+            updateBarcodeResizeHandleLabels();
+            if (is82x38TwoBoxPreset() && typeof render82x38PreviewPipeline === 'function') {
+                render82x38PreviewPipeline({ skipBoxLayout: true });
+            } else if (typeof renderCanvasBarcode === 'function') {
+                renderCanvasBarcode();
+            } else {
+                updateBarcodeQrDisplay();
+            }
+        }
+        syncCodeTypeUiControls();
     }
     document.querySelectorAll('.barcode-qr-toggle .toggle-option').forEach(function(opt) {
         opt.addEventListener('click', function() {
-            document.querySelectorAll('.barcode-qr-toggle .toggle-option').forEach(function(o) { o.classList.remove('active'); });
-            this.classList.add('active');
-            var nextType = this.getAttribute('data-type');
-            if (nextType === currentCodeType) return;
-            flushPendingCanvasPropsToDom();
-            flushCheckboxDomToPersisted();
-            try {
-                var pl = buildBarcodeFormPayload();
-                var lp = buildBarcodeLayoutPayloadObject(pl);
-                lp.layout_variant = (currentCodeType === 'qr') ? 'qr' : 'barcode';
-                if (currentCodeType === 'barcode') {
-                    persistedLayoutBarcode = JSON.stringify(lp);
-                } else {
-                    persistedLayoutQr = JSON.stringify(lp);
-                }
-            } catch (e) {}
-            currentCodeType = nextType;
-            applyCheckboxPersistToDom();
-            savedDesignLayout = (currentCodeType === 'qr') ? persistedLayoutQr : persistedLayoutBarcode;
-            try {
-                restoreSavedLayout();
-            } catch (e2) {}
-            updatePropertiesPanelForCodeType();
-            updateBarcodeQrDisplay();
+            applyCodeTypeSwitch(this.getAttribute('data-type'));
         });
     });
+    var defaultPrintCodeTypeEl = document.getElementById('defaultPrintCodeType');
+    if (defaultPrintCodeTypeEl) {
+        defaultPrintCodeTypeEl.addEventListener('change', function() {
+            applyCodeTypeSwitch(defaultPrintCodeTypeEl.value === 'qr' ? 'qr' : 'barcode');
+        });
+    }
 
+    function hideBarcodeGraphicsInWrap(printWrap) {
+        if (!printWrap) return;
+        var stripes = printWrap.querySelector('.barcode-stripes');
+        if (stripes) {
+            stripes.style.display = 'none';
+            stripes.style.visibility = 'hidden';
+        }
+        printWrap.querySelectorAll('svg.barcode-svg, svg.barcode-svg-box1, svg.barcode-svg-box2').forEach(function(s) {
+            s.style.setProperty('display', 'none', 'important');
+            s.style.setProperty('visibility', 'hidden', 'important');
+            s.style.setProperty('width', '0', 'important');
+            s.style.setProperty('height', '0', 'important');
+        });
+    }
+    function showBarcodeGraphicsInWrap(printWrap) {
+        if (!printWrap) return;
+        var stripes = printWrap.querySelector('.barcode-stripes');
+        if (stripes) {
+            stripes.style.display = 'block';
+            stripes.style.visibility = 'visible';
+        }
+        printWrap.querySelectorAll(':scope > svg.barcode-svg, :scope > svg.barcode-svg-box1, :scope > svg.barcode-svg-box2').forEach(function(s) {
+            s.style.setProperty('display', 'none', 'important');
+            s.style.setProperty('visibility', 'hidden', 'important');
+        });
+        var qr = printWrap.querySelector('.qr-code-preview');
+        if (qr) {
+            qr.style.display = 'none';
+            qr.style.visibility = 'hidden';
+        }
+    }
     function updateBarcodeQrDisplay() {
         var qrSize = getQrSize();
-        var printWraps = document.querySelectorAll('.barcode-default-inner .barcode-print-wrap');
-        printWraps.forEach(function(printWrap, index) {
-            var barcodeStripes = printWrap.querySelector('.barcode-stripes');
+        var printWraps = document.querySelectorAll('#barcode1, #barcode2, .barcode-default-inner .barcode-print-wrap');
+        printWraps.forEach(function(printWrap) {
             var qrCodeEl = printWrap.querySelector('.qr-code-preview');
+            var sampleCode = codeGraphicSampleForWrap(printWrap);
             if (currentCodeType === 'qr') {
-                if (barcodeStripes) { barcodeStripes.style.display = 'none'; barcodeStripes.style.visibility = 'hidden'; }
+                printWrap.classList.add('qr-graphic-mode');
+                hideBarcodeGraphicsInWrap(printWrap);
                 if (!qrCodeEl) {
                     qrCodeEl = document.createElement('div');
                     qrCodeEl.className = 'qr-code-preview';
                 }
-                qrCodeEl.style.cssText = 'width:' + qrSize.width + 'px;height:' + qrSize.height + 'px;background:#fff;display:flex;align-items:center;justify-content:center;visibility:visible;';
+                var qrW = qrSize.width;
+                var qrH = qrSize.height;
+                if (printWrap.classList.contains('barcode-inner-draggable')) {
+                    qrCodeEl.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;background:#fff;display:flex;align-items:center;justify-content:center;visibility:visible;box-sizing:border-box;margin:0;padding:0;';
+                    qrW = Math.max(4, printWrap.clientWidth || qrSize.width);
+                    qrH = Math.max(4, printWrap.clientHeight || qrSize.height);
+                } else {
+                    qrCodeEl.style.cssText = 'width:' + qrW + 'px;height:' + qrH + 'px;background:#fff;display:flex;align-items:center;justify-content:center;visibility:visible;';
+                }
                 var qrCanvas = qrCodeEl.querySelector('.qr-preview-canvas');
                 if (!qrCanvas) {
                     qrCanvas = document.createElement('canvas');
                     qrCanvas.className = 'qr-preview-canvas';
                     qrCodeEl.appendChild(qrCanvas);
                 }
-                var drawSize = Math.min(qrSize.width, qrSize.height, 150);
+                var drawSize = Math.min(qrW, qrH, 150);
                 qrCanvas.width = drawSize;
                 qrCanvas.height = drawSize;
-                qrCodeEl.style.width = qrSize.width + 'px';
-                qrCodeEl.style.height = qrSize.height + 'px';
-                if (!printWrap.contains(qrCodeEl)) printWrap.appendChild(qrCodeEl);
+                qrCanvas.style.width = drawSize + 'px';
+                qrCanvas.style.height = drawSize + 'px';
+                if (!printWrap.classList.contains('barcode-inner-draggable')) {
+                    qrCodeEl.style.width = qrW + 'px';
+                    qrCodeEl.style.height = qrH + 'px';
+                }
+                if (!printWrap.contains(qrCodeEl)) {
+                    printWrap.insertBefore(qrCodeEl, printWrap.firstChild);
+                }
                 qrCodeEl.style.display = 'flex';
-                drawQRCode(qrCanvas, '00002');
+                qrCodeEl.style.visibility = 'visible';
+                drawQRCode(qrCanvas, sampleCode);
             } else {
-                if (barcodeStripes) { barcodeStripes.style.display = ''; barcodeStripes.style.visibility = ''; }
-                if (qrCodeEl) { qrCodeEl.style.display = 'none'; qrCodeEl.style.visibility = 'hidden'; }
+                printWrap.classList.remove('qr-graphic-mode');
+                showBarcodeGraphicsInWrap(printWrap);
             }
         });
+        updateBarcodeResizeHandleLabels();
     }
     updatePropertiesPanelForCodeType();
     updateBarcodeQrDisplay();
@@ -3302,16 +3510,23 @@ html, body {
         wrap.style.pointerEvents = 'auto';
         wrap.style.cursor = 'move';
         wrap.classList.add('barcode-82x38-barcode', 'barcode-inner-draggable');
+        wrap.classList.toggle('qr-graphic-mode', typeof currentCodeType !== 'undefined' && currentCodeType === 'qr');
         var svg = wrap.querySelector('svg.barcode-svg-box1, svg.barcode-svg-box2, svg');
         if (svg) {
-            svg.style.width = '100%';
-            svg.style.height = '100%';
-            svg.style.maxWidth = '100%';
-            svg.style.maxHeight = '100%';
-            svg.style.display = 'block';
-            svg.style.margin = '0';
-            svg.style.padding = '0';
-            svg.removeAttribute('height');
+            if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+                svg.style.setProperty('display', 'none', 'important');
+                svg.style.setProperty('width', '0', 'important');
+                svg.style.setProperty('height', '0', 'important');
+            } else {
+                svg.style.width = '100%';
+                svg.style.height = '100%';
+                svg.style.maxWidth = '100%';
+                svg.style.maxHeight = '100%';
+                svg.style.display = 'block';
+                svg.style.margin = '0';
+                svg.style.padding = '0';
+                svg.removeAttribute('height');
+            }
         }
     }
     function toggle82x38BarcodeTextVisibility() {
@@ -3380,8 +3595,15 @@ html, body {
     function reapply82x38BarcodePositionsFromInputs() {
         if (!is82x38TwoBoxPreset()) return;
         var bl = read82x38BoxLayoutFromInputs();
-        apply82x38BarcodeLayoutMm(document.getElementById('barcode1'), bl.box1_barcode_left_mm, bl.box1_barcode_top_mm, bl.box1_barcode_width_mm, bl.box1_barcode_height_mm);
-        apply82x38BarcodeLayoutMm(document.getElementById('barcode2'), bl.box2_barcode_left_mm, bl.box2_barcode_top_mm, bl.box2_barcode_width_mm, bl.box2_barcode_height_mm);
+        var wrap1 = document.getElementById('barcode1');
+        var wrap2 = document.getElementById('barcode2');
+        var d1 = get82x38GraphicDimsForBox(1, bl, wrap1);
+        var d2 = get82x38GraphicDimsForBox(2, bl, wrap2);
+        apply82x38BarcodeLayoutMm(wrap1, d1.left, d1.top, d1.width, d1.height);
+        apply82x38BarcodeLayoutMm(wrap2, d2.left, d2.top, d2.width, d2.height);
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            updateBarcodeQrDisplay();
+        }
         toggle82x38BarcodeTextVisibility();
         log82x38AppliedBarcodes();
     }
@@ -3536,7 +3758,15 @@ html, body {
                 width_mm: bl.box2_barcode_width_mm,
                 height_mm: bl.box2_barcode_height_mm
             };
-            persistedLayoutBarcode = JSON.stringify(parsed);
+            if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+                var qw = parseInt(document.getElementById('propQrWidth') && document.getElementById('propQrWidth').value, 10);
+                var qh = parseInt(document.getElementById('propQrHeight') && document.getElementById('propQrHeight').value, 10);
+                parsed.qr_width = (isNaN(qw) || qw < 30) ? 60 : Math.min(200, qw);
+                parsed.qr_height = (isNaN(qh) || qh < 30) ? 60 : Math.min(200, qh);
+                persistedLayoutQr = JSON.stringify(parsed);
+            } else {
+                persistedLayoutBarcode = JSON.stringify(parsed);
+            }
             savedDesignLayout = (currentCodeType === 'qr') ? persistedLayoutQr : persistedLayoutBarcode;
         } catch (e) {}
     }
@@ -3601,6 +3831,7 @@ html, body {
                 wrap.style.removeProperty('height');
                 apply82x38BarcodeLayoutMm(wrap, leftMm, topMm, wMm, hMm);
                 set82x38BarcodePropInputs(get82x38BarcodeIndex(wrap), leftMm, topMm, wMm, hMm);
+                syncQrPxFrom82x38WrapMm(wMm, hMm, box);
                 save82x38CurrentLayoutToHiddenJson();
             }
 
@@ -3614,14 +3845,25 @@ html, body {
         var boxRect = st.box.getBoundingClientRect();
         var scale = get82x38ScaleFromBox(st.box);
         var wrapRect = st.wrap.getBoundingClientRect();
+        var widthMm = st.widthMm;
+        var heightMm = st.heightMm;
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            var qrMm = getQrSizeMmFor82x38Wrap(st.wrap);
+            widthMm = qrMm.width_mm;
+            heightMm = qrMm.height_mm;
+        }
         var leftPx = e.clientX - boxRect.left - st.offsetX;
         var topPx = e.clientY - boxRect.top - st.offsetY;
-        leftPx = Math.max(0, Math.min(boxRect.width - wrapRect.width, leftPx));
-        topPx = Math.max(0, Math.min(boxRect.height - wrapRect.height, topPx));
+        var maxLeftPx = boxRect.width - (widthMm * scale.x);
+        var maxTopPx = boxRect.height - (heightMm * scale.y);
+        leftPx = Math.max(0, Math.min(maxLeftPx, leftPx));
+        topPx = Math.max(0, Math.min(maxTopPx, topPx));
         var leftMm = Math.round((leftPx / scale.x) * 10) / 10;
         var topMm = Math.round((topPx / scale.y) * 10) / 10;
-        apply82x38BarcodeLayoutMm(st.wrap, leftMm, topMm, st.widthMm, st.heightMm);
-        set82x38BarcodePropInputs(st.index, leftMm, topMm, st.widthMm, st.heightMm);
+        leftMm = Math.max(0, Math.min(BOX_82X38_WIDTH_MM - widthMm, leftMm));
+        topMm = Math.max(0, Math.min(BOX_82X38_HEIGHT_MM - heightMm, topMm));
+        apply82x38BarcodeLayoutMm(st.wrap, leftMm, topMm, widthMm, heightMm);
+        set82x38BarcodePropInputs(st.index, leftMm, topMm, widthMm, heightMm);
     }
     function bind82x38BarcodeWrapDrag(wrap, box, index) {
         if (!wrap || !box || wrap._82x38DragBound) return;
@@ -3630,6 +3872,9 @@ html, body {
             if (!is82x38TwoBoxPreset()) return;
             if (_82x38BarcodeResizing) return;
             if (e.target.closest('.resize-handle')) return;
+            if (e.target.closest('.qr-code-preview') || e.target.closest('.qr-preview-canvas')) {
+                /* Allow drag from QR canvas — use wrap as drag target */
+            }
             e.preventDefault();
             e.stopPropagation();
             selectBarcodePrintWrap(wrap);
@@ -3642,6 +3887,11 @@ html, body {
             if (isNaN(topMm)) topMm = 2;
             if (isNaN(widthMm)) widthMm = 16;
             if (isNaN(heightMm)) heightMm = 7;
+            if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+                var qrMmStart = getQrSizeMmFor82x38Wrap(wrap);
+                widthMm = qrMmStart.width_mm;
+                heightMm = qrMmStart.height_mm;
+            }
             _82x38BarcodeDragState = {
                 mode: 'drag',
                 wrap: wrap,
@@ -3671,6 +3921,9 @@ html, body {
             });
             document.addEventListener('mouseup', function() {
                 if (!_82x38BarcodeDragState) return;
+                if (_82x38BarcodeDragState.mode === 'drag' && typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+                    updateBarcodeQrDisplay();
+                }
                 sync82x38BarcodePositionsFromDom({ syncSize: true });
                 save82x38CurrentLayoutToHiddenJson();
                 _82x38BarcodeDragState = null;
@@ -3807,9 +4060,12 @@ html, body {
         wrap.style.display = '';
         wrap.style.visibility = 'visible';
         wrap.style.boxSizing = 'border-box';
-        wrap.style.overflow = 'visible';
+        wrap.style.overflow = 'hidden';
         wrap.style.width = 'auto';
         wrap.style.maxWidth = '';
+        wrap.style.height = 'auto';
+        wrap.style.maxHeight = '';
+        wrap.removeAttribute('data-display-height');
         var stripes = wrap.querySelector('.barcode-stripes');
         if (stripes) {
             stripes.style.display = 'block';
@@ -4348,6 +4604,13 @@ html, body {
         }
         if (typeof refreshCodeGraphicAfterLayoutRestore === 'function') refreshCodeGraphicAfterLayoutRestore();
         restoreInnerBarcodePositionFromSaved();
+        [document.getElementById('barcode1'), document.getElementById('barcode2')].forEach(function(wrap) {
+            if (!wrap) return;
+            var canvasEl = wrap.closest('.barcode-label-canvas');
+            if (canvasEl && typeof enforceStandardBarcodeGraphicBounds === 'function') {
+                enforceStandardBarcodeGraphicBounds(wrap, canvasEl);
+            }
+        });
         clampBarcodeBlockIntoCanvas(labelCanvas1, document.getElementById('barcode1'));
         clampBarcodeBlockIntoCanvas(labelCanvas2, document.getElementById('barcode2'));
         if (typeof ensureAllBarcodeResizeHandles === 'function') ensureAllBarcodeResizeHandles();
@@ -4369,7 +4632,10 @@ html, body {
         if (!preserveSaved) {
             bc1.style.boxSizing = '';
             bc1.style.width = '';
-            bc1.style.overflow = '';
+            bc1.style.height = 'auto';
+            bc1.style.maxHeight = '';
+            bc1.style.overflow = 'hidden';
+            bc1.removeAttribute('data-display-height');
             var stripes = bc1.querySelector('.barcode-stripes');
             if (stripes) {
                 stripes.style.width = '';
@@ -4659,6 +4925,38 @@ html, body {
             }
             syncToolboxHighlight();
         }
+        clearBarcodeDragDecorations();
+        clearBarcodeSelection();
+    }
+
+    function isBarcodeGraphicClickTarget(el) {
+        if (!el) return false;
+        return !!(el.closest('.barcode-stripes') || el.closest('.qr-code-preview') || el.closest('.barcode-resize-handle'));
+    }
+
+    function clearBarcodeDragDecorations() {
+        if (dropLayer) dropLayer.classList.remove('drag-over');
+        document.querySelectorAll('.barcode-white-drop-zone').forEach(function(z) {
+            z.classList.remove('drag-over', 'dragging-active');
+        });
+        document.body.classList.remove('is-barcode-dragging');
+        [labelCanvas1, labelCanvas2].forEach(function(c) {
+            if (c) c.classList.remove('is-toolbox-dragging');
+        });
+    }
+
+    function syncBarcodeResizeHandleVisibility() {
+        document.querySelectorAll('.barcode-print-wrap').forEach(function(w) {
+            var h = w.querySelector('.barcode-resize-handle');
+            if (h) h.style.display = w.classList.contains('barcode-selected') ? 'block' : 'none';
+        });
+    }
+
+    function clearBarcodeSelection() {
+        document.querySelectorAll('.barcode-print-wrap, .barcode-inner-draggable').forEach(function(w) {
+            w.classList.remove('barcode-selected');
+        });
+        syncBarcodeResizeHandleVisibility();
     }
 
     /** Preview sample value for a toolbox field (from PHP sample_field_preview). */
@@ -5171,13 +5469,49 @@ html, body {
         var cw = canvasEl.clientWidth;
         var ch = canvasEl.clientHeight;
         if (cw <= 0 || ch <= 0) return;
-        var bw = barcodeEl.offsetWidth;
-        var bh = barcodeEl.offsetHeight;
-        if (bw <= 0 || bh <= 0) return;
+
         var l = parseInt(barcodeEl.style.left, 10);
         var t = parseInt(barcodeEl.style.top, 10);
         if (isNaN(l)) l = barcodeEl.offsetLeft;
         if (isNaN(t)) t = barcodeEl.offsetTop;
+
+        var stripes = barcodeEl.querySelector('.barcode-stripes');
+        var caption = barcodeEl.querySelector('.barcode-text');
+        var captionH = 0;
+        if (caption && caption.style.display !== 'none') {
+            captionH = caption.offsetHeight > 0 ? caption.offsetHeight + 2 : 10;
+        }
+        if (stripes) {
+            var maxStripesH = Math.max(8, ch - t - captionH - 2);
+            var sh = parseInt(stripes.style.height, 10);
+            if (isNaN(sh) || sh <= 0) sh = stripes.offsetHeight;
+            if (sh > maxStripesH) {
+                stripes.style.height = maxStripesH + 'px';
+                stripes.style.minHeight = maxStripesH + 'px';
+                var propH = document.getElementById('propBarcodeBarHeight');
+                if (propH && (barcodeEl.classList.contains('barcode-selected') || barcodeEl.id === 'barcode1')) {
+                    propH.value = String(Math.max(8, Math.round(maxStripesH)));
+                }
+            }
+        } else if (barcodeEl.classList.contains('qr-graphic-mode')) {
+            var qrEl = barcodeEl.querySelector('.qr-code-preview');
+            if (qrEl) {
+                var maxQrH = Math.max(30, ch - t - captionH - 2);
+                var qrH = qrEl.offsetHeight;
+                if (qrH > maxQrH) {
+                    var qhEl = document.getElementById('propQrHeight');
+                    if (qhEl) qhEl.value = String(Math.max(30, Math.round(maxQrH)));
+                    if (typeof updateBarcodeQrDisplay === 'function') updateBarcodeQrDisplay();
+                }
+            }
+        }
+        barcodeEl.style.height = 'auto';
+        barcodeEl.style.maxHeight = '100%';
+        barcodeEl.removeAttribute('data-display-height');
+
+        var bw = barcodeEl.offsetWidth;
+        var bh = barcodeEl.offsetHeight;
+        if (bw <= 0 || bh <= 0) return;
         var maxL = Math.max(0, cw - bw);
         var maxT = Math.max(0, ch - bh);
         barcodeEl.style.left = Math.max(0, Math.min(maxL, l)) + 'px';
@@ -5272,6 +5606,75 @@ html, body {
         }
     }
 
+    function isQrGraphicWrap(wrap) {
+        return !!(wrap && typeof currentCodeType !== 'undefined' && currentCodeType === 'qr' && wrap.classList.contains('qr-graphic-mode'));
+    }
+
+    function syncQrSizePropsFromWrap(wrap) {
+        if (!isQrGraphicWrap(wrap)) return;
+        var qr = wrap.querySelector('.qr-code-preview');
+        var qw = document.getElementById('propQrWidth');
+        var qh = document.getElementById('propQrHeight');
+        if (qr && qw && qr.offsetWidth > 0) {
+            qw.value = String(Math.max(30, Math.min(200, Math.round(qr.offsetWidth))));
+        }
+        if (qr && qh && qr.offsetHeight > 0) {
+            qh.value = String(Math.max(30, Math.min(200, Math.round(qr.offsetHeight))));
+        }
+    }
+
+    function getQrMaxSizeForCanvas(canvasEl, wrap) {
+        var maxW = 200;
+        var maxH = 200;
+        if (!canvasEl || canvasEl.clientWidth <= 0 || canvasEl.clientHeight <= 0) {
+            return { maxW: maxW, maxH: maxH };
+        }
+        var left = parseInt(wrap.style.left, 10);
+        var top = parseInt(wrap.style.top, 10);
+        if (isNaN(left)) left = wrap.offsetLeft || 0;
+        if (isNaN(top)) top = wrap.offsetTop || 0;
+        maxW = Math.min(200, Math.max(30, canvasEl.clientWidth - left - 4));
+        maxH = Math.min(200, Math.max(30, canvasEl.clientHeight - top - 4));
+        var caption = wrap.querySelector('.barcode-text');
+        if (caption && caption.style.display !== 'none' && caption.offsetHeight > 0) {
+            maxH = Math.max(30, maxH - caption.offsetHeight - 2);
+        }
+        return { maxW: maxW, maxH: maxH };
+    }
+
+    function updateBarcodeResizeHandleLabels() {
+        var isQr = typeof currentCodeType !== 'undefined' && currentCodeType === 'qr';
+        document.querySelectorAll('.barcode-print-wrap .barcode-resize-handle').forEach(function(handle) {
+            handle.setAttribute('aria-label', isQr ? 'Resize QR width and height' : 'Resize barcode width and height');
+            handle.title = isQr ? 'Drag to change QR width and height' : 'Drag to change barcode width and height';
+        });
+    }
+
+    function getBarcodeCaptionHeight(wrap) {
+        if (!wrap) return 0;
+        var caption = wrap.querySelector('.barcode-text');
+        if (!caption || caption.style.display === 'none') return 0;
+        return caption.offsetHeight > 0 ? caption.offsetHeight + 2 : 10;
+    }
+
+    function getBarcodeMaxStripeHeightPx(wrap, canvasEl) {
+        var ch = (canvasEl && canvasEl.clientHeight > 0) ? canvasEl.clientHeight : Math.round((labelHeightMm || 18) * MM_TO_PX);
+        var minBarH = (labelHeightMm || 18) <= 20 ? 8 : 10;
+        if (!wrap) return Math.max(minBarH, ch - ((labelHeightMm || 18) <= 20 ? 8 : 12));
+        var topPx = parseInt(wrap.style.top, 10);
+        if (isNaN(topPx)) topPx = wrap.offsetTop || 0;
+        return Math.max(minBarH, ch - topPx - getBarcodeCaptionHeight(wrap) - 2);
+    }
+
+    function syncBarcodeBarHeightPropFromWrap(wrap) {
+        if (!wrap || isQrGraphicWrap(wrap)) return;
+        var stripes = wrap.querySelector('.barcode-stripes');
+        var propH = document.getElementById('propBarcodeBarHeight');
+        if (!stripes || !propH) return;
+        var h = stripes.offsetHeight;
+        if (h > 0) propH.value = String(Math.max(8, Math.min(200, Math.round(h))));
+    }
+
     function selectBarcodePrintWrap(wrap) {
         document.querySelectorAll('.barcode-print-wrap, .barcode-inner-draggable').forEach(function(w) {
             w.classList.remove('barcode-selected');
@@ -5281,8 +5684,15 @@ html, body {
         });
         if (wrap) {
             wrap.classList.add('barcode-selected');
-            syncBarcodeDisplayWidthPropFromWrap(wrap);
+            if (isQrGraphicWrap(wrap)) {
+                syncQrSizePropsFromWrap(wrap);
+            } else {
+                syncBarcodeDisplayWidthPropFromWrap(wrap);
+                syncBarcodeBarHeightPropFromWrap(wrap);
+            }
+            positionStandardBarcodeResizeHandle(wrap);
         }
+        syncBarcodeResizeHandleVisibility();
     }
 
     function getBarcodeMaxDisplayWidthPx(canvasEl, wrap) {
@@ -5343,6 +5753,10 @@ html, body {
         var handle = wrap.querySelector('.barcode-resize-handle');
         if (!handle) return;
         var stripes = wrap.querySelector('.barcode-stripes');
+        if (wrap.classList.contains('qr-graphic-mode')) {
+            var qr = wrap.querySelector('.qr-code-preview');
+            if (qr && qr.offsetHeight > 0) stripes = qr;
+        }
         handle.style.right = '-5px';
         handle.style.bottom = 'auto';
         if (stripes && stripes.offsetHeight > 0) {
@@ -5366,8 +5780,8 @@ html, body {
         var handle = document.createElement('span');
         var is82Resize = is82x38TwoBoxPreset() && (wrap.id === 'barcode1' || wrap.id === 'barcode2');
         handle.className = 'barcode-resize-handle' + (is82Resize ? ' barcode-resize-handle--82x38' : '');
-        handle.setAttribute('aria-label', is82Resize ? 'Resize barcode width and height' : 'Resize barcode width');
-        handle.title = is82Resize ? 'Drag to change barcode width and height' : 'Drag to change barcode width';
+        handle.setAttribute('aria-label', 'Resize barcode width and height');
+        handle.title = 'Drag to change barcode width and height';
         wrap.appendChild(handle);
         positionStandardBarcodeResizeHandle(wrap);
         var resizing = false;
@@ -5383,16 +5797,25 @@ html, body {
             resizing = true;
             startX = e.clientX;
             startY = e.clientY;
-            startW = wrap.offsetWidth || parseInt(wrap.getAttribute('data-display-width'), 10) || 80;
-            var stripesStart = wrap.querySelector('.barcode-stripes');
-            startH = (stripesStart && stripesStart.offsetHeight > 0) ? stripesStart.offsetHeight : (wrap.offsetHeight || parseInt(wrap.getAttribute('data-display-height'), 10) || 24);
+            var isQrResize = isQrGraphicWrap(wrap);
+            if (isQrResize) {
+                var qrStart = wrap.querySelector('.qr-code-preview');
+                var qrSize = getQrSize();
+                startW = (qrStart && qrStart.offsetWidth > 0) ? qrStart.offsetWidth : qrSize.width;
+                startH = (qrStart && qrStart.offsetHeight > 0) ? qrStart.offsetHeight : qrSize.height;
+            } else {
+                startW = wrap.offsetWidth || parseInt(wrap.getAttribute('data-display-width'), 10) || 80;
+                var stripesStart = wrap.querySelector('.barcode-stripes');
+                startH = (stripesStart && stripesStart.offsetHeight > 0) ? stripesStart.offsetHeight : (wrap.offsetHeight || parseInt(wrap.getAttribute('data-display-height'), 10) || 24);
+            }
             startLeft = parseInt(wrap.style.left, 10);
             if (isNaN(startLeft)) startLeft = wrap.offsetLeft || 0;
-            document.body.style.cursor = is82Resize ? 'nwse-resize' : 'ew-resize';
+            document.body.style.cursor = 'nwse-resize';
         });
         document.addEventListener('mousemove', function(e) {
             if (!resizing) return;
             var canvasEl = wrap.closest('.barcode-label-canvas');
+            var isQrResize = isQrGraphicWrap(wrap);
             if (is82Resize) {
                 var bl = read82x38BoxLayoutFromInputs();
                 var maxW = canvasEl && canvasEl.clientWidth > 0
@@ -5415,27 +5838,30 @@ html, body {
                 update82x38BoxBarcodeMmFromPx(wrap, newW, newH, canvasEl);
                 return;
             }
+            if (isQrResize) {
+                var qrLimits = getQrMaxSizeForCanvas(canvasEl, wrap);
+                var newW = Math.max(30, Math.min(qrLimits.maxW, startW + (e.clientX - startX)));
+                var newH = Math.max(30, Math.min(qrLimits.maxH, startH + (e.clientY - startY)));
+                var qwEl = document.getElementById('propQrWidth');
+                var qhEl = document.getElementById('propQrHeight');
+                if (qwEl) qwEl.value = String(Math.round(newW));
+                if (qhEl) qhEl.value = String(Math.round(newH));
+                updateBarcodeQrDisplay();
+                positionStandardBarcodeResizeHandle(wrap);
+                return;
+            }
             var maxW = getBarcodeMaxDisplayWidthPx(canvasEl, wrap);
-            var maxH = canvasEl && canvasEl.clientHeight > 0
-                ? Math.max(8, canvasEl.clientHeight - (parseInt(wrap.style.top, 10) || 0) - 4)
-                : 80;
             var newW = Math.max(24, Math.min(maxW, startW + (e.clientX - startX)));
-            var newH = Math.max(8, Math.min(maxH, startH + (e.clientY - startY)));
+            var opts = getBarcodeBarOptions(wrap, canvasEl);
+            var maxStripeH = getBarcodeMaxStripeHeightPx(wrap, canvasEl);
+            var newH = Math.max(opts.minBarH, Math.min(maxStripeH, startH + (e.clientY - startY)));
             wrap.setAttribute('data-display-width', String(Math.round(newW)));
-            wrap.setAttribute('data-display-height', String(Math.round(newH)));
             wrap.style.width = newW + 'px';
             wrap.style.left = startLeft + 'px';
-            var stripes = wrap.querySelector('.barcode-stripes');
-            if (stripes) {
-                stripes.style.height = newH + 'px';
-                stripes.style.minHeight = newH + 'px';
-            }
-            var prop = document.getElementById('propBarcodeDisplayWidth');
-            if (prop && wrap.classList.contains('barcode-selected')) prop.value = String(Math.round(newW));
+            var propW = document.getElementById('propBarcodeDisplayWidth');
+            if (propW && wrap.classList.contains('barcode-selected')) propW.value = String(Math.round(newW));
             var propH = document.getElementById('propBarcodeBarHeight');
-            if (propH && wrap.classList.contains('barcode-selected')) {
-                propH.value = String(Math.max(8, Math.min(200, Math.round(newH))));
-            }
+            if (propH && wrap.classList.contains('barcode-selected')) propH.value = String(Math.round(newH));
             positionStandardBarcodeResizeHandle(wrap);
             renderCanvasBarcode();
         });
@@ -5464,6 +5890,7 @@ html, body {
         wrap.addEventListener('mousedown', function(e) {
             if (is82x38TwoBoxPreset()) return;
             if (e.target.closest('.barcode-resize-handle')) return;
+            if (!isBarcodeGraphicClickTarget(e.target)) return;
             e.preventDefault();
             e.stopPropagation();
             dragging = true;
@@ -5500,39 +5927,86 @@ html, body {
         if (!wrap || wrap._barcodeUiBound) return;
         wrap._barcodeUiBound = true;
         ensureBarcodeResizeHandle(wrap);
+        syncBarcodeResizeHandleVisibility();
         initStandardBarcodePrintWrapDrag(wrap);
-        wrap.addEventListener('mousedown', function(e) {
-            if (e.target.closest('.barcode-resize-handle')) return;
-            selectBarcodePrintWrap(wrap);
-        });
     }
 
-    function getBarcodeBarOptions() {
+    function getBarcodeBarOptions(wrap, canvasEl) {
         var w = parseInt(document.getElementById('propBarcodeBarWidth') && document.getElementById('propBarcodeBarWidth').value, 10);
         var h = parseInt(document.getElementById('propBarcodeBarHeight') && document.getElementById('propBarcodeBarHeight').value, 10);
-        var c1 = labelCanvas1 || document.getElementById('labelCanvas1');
+        var c1 = canvasEl || labelCanvas1 || document.getElementById('labelCanvas1');
         var ch = (c1 && c1.clientHeight > 0) ? c1.clientHeight : Math.round((labelHeightMm || 18) * MM_TO_PX);
         var isShortLabel = (labelHeightMm || 18) <= 20;
-        var maxBarH = Math.max(8, ch - (isShortLabel ? 8 : 12));
         var minBarH = isShortLabel ? 8 : 10;
+        var maxBarH = wrap ? getBarcodeMaxStripeHeightPx(wrap, c1) : Math.max(minBarH, ch - (isShortLabel ? 8 : 12));
         var barH = (isNaN(h) || h < minBarH) ? (isShortLabel ? 10 : 28) : Math.min(200, h);
         barH = Math.min(barH, maxBarH);
         var barW = (isNaN(w) || w < 1) ? (isShortLabel ? 1 : 2) : Math.min(10, w);
         return { width: barW, height: barH, minBarH: minBarH };
     }
-    /** 82×38: boxes → JsBarcode → apply saved mm (no auto-align after). */
+    /** Keep standard barcode stripes within the label canvas so the block does not block drag/drop. */
+    function enforceStandardBarcodeGraphicBounds(wrap, canvasEl) {
+        if (!wrap || !canvasEl || is82x38TwoBoxPreset() || wrap.classList.contains('barcode-inner-draggable')) return;
+        if (wrap.classList.contains('qr-graphic-mode')) return;
+        var stripes = wrap.querySelector('.barcode-stripes');
+        if (!stripes) return;
+        var opts = getBarcodeBarOptions(wrap, canvasEl);
+        var ch = canvasEl.clientHeight > 0 ? canvasEl.clientHeight : Math.round((labelHeightMm || 18) * MM_TO_PX);
+        var captionH = getBarcodeCaptionHeight(wrap);
+        var topPx = parseInt(wrap.style.top, 10);
+        if (isNaN(topPx)) topPx = wrap.offsetTop || 0;
+        var maxStripeH = Math.max(8, ch - topPx - captionH - 2);
+        var barH = Math.min(opts.height, maxStripeH);
+        stripes.style.height = barH + 'px';
+        stripes.style.minHeight = barH + 'px';
+        stripes.style.maxHeight = barH + 'px';
+        wrap.style.height = 'auto';
+        wrap.style.maxHeight = Math.max(barH + captionH, 8) + 'px';
+        wrap.removeAttribute('data-display-height');
+        wrap.querySelectorAll(':scope > svg.barcode-svg').forEach(function(s) {
+            s.style.setProperty('display', 'none', 'important');
+        });
+        syncBarcodeBarHeightPropFromWrap(wrap);
+    }
+    /** 82×38: boxes → JsBarcode or QR preview → apply saved mm (no auto-align after). */
     function render82x38PreviewPipeline(opts) {
         opts = opts || {};
-        if (!is82x38TwoBoxPreset() || typeof JsBarcode === 'undefined') return;
+        if (!is82x38TwoBoxPreset()) return;
         if (!opts.skipBoxLayout) {
             layout82x38DualCanvases();
         }
         var bl = read82x38BoxLayoutFromInputs();
-        var jsOpts = get82x38JsBarcodeOpts();
+        var wrap1 = document.getElementById('barcode1');
+        var wrap2 = document.getElementById('barcode2');
+        var dims1 = get82x38GraphicDimsForBox(1, bl, wrap1);
+        var dims2 = get82x38GraphicDimsForBox(2, bl, wrap2);
         var pairs = [
-            { svg: document.getElementById('barcodeSvgBox1'), wrap: document.getElementById('barcode1'), code: String(sampleBarcodeNumber || '00002').trim() || '00002', text: document.getElementById('barcodeText1'), barW: bl.box1_barcode_width_mm, barH: bl.box1_barcode_height_mm, barL: bl.box1_barcode_left_mm, barT: bl.box1_barcode_top_mm },
-            { svg: document.getElementById('barcodeSvgBox2'), wrap: document.getElementById('barcode2'), code: String(sampleBarcodeNumber2 || '00003').trim() || '00003', text: document.getElementById('barcodeText2'), barW: bl.box2_barcode_width_mm, barH: bl.box2_barcode_height_mm, barL: bl.box2_barcode_left_mm, barT: bl.box2_barcode_top_mm }
+            { svg: document.getElementById('barcodeSvgBox1'), wrap: wrap1, code: String(sampleBarcodeNumber || '00002').trim() || '00002', text: document.getElementById('barcodeText1'), barW: dims1.width, barH: dims1.height, barL: dims1.left, barT: dims1.top },
+            { svg: document.getElementById('barcodeSvgBox2'), wrap: wrap2, code: String(sampleBarcodeNumber2 || '00003').trim() || '00003', text: document.getElementById('barcodeText2'), barW: dims2.width, barH: dims2.height, barL: dims2.left, barT: dims2.top }
         ];
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            pairs.forEach(function(p) {
+                if (!p.wrap) return;
+                p.wrap.style.display = 'block';
+                p.wrap.style.visibility = 'visible';
+                if (p.text) p.text.textContent = p.code;
+            });
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    pairs.forEach(function(p, idx) {
+                        if (!p.wrap) return;
+                        apply82x38BarcodeLayoutMm(p.wrap, p.barL, p.barT, p.barW, p.barH);
+                        set82x38BarcodePropInputs(idx + 1, p.barL, p.barT, p.barW, p.barH);
+                    });
+                    updateBarcodeQrDisplay();
+                    toggle82x38BarcodeTextVisibility();
+                    init82x38BarcodeDragResize();
+                });
+            });
+            return;
+        }
+        if (typeof JsBarcode === 'undefined') return;
+        var jsOpts = get82x38JsBarcodeOpts();
         pairs.forEach(function(p) {
             if (!p.svg || !p.wrap) return;
             p.wrap.style.display = 'block';
@@ -5556,6 +6030,7 @@ html, body {
                     if (!p.wrap) return;
                     apply82x38BarcodeLayoutMm(p.wrap, p.barL, p.barT, p.barW, p.barH);
                 });
+                updateBarcodeQrDisplay();
                 toggle82x38BarcodeTextVisibility();
                 init82x38BarcodeDragResize();
                 log82x38AppliedBarcodes();
@@ -5568,6 +6043,10 @@ html, body {
     /** Canvas preview: always reads bar width/height from prop inputs (matches saved design_layout after reload). */
     function renderCanvasBarcode() {
         if (typeof JsBarcode === 'undefined') return;
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            updateBarcodeQrDisplay();
+            return;
+        }
         if (is82x38TwoBoxPreset()) {
             render82x38PreviewPipeline();
             return;
@@ -5577,7 +6056,7 @@ html, body {
         if (bc1WrapEarly && (bc1WrapEarly.style.left || bc1WrapEarly.style.top)) {
             preservedPos = { left: bc1WrapEarly.style.left, top: bc1WrapEarly.style.top };
         }
-        var opts = getBarcodeBarOptions();
+        var opts = getBarcodeBarOptions(bc1Wrap, labelCanvas1 || document.getElementById('labelCanvas1'));
         var code = String(sampleBarcodeNumber || '00002').trim() || '00002';
         var code2 = String(sampleBarcodeNumber2 || '00003').trim() || '00003';
         var jsOpts = {
@@ -5608,7 +6087,7 @@ html, body {
             initBarcodePrintWrapInteractions(wrap);
             var cw = (canvasEl && canvasEl.offsetWidth > 0) ? canvasEl.offsetWidth : 270;
             var chCanvas = (canvasEl && canvasEl.offsetHeight > 0) ? canvasEl.offsetHeight : Math.round((labelHeightMm || 18) * MM_TO_PX);
-            var maxBarH = Math.max(8, chCanvas - 18);
+            var maxBarH = getBarcodeMaxStripeHeightPx(wrap, canvasEl);
             stripesEl.innerHTML = '';
             stripesEl.style.display = 'block';
             stripesEl.style.boxSizing = 'border-box';
@@ -5643,20 +6122,30 @@ html, body {
             } catch (e) {
                 stripesEl.innerHTML = '';
             }
+            if (wrap) {
+                enforceStandardBarcodeGraphicBounds(wrap, canvasEl);
+                wrap.style.height = 'auto';
+                wrap.style.maxHeight = '100%';
+                wrap.removeAttribute('data-display-height');
+                wrap.querySelectorAll(':scope > svg.barcode-svg').forEach(function(s) {
+                    s.style.setProperty('display', 'none', 'important');
+                });
+                clampBarcodeBlockIntoCanvas(canvasEl, wrap);
+                positionStandardBarcodeResizeHandle(wrap);
+                syncBarcodeBarHeightPropFromWrap(wrap);
+            }
         });
         var bt1 = document.getElementById('barcodeText1');
         var bt2 = document.getElementById('barcodeText2');
         if (bt1) bt1.textContent = code;
         if (bt2) bt2.textContent = code2;
         if (typeof toggleBarcodeNumber === 'function') toggleBarcodeNumber();
-        if (barcode1El && !document.querySelector('.barcode-print-wrap.barcode-selected')) {
-            selectBarcodePrintWrap(barcode1El);
-        }
         if (preservedPos && bc1WrapEarly) {
             bc1WrapEarly.style.left = preservedPos.left;
             bc1WrapEarly.style.top = preservedPos.top;
         }
         ensureAllBarcodeResizeHandles();
+        updateBarcodeQrDisplay();
     }
     /** Re-render canvas barcodes from saved prop inputs (avoids CSS hardcoded stripe width fighting design_layout). */
     function applySavedBarcodeSize() {
@@ -5754,11 +6243,15 @@ html, body {
                                 var wPx = Math.round(wMm * mmToPxX);
                                 var hPx = Math.round(hMm * mmToPxY);
                                 var maxBarPx = Math.max(10, ch - 4);
-                                hPx = Math.min(hPx, maxBarPx);
+                                var optsCap = getBarcodeBarOptions();
+                                hPx = Math.min(hPx, optsCap.height, maxBarPx);
                                 wPx = Math.min(wPx, Math.max(40, cw - 4));
                                 barcodePrintWrap.style.boxSizing = 'border-box';
                                 barcodePrintWrap.style.width = wPx + 'px';
-                                barcodePrintWrap.style.overflow = 'visible';
+                                barcodePrintWrap.style.height = 'auto';
+                                barcodePrintWrap.style.maxHeight = '100%';
+                                barcodePrintWrap.style.overflow = 'hidden';
+                                barcodePrintWrap.removeAttribute('data-display-height');
                                 barcodeStripes.style.width = '100%';
                                 barcodeStripes.style.height = hPx + 'px';
                                 barcodeStripes.style.minHeight = hPx + 'px';
@@ -5862,9 +6355,15 @@ html, body {
                             if (!isDualRestore && barcodePrintWrap2 && barcodeStripes2) {
                                 var wPx2 = Math.round(wMm * mmToPxX2);
                                 var hPx2 = Math.round(hMm * mmToPxY2);
+                                var maxBarPx2 = Math.max(10, ch2 - 4);
+                                var optsCap2 = getBarcodeBarOptions();
+                                hPx2 = Math.min(hPx2, optsCap2.height, maxBarPx2);
                                 barcodePrintWrap2.style.boxSizing = 'border-box';
                                 barcodePrintWrap2.style.width = wPx2 + 'px';
-                                barcodePrintWrap2.style.overflow = 'visible';
+                                barcodePrintWrap2.style.height = 'auto';
+                                barcodePrintWrap2.style.maxHeight = '100%';
+                                barcodePrintWrap2.style.overflow = 'hidden';
+                                barcodePrintWrap2.removeAttribute('data-display-height');
                                 barcodeStripes2.style.width = '100%';
                                 barcodeStripes2.style.height = hPx2 + 'px';
                                 barcodeStripes2.style.minHeight = hPx2 + 'px';
@@ -6032,6 +6531,10 @@ html, body {
             el.style.display = show ? 'block' : 'none';
         });
         /* Barcode image/SVG always visible — checkbox controls number text only. */
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            if (typeof updateBarcodeQrDisplay === 'function') updateBarcodeQrDisplay();
+            return;
+        }
         if (is82x38TwoBoxPreset()) {
             document.querySelectorAll('.barcode-svg-box1, .barcode-svg-box2').forEach(function(el) {
                 el.style.display = 'block';
@@ -6055,88 +6558,19 @@ html, body {
 
     (function initBarcode1Drag() {
         var barcodeBox = barcode1El;
-        var canvas = labelCanvas1;
-        if (!barcodeBox || !canvas) return;
+        if (!barcodeBox) return;
         if (!barcodeBox.classList.contains('barcode-inner-draggable')) {
             initBarcodePrintWrapInteractions(barcodeBox);
             ensureAllBarcodeResizeHandles();
         }
-        var isDragging = false, offsetX, offsetY;
-        barcodeBox.addEventListener('mousedown', function(e) {
-            if (is82x38TwoBoxPreset()) return;
-            if (e.target.closest('.barcode-resize-handle')) return;
-            selectBarcodePrintWrap(barcodeBox);
-            offsetX = e.offsetX;
-            offsetY = e.offsetY;
-            e.preventDefault();
-            e.stopPropagation();
-            isDragging = true;
-        });
-        document.addEventListener('mousemove', function(e) {
-            if (!isDragging) return;
-            var rect = canvas.getBoundingClientRect();
-            var w = barcodeBox.offsetWidth || 120;
-            var h = barcodeBox.offsetHeight || 30;
-            var left = e.clientX - rect.left - offsetX;
-            var top = e.clientY - rect.top - offsetY;
-            var maxLeft = rect.width - w;
-            var maxTop = rect.height - h;
-            left = maxLeft < 0 ? (rect.width - w) / 2 : Math.max(0, Math.min(maxLeft, left));
-            top = maxTop < 0 ? (rect.height - h) / 2 : Math.max(0, Math.min(maxTop, top));
-            barcodeBox.style.left = Math.round(left) + 'px';
-            barcodeBox.style.top = Math.round(top) + 'px';
-        });
-        document.addEventListener('mouseup', function() {
-            if (!isDragging) return;
-            isDragging = false;
-            if (is82x38TwoBoxPreset()) {
-                sync82x38BarcodePositionsFromDom({ syncSize: false });
-                reapply82x38BarcodePositionsFromInputs();
-            } else {
-                clampBarcodeBlockIntoCanvas(canvas, barcodeBox);
-            }
-        });
     })();
     (function initBarcode2Drag() {
         var barcodeBox = barcode2El;
         if (!barcodeBox) return;
-        var isDragging = false, offsetX, offsetY;
-        barcodeBox.addEventListener('mousedown', function(e) {
-            if (is82x38TwoBoxPreset()) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            isDragging = true;
-            offsetX = e.offsetX;
-            offsetY = e.offsetY;
-        });
-        document.addEventListener('mousemove', function(e) {
-            if (!isDragging) return;
-            var canvas = barcodeBox.closest('.barcode-label-canvas') || labelCanvas2;
-            if (!canvas) return;
-            var rect = canvas.getBoundingClientRect();
-            var w = barcodeBox.offsetWidth || 120;
-            var h = barcodeBox.offsetHeight || 30;
-            var left = e.clientX - rect.left - offsetX;
-            var top = e.clientY - rect.top - offsetY;
-            var maxLeft = rect.width - w;
-            var maxTop = rect.height - h;
-            left = maxLeft < 0 ? (rect.width - w) / 2 : Math.max(0, Math.min(maxLeft, left));
-            top = maxTop < 0 ? (rect.height - h) / 2 : Math.max(0, Math.min(maxTop, top));
-            barcodeBox.style.left = Math.round(left) + 'px';
-            barcodeBox.style.top = Math.round(top) + 'px';
-        });
-        document.addEventListener('mouseup', function() {
-            if (!isDragging) return;
-            isDragging = false;
-            if (is82x38TwoBoxPreset()) {
-                sync82x38BarcodePositionsFromDom({ syncSize: false });
-                reapply82x38BarcodePositionsFromInputs();
-            } else {
-                var canvasUp = barcodeBox.closest('.barcode-label-canvas') || labelCanvas2;
-                clampBarcodeBlockIntoCanvas(canvasUp, barcodeBox);
-            }
-        });
+        if (!barcodeBox.classList.contains('barcode-inner-draggable')) {
+            initBarcodePrintWrapInteractions(barcodeBox);
+            ensureAllBarcodeResizeHandles();
+        }
     })();
     function centerBarcode(barcodeBox, canvas) {
         if (!barcodeBox || !canvas) return;
@@ -6166,15 +6600,57 @@ html, body {
         barcodeBox.style.top = Math.max(0, (canvas.offsetHeight - (barcodeBox.offsetHeight || 30)) / 2) + 'px';
     }
 
+    function bindLabelCanvasDropTarget(canvasEl) {
+        if (!canvasEl || canvasEl._dropTargetBound) return;
+        canvasEl._dropTargetBound = true;
+        canvasEl.addEventListener('dragover', function(e) {
+            if (e.dataTransfer.types.indexOf('text/plain') < 0 && e.dataTransfer.types.indexOf('application/x-canvas-item') < 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = (e.dataTransfer.types.indexOf('application/x-canvas-item') >= 0) ? 'move' : 'copy';
+            if (dropLayer) dropLayer.classList.add('drag-over');
+        });
+        canvasEl.addEventListener('dragleave', function(e) {
+            if (!canvasEl.contains(e.relatedTarget) && dropLayer) dropLayer.classList.remove('drag-over');
+        });
+        canvasEl.addEventListener('drop', function(e) {
+            if (e.dataTransfer.types.indexOf('text/plain') < 0 && e.dataTransfer.types.indexOf('application/x-canvas-item') < 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (dropLayer) dropLayer.classList.remove('drag-over');
+            var rect = canvasEl.getBoundingClientRect();
+            handleDrop(e, rect, canvasEl);
+        });
+    }
+    bindLabelCanvasDropTarget(labelCanvas1);
+    bindLabelCanvasDropTarget(labelCanvas2);
+
     if (whiteDropZone) {
-        document.addEventListener('dragstart', function() { whiteDropZone.classList.add('dragging-active'); });
-        document.addEventListener('dragend', function() { whiteDropZone.classList.remove('dragging-active'); });
-        document.addEventListener('drop', function() { whiteDropZone.classList.remove('dragging-active'); });
+        document.addEventListener('dragstart', function(e) {
+            if (!e.target.closest('.toolbox-field-item') && !e.target.closest('.canvas-dropped-item')) return;
+            whiteDropZone.classList.add('dragging-active');
+            document.body.classList.add('is-barcode-dragging');
+            if (labelCanvas1) labelCanvas1.classList.add('is-toolbox-dragging');
+            if (labelCanvas2) labelCanvas2.classList.add('is-toolbox-dragging');
+            if (dropLayer) dropLayer.classList.add('drag-over');
+        });
+        function endBarcodeCanvasDragUi() {
+            clearBarcodeDragDecorations();
+        }
+        document.addEventListener('dragend', endBarcodeCanvasDragUi);
+        document.addEventListener('drop', endBarcodeCanvasDragUi);
     }
     if (whiteDropZone2) {
-        document.addEventListener('dragstart', function() { whiteDropZone2.classList.add('dragging-active'); });
-        document.addEventListener('dragend', function() { whiteDropZone2.classList.remove('dragging-active'); });
-        document.addEventListener('drop', function() { whiteDropZone2.classList.remove('dragging-active'); });
+        document.addEventListener('dragstart', function(e) {
+            if (!e.target.closest('.toolbox-field-item') && !e.target.closest('.canvas-dropped-item')) return;
+            whiteDropZone2.classList.add('dragging-active');
+        });
+        document.addEventListener('dragend', function() {
+            if (whiteDropZone2) whiteDropZone2.classList.remove('dragging-active');
+        });
+        document.addEventListener('drop', function() {
+            if (whiteDropZone2) whiteDropZone2.classList.remove('dragging-active');
+        });
     }
 
     dropLayer.addEventListener('dragover', function(e) {
@@ -6187,6 +6663,7 @@ html, body {
     });
     dropLayer.addEventListener('drop', function(e) {
         e.preventDefault();
+        dropLayer.classList.remove('drag-over');
         var rect = getDropLayerRect();
         handleDrop(e, rect, dropLayer);
     });
@@ -6202,6 +6679,9 @@ html, body {
     }, true);
 
     canvas.addEventListener('click', function(e) {
+        if (!isBarcodeGraphicClickTarget(e.target)) {
+            clearBarcodeSelection();
+        }
         if (!e.target.closest('.canvas-dropped-item')) {
             document.querySelectorAll('.canvas-dropped-item').forEach(function(i) { i.classList.remove('selected'); });
             document.querySelectorAll('.toolbox-field-item').forEach(function(i) { i.classList.remove('selected'); });
@@ -6268,7 +6748,39 @@ html, body {
 
     // Move selected item: buttons + arrow keys
     var MOVE_STEP = 8;
+    function move82x38SelectedGraphic(dx, dy) {
+        var barSel = getActiveBarcodePrintWrap();
+        if (!barSel || !is82x38TwoBoxPreset()) return false;
+        var index = get82x38BarcodeIndex(barSel);
+        var leftMm = parseFloat(String(barSel.style.left || '').replace('mm', ''));
+        var topMm = parseFloat(String(barSel.style.top || '').replace('mm', ''));
+        var widthMm = parseFloat(String(barSel.style.width || '').replace('mm', ''));
+        var heightMm = parseFloat(String(barSel.style.height || '').replace('mm', ''));
+        if (isNaN(leftMm)) leftMm = 2;
+        if (isNaN(topMm)) topMm = 2;
+        if (isNaN(widthMm)) widthMm = 16;
+        if (isNaN(heightMm)) heightMm = 7;
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            var qrMm = getQrSizeMmFor82x38Wrap(barSel);
+            widthMm = qrMm.width_mm;
+            heightMm = qrMm.height_mm;
+        }
+        var box = get82x38BoxForBarcodeIndex(index);
+        var scale = get82x38ScaleFromBox(box);
+        var dLeftMm = Math.round((dx / scale.x) * 10) / 10;
+        var dTopMm = Math.round((dy / scale.y) * 10) / 10;
+        var newLeft = Math.max(0, Math.min(BOX_82X38_WIDTH_MM - widthMm, leftMm + dLeftMm));
+        var newTop = Math.max(0, Math.min(BOX_82X38_HEIGHT_MM - heightMm, topMm + dTopMm));
+        apply82x38BarcodeLayoutMm(barSel, newLeft, newTop, widthMm, heightMm);
+        set82x38BarcodePropInputs(index, newLeft, newTop, widthMm, heightMm);
+        if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            updateBarcodeQrDisplay();
+        }
+        save82x38CurrentLayoutToHiddenJson();
+        return true;
+    }
     function moveSelected(dx, dy) {
+        if (move82x38SelectedGraphic(dx, dy)) return;
         var sel = document.querySelector('.canvas-dropped-item.selected');
         if (!sel) return;
         var l = parseInt(sel.style.left, 10) || 0;
@@ -6283,7 +6795,8 @@ html, body {
     document.getElementById('btnMoveRight').addEventListener('click', function() { moveSelected(MOVE_STEP, 0); });
     document.addEventListener('keydown', function(e) {
         var sel = document.querySelector('.canvas-dropped-item.selected');
-        if (!sel) return;
+        var barSel = getActiveBarcodePrintWrap();
+        if (!sel && !(barSel && is82x38TwoBoxPreset())) return;
         if (e.key === 'ArrowUp') { e.preventDefault(); moveSelected(0, -MOVE_STEP); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); moveSelected(0, MOVE_STEP); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); moveSelected(-MOVE_STEP, 0); }
@@ -6446,9 +6959,9 @@ html, body {
         var minH = isShortLabelSize() ? 8 : 10;
         var v = parseInt(ph.value, 10);
         if (isNaN(v)) v = isShortLabelSize() ? 10 : 28;
-        var c1 = labelCanvas1 || document.getElementById('labelCanvas1');
-        var ch = (c1 && c1.clientHeight > 0) ? c1.clientHeight : Math.round((labelHeightMm || 18) * MM_TO_PX);
-        var maxH = Math.max(minH, ch - (isShortLabelSize() ? 8 : 12));
+        var wrap = getActiveBarcodePrintWrap() || document.getElementById('barcode1');
+        var canvasEl = wrap ? wrap.closest('.barcode-label-canvas') : (labelCanvas1 || document.getElementById('labelCanvas1'));
+        var maxH = getBarcodeMaxStripeHeightPx(wrap, canvasEl);
         ph.value = String(Math.max(minH, Math.min(maxH, Math.min(200, v + delta))));
     }
     function bumpPropBarcodeBarWidth(delta) {
@@ -6554,7 +7067,13 @@ html, body {
     }
     var propQrWidth = document.getElementById('propQrWidth');
     var propQrHeight = document.getElementById('propQrHeight');
-    function onQrSizeChange() { updateBarcodeQrDisplay(); }
+    function onQrSizeChange() {
+        if (is82x38TwoBoxPreset() && typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
+            render82x38PreviewPipeline({ skipBoxLayout: true });
+            return;
+        }
+        updateBarcodeQrDisplay();
+    }
     if (propQrWidth) {
         propQrWidth.addEventListener('change', onQrSizeChange);
         propQrWidth.addEventListener('input', onQrSizeChange);

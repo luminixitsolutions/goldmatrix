@@ -230,6 +230,25 @@ if ($type === 'sale_order') {
     exit;
 }
 
+// Job Work Order: delete queue/items first (via shared helper), then master.
+if ($type === 'jobwork_order') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    if (!function_exists('auragold_delete_jobwork_order_by_id')) {
+        echo json_encode(['status' => 'error', 'message' => 'Delete helper not available']);
+        exit;
+    }
+    $result = auragold_delete_jobwork_order_by_id($conn, $id);
+    if (!empty($result['ok'])) {
+        echo json_encode(['status' => 'success', 'message' => $result['message'] ?? 'Job work order deleted successfully.']);
+    } else {
+        echo json_encode(['status' => 'error', 'message' => $result['message'] ?? 'Could not delete job work order.']);
+    }
+    exit;
+}
+
 $allowed_types = [
     'purchase_invoice' => 'tbl_purchase_invoices',
     'sale_invoice' => 'tbl_sale_invoices',

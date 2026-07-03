@@ -83,6 +83,25 @@ if (!is_array($branch_add_countries)) {
     $branch_add_countries = [];
 }
 
+function auragold_branches_page_row_host(array $row): string {
+    $h = trim((string) ($row['subdomain_url'] ?? ''));
+    if ($h === '') {
+        $h = trim((string) ($row['ip_address'] ?? ''));
+    }
+    return $h;
+}
+
+function auragold_branches_page_row_visit_url(string $host): string {
+    if ($host === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $host)) {
+        return $host;
+    }
+    $scheme = (defined('AURAGOLD_BRANCH_URL_USE_HTTPS') && AURAGOLD_BRANCH_URL_USE_HTTPS) ? 'https' : 'http';
+    return $scheme . '://' . $host;
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en" class="default-style">
@@ -99,7 +118,7 @@ if (!is_array($branch_add_countries)) {
             --branches-navy: #11294b;
             --branches-navy-dark: #0d1f38;
         }
-        .branches-page { padding: 24px; max-width: 960px; margin: 0 auto; }
+        .branches-page { padding: 24px; max-width: 1120px; margin: 0 auto; }
         .branches-page h1 { font-size: 1.5rem; font-weight: 700; color: #1e293b; margin-bottom: 20px; }
         .branches-card {
             border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -155,10 +174,19 @@ if (!is_array($branch_add_countries)) {
         .btn-branch-restore-db:disabled { opacity: 0.5; cursor: not-allowed; }
         tr.branch-row-switchable { cursor: pointer; }
         tr.branch-row-switchable:hover td { background: #f1f5f9; }
-        .branches-working-bar {
-            background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a5f;
-            padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 16px;
+        .branch-ip-copy {
+            font-size: 12px; word-break: break-all; max-width: 220px; display: inline-block;
+            color: #64748b; background: none; border: none; padding: 0; cursor: text;
+            text-align: left; text-decoration: none; font-family: inherit; font-weight: 400;
         }
+        .branch-ip-copy:hover { color: #64748b; text-decoration: none; }
+        .btn-branch-go {
+            font-size: 12px; font-weight: 600; white-space: nowrap;
+            color: #fff; background: linear-gradient(135deg, #11294b 0%, #0d1f38 100%);
+            border: 1px solid #11294b; border-radius: 8px; padding: 6px 10px;
+            text-decoration: none; display: inline-block;
+        }
+        .btn-branch-go:hover { filter: brightness(1.06); color: #fff; text-decoration: none; }
         .btn-branch-create-sub {
             font-size: 12px; font-weight: 600; white-space: nowrap;
             color: #fff; background: linear-gradient(135deg, #11294b 0%, #0d1f38 100%);
@@ -234,18 +262,6 @@ if (!is_array($branch_add_countries)) {
                         <?php if ($branch_switch_err !== ''): ?>
                             <div class="alert alert-danger" style="font-size:13px;"><?php echo htmlspecialchars($branch_switch_err); ?></div>
                         <?php endif; ?>
-                        <?php if (!empty($_SESSION['working_branch_name'])): ?>
-                            <div class="branches-working-bar">
-                                Working context: <strong><?php echo htmlspecialchars((string) $_SESSION['working_branch_name']); ?></strong>
-                                <?php if (!empty($_SESSION['working_db']['database'])): ?>
-                                    — database <code><?php echo htmlspecialchars((string) $_SESSION['working_db']['database']); ?></code>
-                                <?php else: ?>
-                                    — default application database (<code><?php echo htmlspecialchars(DB_NAME); ?></code>)
-                                <?php endif; ?>
-                                <span class="muted" style="margin-left:8px;">Use <strong>Open</strong> below to change context.</span>
-                            </div>
-                        <?php endif; ?>
-
                         <?php if (empty($all_mains)): ?>
                             <div class="branches-card"><div class="branches-empty">No branches in the database.</div></div>
                         <?php else: ?>
@@ -268,6 +284,7 @@ if (!is_array($branch_add_countries)) {
                                                     <th style="width:100px;">Active</th>
                                                     <th style="width:88px;">Delete</th>
                                                     <th style="width:150px;">Add sub-branch</th>
+                                                    <th style="width:130px;">Go to branch</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -277,13 +294,13 @@ if (!is_array($branch_add_countries)) {
                                                         <span class="badge-type">Main</span>
                                                     </td>
                                                     <td class="muted"><?php echo htmlspecialchars($main['code'] !== '' && $main['code'] !== null ? $main['code'] : '—'); ?></td>
-                                                    <td class="muted" style="font-size:12px;word-break:break-all;max-width:220px;"><?php
-                                                        $mh = trim((string) ($main['subdomain_url'] ?? ''));
-                                                        if ($mh === '') {
-                                                            $mh = trim((string) ($main['ip_address'] ?? ''));
-                                                        }
-                                                        echo $mh !== '' ? htmlspecialchars($mh) : '—';
-                                                        ?></td>
+                                                    <td><?php
+                                                        $mh = auragold_branches_page_row_host($main);
+                                                        if ($mh !== ''): ?>
+                                                            <span class="branch-ip-copy muted" data-copy="<?php echo htmlspecialchars($mh, ENT_QUOTES, 'UTF-8'); ?>" title="Click to copy"><?php echo htmlspecialchars($mh); ?></span>
+                                                        <?php else: ?>
+                                                            <span class="muted">—</span>
+                                                        <?php endif; ?></td>
                                                     <td class="branch-status-cell">
                                                         <?php if ((int) $main['status'] === 1): ?>
                                                             <span class="badge-status on">Active</span>
@@ -318,6 +335,14 @@ if (!is_array($branch_add_countries)) {
                                                             <span class="muted">—</span>
                                                         <?php endif; ?>
                                                     </td>
+                                                    <td><?php
+                                                        if ($mh !== ''):
+                                                            $mainVisitUrl = auragold_branches_page_row_visit_url($mh);
+                                                            ?>
+                                                            <a href="<?php echo htmlspecialchars($mainVisitUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn-branch-go" target="_blank" rel="noopener noreferrer">Go to branch</a>
+                                                        <?php else: ?>
+                                                            <span class="muted">—</span>
+                                                        <?php endif; ?></td>
                                                 </tr>
                                                 <?php foreach ($children as $sub): ?>
                                                     <tr<?php echo ((int) $sub['status'] === 1)
@@ -333,13 +358,13 @@ if (!is_array($branch_add_countries)) {
                                                             <span class="badge-type">Subbranch</span>
                                                         </td>
                                                         <td class="muted"><?php echo htmlspecialchars($sub['code'] !== '' && $sub['code'] !== null ? $sub['code'] : '—'); ?></td>
-                                                        <td class="muted" style="font-size:12px;word-break:break-all;max-width:220px;"><?php
-                                                            $sh = trim((string) ($sub['subdomain_url'] ?? ''));
-                                                            if ($sh === '') {
-                                                                $sh = trim((string) ($sub['ip_address'] ?? ''));
-                                                            }
-                                                            echo $sh !== '' ? htmlspecialchars($sh) : '—';
-                                                            ?></td>
+                                                        <td><?php
+                                                            $sh = auragold_branches_page_row_host($sub);
+                                                            if ($sh !== ''): ?>
+                                                                <span class="branch-ip-copy muted" data-copy="<?php echo htmlspecialchars($sh, ENT_QUOTES, 'UTF-8'); ?>" title="Click to copy"><?php echo htmlspecialchars($sh); ?></span>
+                                                            <?php else: ?>
+                                                                <span class="muted">—</span>
+                                                            <?php endif; ?></td>
                                                         <!-- <td>
                                                             <?php
                                                             $subDb = trim((string) ($sub['db_name'] ?? ''));
@@ -408,6 +433,14 @@ if (!is_array($branch_add_countries)) {
                                                             <?php endif; ?>
                                                         </td>
                                                         <td><span class="muted">—</span></td>
+                                                        <td><?php
+                                                            if ($sh !== ''):
+                                                                $subVisitUrl = auragold_branches_page_row_visit_url($sh);
+                                                                ?>
+                                                                <a href="<?php echo htmlspecialchars($subVisitUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn-branch-go" target="_blank" rel="noopener noreferrer">Go to branch</a>
+                                                            <?php else: ?>
+                                                                <span class="muted">—</span>
+                                                            <?php endif; ?></td>
                                                     </tr>
                                                 <?php endforeach; ?>
                                             </tbody>
@@ -635,9 +668,57 @@ if (!is_array($branch_add_countries)) {
                     });
             });
         });
+        function copyTextToClipboard(text, onSuccess) {
+            if (!text) {
+                return;
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(onSuccess).catch(function () {
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        if (document.execCommand('copy')) {
+                            onSuccess();
+                        }
+                    } catch (err) {}
+                    document.body.removeChild(ta);
+                });
+                return;
+            }
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                if (document.execCommand('copy')) {
+                    onSuccess();
+                }
+            } catch (err) {}
+            document.body.removeChild(ta);
+        }
+        document.querySelectorAll('.branch-ip-copy').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var text = el.getAttribute('data-copy') || el.textContent || '';
+                var origTitle = el.getAttribute('title') || 'Click to copy';
+                copyTextToClipboard(text.trim(), function () {
+                    el.setAttribute('title', 'Copied!');
+                    setTimeout(function () {
+                        el.setAttribute('title', origTitle);
+                    }, 1500);
+                });
+            });
+        });
         document.querySelectorAll('tr.branch-row-switchable').forEach(function (tr) {
             tr.addEventListener('click', function (e) {
-                if (e.target.closest('a, button, input, label, select, textarea')) {
+                if (e.target.closest('a, button, input, label, select, textarea, .branch-ip-copy')) {
                     return;
                 }
                 var u = tr.getAttribute('data-switch-url');

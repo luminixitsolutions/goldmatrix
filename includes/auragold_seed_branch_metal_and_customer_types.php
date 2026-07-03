@@ -95,6 +95,7 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
         $host = defined('DB_HOST') ? (string) DB_HOST : 'localhost';
 
         if (strcasecmp($sourceDb, $targetDbName) === 0) {
+            // Same operational database: metal/carat masters stay on the main branch (shared ids).
             if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
                 require_once __DIR__ . '/auragold_branch_data_scope.php';
             }
@@ -103,16 +104,16 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
                 $link = auragold_mysqli_connect_branch_or_registry($host, $targetDbName, $targetDbUser, $targetDbPass);
             }
             if (!$link) {
-                return ['ok' => false, 'message' => 'Could not connect to branch database for metal/carat copy.'];
+                return ['ok' => false, 'message' => 'Could not connect to branch database for master copy.'];
             }
             $seed = auragold_seed_subbranch_masters_from_main($link, $mainBranchId, $newSubBranchId);
-            $metals = (int) ($seed['tables']['tbl_metal'] ?? 0);
-            $carats = (int) ($seed['tables']['tbl_carat'] ?? 0);
             return [
-                'ok'      => true,
-                'message' => 'Copied ' . $metals . ' metal(s) and ' . $carats . ' carat row(s) from main branch.',
-                'metals'  => $metals,
-                'carats'  => $carats,
+                'ok'            => true,
+                'message'       => 'Metals and carats shared with main branch (same database). Other masters copied where needed.',
+                'metals'        => 0,
+                'carats'        => 0,
+                'shared_master' => true,
+                'other_masters' => $seed['tables'] ?? [],
             ];
         }
 
@@ -311,6 +312,13 @@ if (!function_exists('auragold_seed_metal_and_customer_types_for_new_branch')) {
 
         $bid       = (int) $registryBranchId;
         $skipMetal = !empty($opts['skip_metal']);
+
+        if (!$skipMetal && function_exists('auragold_metal_carat_master_branch_id')) {
+            $metalMasterBranchId = auragold_metal_carat_master_branch_id($bid);
+            if ($metalMasterBranchId > 0 && $metalMasterBranchId !== $bid) {
+                $skipMetal = true;
+            }
+        }
 
         // --- tbl_metal ---
         if (!$skipMetal && auragold_schema_table_reachable($conn, 'tbl_metal')) {

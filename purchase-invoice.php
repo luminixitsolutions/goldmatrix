@@ -3225,7 +3225,7 @@ include 'includes/common-modal.php';
 ?>
 <?php auragold_echo_party_select2_styles(); ?>
 <?php include 'footer-script.php';?>
-<?php auragold_echo_party_select2_scripts(); ?>
+<?php auragold_echo_party_select2_scripts(['placeholder' => 'Select supplier...'], true); ?>
 
 <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
@@ -3283,6 +3283,7 @@ window.PB_PAGE_CONFIG = {
 };
 </script>
 <script src="js/previous-balance-common.js"></script>
+<?php auragold_echo_party_select2_init(); ?>
 <script>
     <?php
     // Embed edit order/items/payments so form populates on page load (no AJAX dependency for direct ?id= load)

@@ -47,6 +47,7 @@ $opts = [
 ];
 
 try {
+    auragold_jewelry_catalogue_boot_stock_helpers();
     $items = auragold_jewelry_catalogue_grid_fetch($conn, $opts, $SiteUrl ?? '');
     $metals = auragold_jewelry_catalog_metals($conn);
 

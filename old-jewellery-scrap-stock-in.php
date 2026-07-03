@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 require_once __DIR__ . '/includes/auragold-gst-page-vars.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
@@ -2765,13 +2766,18 @@ text-transform: uppercase;
                                             <div class="col-md-12">
                                                 <div class="form-group">
                                                     <label>Name *</label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" required style="padding-right: 35px;" autocomplete="off">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="">
-                                                        <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
-                                                    </div>
+                                                    <?php
+                                                    $ojs_party_id = 0;
+                                                    $ojs_party_name = '';
+                                                    if (!empty($edit_order) && is_array($edit_order)) {
+                                                        $ojs_party_id = (int) ($edit_order['customer_id'] ?? $edit_order['supplier_id'] ?? 0);
+                                                        $ojs_party_name = trim((string) ($edit_order['customer_name'] ?? $edit_order['supplier_name'] ?? ''));
+                                                    }
+                                                    auragold_party_select2_field([
+                                                        'value_id' => $ojs_party_id,
+                                                        'value_name' => $ojs_party_name,
+                                                    ]);
+                                                    ?>
                                                 </div>
                                             </div>
                                         <div class="col-md-6">
@@ -3140,6 +3146,9 @@ text-transform: uppercase;
 <?php require_once __DIR__ . '/includes/auragold_payment_cards_assets.php'; ?>
 
 <?php include 'footer-script.php';?>
+
+<?php auragold_echo_party_select2_styles(); ?>
+<?php auragold_echo_party_select2_scripts(); ?>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.10.8/dist/sweetalert2.min.css">
 <style id="auragold-swal2-print-barcode-theme">
@@ -4905,17 +4914,22 @@ window.PB_PAGE_CONFIG = {
                 $('#customerCreationModal').modal('hide');
                 
                 // Update the customer in the main form (keep selected customer id)
-                if (data.customer_name && document.getElementById('customerName')) {
-                    document.getElementById('customerName').value = data.customer_name;
-                }
-                if (data.customer_id && document.getElementById('customerId')) {
-                    document.getElementById('customerId').value = data.customer_id;
-                    selectedCustomerId = data.customer_id;
-                    if (typeof jQuery !== 'undefined') {
-                        jQuery('#customerId').trigger('change');
-                    } else if (typeof window.updateSaleInvoiceAddItemButtonState === 'function') {
-                        window.updateSaleInvoiceAddItemButtonState();
+                if (data.customer_id) {
+                    var cname = (data.customer_name || '').trim();
+                    if (typeof window.setAuragoldPartyValue === 'function') {
+                        window.setAuragoldPartyValue(data.customer_id, cname);
+                    } else {
+                        if (cname && document.getElementById('customerName')) {
+                            document.getElementById('customerName').value = cname;
+                        }
+                        if (document.getElementById('customerId')) {
+                            document.getElementById('customerId').value = data.customer_id;
+                        }
+                        if (typeof jQuery !== 'undefined') {
+                            jQuery('#customerId').trigger('change');
+                        }
                     }
+                    selectedCustomerId = data.customer_id;
                     setTimeout(function() {
                         if (typeof loadCustomerBalance === 'function') {
                             loadCustomerBalance();

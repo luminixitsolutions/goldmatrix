@@ -86,6 +86,51 @@ if (!function_exists('auragold_voucher_images_raw_to_group_image')) {
     }
 }
 
+if (!function_exists('auragold_voucher_apply_catalogue_images_to_items')) {
+    /**
+     * Fill group_image from jewelry catalogue when line has design_no but no saved photos.
+     *
+     * @param array<int, array<string, mixed>> $items
+     */
+    function auragold_voucher_apply_catalogue_images_to_items($conn, array &$items, string $base_url): void
+    {
+        if (!$conn || $items === []) {
+            return;
+        }
+        if (!function_exists('auragold_jewelry_catalogue_find_by_design_no')) {
+            $inc = __DIR__ . '/jewelry_catalogue_create_include.php';
+            if (is_file($inc)) {
+                require_once $inc;
+            }
+        }
+        if (!function_exists('auragold_jewelry_catalogue_find_by_design_no')
+            || !function_exists('auragold_jewelry_catalogue_normalize_db_row')
+            || !function_exists('auragold_jewelry_catalogue_images_to_group_image')) {
+            return;
+        }
+        $siteUrl = rtrim($base_url, '/');
+        foreach ($items as &$it) {
+            if (!empty($it['group_image'])) {
+                continue;
+            }
+            $dn = trim((string) ($it['design_no'] ?? ''));
+            if ($dn === '') {
+                continue;
+            }
+            $row = auragold_jewelry_catalogue_find_by_design_no($conn, $dn);
+            if (!$row) {
+                continue;
+            }
+            $catalogue = auragold_jewelry_catalogue_normalize_db_row($row);
+            $gi = auragold_jewelry_catalogue_images_to_group_image($catalogue['images'] ?? [], $siteUrl);
+            if ($gi !== '') {
+                $it['group_image'] = $gi;
+            }
+        }
+        unset($it);
+    }
+}
+
 if (!function_exists('auragold_voucher_apply_line_images_to_items')) {
   /**
    * @param array<int, array<string, mixed>> $items
@@ -102,6 +147,19 @@ if (!function_exists('auragold_voucher_apply_line_images_to_items')) {
             }
         }
         unset($it);
+    }
+}
+
+if (!function_exists('auragold_voucher_embed_items_apply_all_images')) {
+    /**
+     * Line images column, then jewellery catalogue by design no.
+     *
+     * @param array<int, array<string, mixed>> $items
+     */
+    function auragold_voucher_embed_items_apply_all_images($conn, array &$items, string $base_url): void
+    {
+        auragold_voucher_apply_line_images_to_items($items, $base_url);
+        auragold_voucher_apply_catalogue_images_to_items($conn, $items, $base_url);
     }
 }
 

@@ -60,8 +60,59 @@ body.modal-open #auragoldTopNav { z-index: 1030 !important; }
     }
 }
 
-if (!function_exists('auragold_echo_party_select2_scripts')) {
-    function auragold_echo_party_select2_scripts(): void
+if (!function_exists('auragold_party_select2_js_config')) {
+    /**
+     * JS config object for assets/js/auragold-party-select2.js
+     *
+     * @return array<string, string>
+     */
+    function auragold_party_select2_js_config(array $args = []): array
+    {
+        $a = array_merge(auragold_party_select2_defaults(), $args);
+        $partyId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($a['party_id'] ?? 'customerId')) ?: 'customerId';
+        $partyName = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($a['party_name'] ?? 'customerName')) ?: 'customerName';
+        $billingState = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($a['billing_state'] ?? 'customerBillingState')) ?: 'customerBillingState';
+        $wrapClass = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($a['wrap_class'] ?? 'auragold-party-select2-wrap')) ?: 'auragold-party-select2-wrap';
+        $placeholder = (string) ($a['placeholder'] ?? 'Select customer...');
+        $isSupplier = (stripos($placeholder, 'supplier') !== false);
+
+        return [
+            'partyId' => '#' . $partyId,
+            'partyName' => '#' . $partyName,
+            'billingState' => '#' . $billingState,
+            'gstin' => '#customerGstin',
+            'wrapClass' => $wrapClass,
+            'containerClass' => $wrapClass === 'si-customer-select2-wrap'
+                ? 'si-customer-select2-container'
+                : 'auragold-party-select2-container',
+            'dropdownClass' => $wrapClass === 'si-customer-select2-wrap'
+                ? 'si-customer-select2-dropdown'
+                : 'auragold-party-select2-dropdown',
+            'searchUrl' => 'ajax/search-customers.php',
+            'placeholder' => $placeholder,
+            'noResultsText' => $isSupplier ? 'No supplier found' : 'No account found',
+        ];
+    }
+}
+
+if (!function_exists('auragold_echo_party_select2_config_script')) {
+    function auragold_echo_party_select2_config_script(array $args = []): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $done = true;
+        $cfg = auragold_party_select2_js_config($args);
+        echo '<script>window.AURAGOLD_PARTY_SELECT2 = '
+            . json_encode($cfg, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE)
+            . ';</script>' . "\n";
+    }
+}
+
+if (!function_exists('auragold_echo_party_select2_init')) {
+    /** Load auragold-party-select2.js — call after js/previous-balance-common.js when the page uses previous balance. */
+    function auragold_echo_party_select2_init(): void
     {
         static $done = false;
         if ($done) {
@@ -69,9 +120,30 @@ if (!function_exists('auragold_echo_party_select2_scripts')) {
         }
         $done = true;
         $v = @filemtime(__DIR__ . '/../assets/js/auragold-party-select2.js');
+        echo '<script src="assets/js/auragold-party-select2.js?v=' . (int) $v . '"></script>' . "\n";
+    }
+}
+
+if (!function_exists('auragold_echo_party_select2_scripts')) {
+    /**
+     * @param bool $deferInitJs When true, only Select2 + config; call auragold_echo_party_select2_init() after previous-balance-common.js
+     */
+    function auragold_echo_party_select2_scripts(array $configArgs = [], bool $deferInitJs = false): void
+    {
+        static $done = false;
+        if ($done) {
+            if (!$deferInitJs) {
+                auragold_echo_party_select2_init();
+            }
+            return;
+        }
+        $done = true;
+        auragold_echo_party_select2_config_script($configArgs);
         echo '<link rel="stylesheet" href="assets/libs/select2/select2.css">' . "\n";
         echo '<script src="assets/libs/select2/select2.js"></script>' . "\n";
-        echo '<script src="assets/js/auragold-party-select2.js?v=' . (int) $v . '"></script>' . "\n";
+        if (!$deferInitJs) {
+            auragold_echo_party_select2_init();
+        }
     }
 }
 

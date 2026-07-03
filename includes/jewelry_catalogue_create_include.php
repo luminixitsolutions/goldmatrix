@@ -624,11 +624,135 @@ function auragold_jewelry_catalogue_json_safe_value($value)
 }
 
 /**
+ * Normalize design no for fuzzy lookup (JC-2, JC 2, jc2 → JC2).
+ */
+function auragold_jewelry_catalogue_normalize_design_no_key(string $designNo): string
+{
+    $s = strtoupper(trim($designNo));
+    $s = preg_replace('/[\s_]+/u', '', $s) ?? '';
+    $s = str_replace('-', '', $s);
+
+    return $s;
+}
+
+/**
+ * Resolve public URLs from catalogue images_json entries.
+ *
+ * @param list<array<string, mixed>> $images
+ * @return list<string>
+ */
+function auragold_jewelry_catalogue_image_urls(array $images, string $siteUrl = ''): array
+{
+    $urls = [];
+    foreach ($images as $img) {
+        if (!is_array($img)) {
+            continue;
+        }
+        $url = trim((string) ($img['url'] ?? ''));
+        if ($url === '' && !empty($img['path'])) {
+            $path = (string) $img['path'];
+            if (function_exists('gas_public_url_for_stored_path')) {
+                $url = gas_public_url_for_stored_path($path, $siteUrl);
+            } elseif (function_exists('auragold_uploads_public_url')) {
+                $url = auragold_uploads_public_url($path);
+            } elseif (function_exists('auragold_voucher_resolve_image_url')) {
+                $url = auragold_voucher_resolve_image_url($path, $siteUrl);
+            }
+        }
+        if ($url !== '') {
+            $urls[] = $url;
+        }
+    }
+
+    return array_values(array_unique($urls));
+}
+
+/**
+ * Build group_image JSON (primary + images) for voucher product list / modal rows.
+ */
+function auragold_jewelry_catalogue_images_to_group_image(array $images, string $siteUrl = ''): string
+{
+    $urls = auragold_jewelry_catalogue_image_urls($images, $siteUrl);
+    if ($urls === []) {
+        return '';
+    }
+
+    return json_encode(['primary' => $urls[0], 'images' => $urls]);
+}
+
+/**
+ * Find active catalogue row by design no (exact match, then normalized key).
+ *
+ * @return array<string, mixed>|null
+ */
+function auragold_jewelry_catalogue_find_by_design_no(mysqli $conn, string $designNo): ?array
+{
+    $designNo = trim($designNo);
+    if ($designNo === '') {
+        return null;
+    }
+
+    $esc = mysqli_real_escape_string($conn, $designNo);
+    $row = getRecord("SELECT * FROM tbl_jewelry_catalogue WHERE status = 1 AND design_no = '" . $esc . "' ORDER BY id DESC LIMIT 1");
+    if ($row) {
+        return $row;
+    }
+
+    $key = auragold_jewelry_catalogue_normalize_design_no_key($designNo);
+    if ($key === '') {
+        return null;
+    }
+
+    $rows = getList(
+        "SELECT * FROM tbl_jewelry_catalogue
+         WHERE status = 1 AND design_no IS NOT NULL AND TRIM(design_no) <> ''
+         ORDER BY id DESC LIMIT 1000"
+    );
+    if (!is_array($rows)) {
+        return null;
+    }
+    foreach ($rows as $candidate) {
+        $candKey = auragold_jewelry_catalogue_normalize_design_no_key((string) ($candidate['design_no'] ?? ''));
+        if ($candKey !== '' && $candKey === $key) {
+            return $candidate;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Attach catalogue header images to each modal row as group_image.
+ *
+ * @param list<array<string, mixed>> $modalRows
+ * @return list<array<string, mixed>>
+ */
+function auragold_jewelry_catalogue_attach_group_image_to_modal_rows(array $modalRows, array $catalogue, string $siteUrl = ''): array
+{
+    $groupImage = auragold_jewelry_catalogue_images_to_group_image($catalogue['images'] ?? [], $siteUrl);
+    if ($groupImage === '') {
+        return $modalRows;
+    }
+
+    foreach ($modalRows as &$mr) {
+        if (!is_array($mr)) {
+            continue;
+        }
+        if (empty($mr['group_image'])) {
+            $mr['group_image'] = $groupImage;
+        }
+    }
+    unset($mr);
+
+    return $modalRows;
+}
+
+/**
  * Load catalogue header + BOM lines for sale invoice product modal.
  *
  * @return array<string, mixed>|null
  */
-function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo = '', int $catalogueId = 0): ?array
+function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo = '', int $catalogueId = 0, string $siteUrl = ''): ?array
 {
     auragold_ensure_jewelry_catalogue_table($conn);
     $designNo = trim($designNo);
@@ -636,8 +760,7 @@ function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo
     if ($catalogueId > 0) {
         $row = getRecord('SELECT * FROM tbl_jewelry_catalogue WHERE id = ' . (int) $catalogueId . ' AND status = 1 LIMIT 1');
     } elseif ($designNo !== '') {
-        $esc = mysqli_real_escape_string($conn, $designNo);
-        $row = getRecord("SELECT * FROM tbl_jewelry_catalogue WHERE status = 1 AND design_no = '" . $esc . "' ORDER BY id DESC LIMIT 1");
+        $row = auragold_jewelry_catalogue_find_by_design_no($conn, $designNo);
     }
     if (!$row) {
         return null;
@@ -648,10 +771,13 @@ function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo
     if (!$modalRows) {
         $modalRows = auragold_jewelry_catalogue_header_to_modal_rows($conn, $catalogue);
     }
+    $modalRows = auragold_jewelry_catalogue_attach_group_image_to_modal_rows($modalRows, $catalogue, $siteUrl);
     $modalRows = auragold_jewelry_catalogue_json_safe_value($modalRows);
     if (!is_array($modalRows)) {
         $modalRows = [];
     }
+
+    $groupImage = auragold_jewelry_catalogue_images_to_group_image($catalogue['images'] ?? [], $siteUrl);
 
     return [
         'catalogue' => $catalogue,
@@ -661,6 +787,7 @@ function auragold_jewelry_catalogue_get_for_modal(mysqli $conn, string $designNo
         'metal_id' => (int) ($catalogue['metal_id'] ?? 0),
         'weight' => (string) ($catalogue['weight'] ?? ''),
         'amount' => (string) ($catalogue['amount'] ?? ''),
+        'group_image' => $groupImage,
     ];
 }
 

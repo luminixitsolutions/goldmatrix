@@ -1285,8 +1285,8 @@ if (isset($conn) && $conn instanceof mysqli) {
         }
     });
 
-    refreshBadge();
-    setInterval(refreshBadge, 60000);
+    setTimeout(refreshBadge, 1200);
+    setInterval(refreshBadge, 120000);
 })();
 // Log out after no keyboard/mouse/scroll activity (aligned with server session idle timeout)
 (function() {

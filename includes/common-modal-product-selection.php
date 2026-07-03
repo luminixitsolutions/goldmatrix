@@ -680,6 +680,10 @@ if (empty($common_modal_show_checkbox_column)) {
                 #productSearchModal {
                     z-index: 10700 !important;
                 }
+                /* Row Details overlay (10850) — product picker must stack above it */
+                body.product-row-detail-modal-open #productSearchModal {
+                    z-index: 10900 !important;
+                }
                 #productSelectionModal .modal-dialog {
                     margin-top: 1.25rem !important;
                     margin-bottom: 1rem !important;

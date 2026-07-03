@@ -30,11 +30,25 @@ if ($for_sale_invoice === 1) {
 
 $type = esc($type);
 $items = [];
+$hidden_in_manufacturing = 0;
 
 if ($type === 'Sale Order') {
-    $items = getList("SELECT * FROM tbl_sale_order_items WHERE order_id = $order_id ORDER BY id ASC");
-    if ($for_sale_invoice === 1 && function_exists('auragold_sale_order_filter_pending_invoice_items')) {
-        $items = auragold_sale_order_filter_pending_invoice_items($conn, $order_id, $items, $exclude_invoice_id);
+    $all_items = getList("SELECT * FROM tbl_sale_order_items WHERE order_id = $order_id ORDER BY id ASC");
+    if (!is_array($all_items)) {
+        $all_items = [];
+    }
+    $hidden_in_manufacturing = 0;
+    $items = $all_items;
+    if ($for_sale_invoice === 1) {
+        $pending = function_exists('auragold_sale_order_filter_pending_invoice_items')
+            ? auragold_sale_order_filter_pending_invoice_items($conn, $order_id, $all_items, $exclude_invoice_id)
+            : $all_items;
+        if (function_exists('auragold_sale_order_filter_invoice_ready_items')) {
+            $items = auragold_sale_order_filter_invoice_ready_items($conn, $order_id, $all_items, $exclude_invoice_id);
+            $hidden_in_manufacturing = max(0, count($pending) - count($items));
+        } else {
+            $items = $pending;
+        }
     }
     foreach ($items as &$item) {
         $item['barcode_no'] = $item['barcode_no'] ?? $item['barcode'] ?? '';
@@ -45,6 +59,15 @@ if ($type === 'Sale Order') {
         }
     }
     unset($item);
+    if ($items !== []) {
+        require_once __DIR__ . '/../includes/auragold_voucher_line_images.php';
+        $base_url = (isset($SiteUrl) ? rtrim((string) $SiteUrl, '/') . '/' : '');
+        if (function_exists('auragold_voucher_embed_items_apply_all_images')) {
+            auragold_voucher_embed_items_apply_all_images($conn, $items, $base_url);
+        } elseif (function_exists('auragold_voucher_apply_line_images_to_items')) {
+            auragold_voucher_apply_line_images_to_items($items, $base_url);
+        }
+    }
 } elseif ($type === 'Repair Order') {
     $items = getList("SELECT * FROM tbl_repair_order_items WHERE order_id = $order_id ORDER BY id ASC");
     foreach ($items as &$item) {
@@ -166,8 +189,12 @@ if ($type === 'Sale Order') {
     }
 }
 
-echo json_encode([
+$payload = [
     'status' => 'success',
-    'items' => $items
-]);
+    'items' => $items,
+];
+if ($type === 'Sale Order' && $for_sale_invoice === 1) {
+    $payload['hidden_in_manufacturing'] = (int) ($hidden_in_manufacturing ?? 0);
+}
+echo json_encode($payload);
 ?>

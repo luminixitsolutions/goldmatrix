@@ -70,6 +70,18 @@
         var partyIdEl = cfg.partyIdSelector ? document.querySelector(cfg.partyIdSelector) : null;
         var partyName = partyNameEl ? String(partyNameEl.value || '').trim() : '';
         var partyId = partyIdEl ? String(partyIdEl.value || '').trim() : '';
+        if (!partyName && partyId && partyIdEl && partyIdEl.tagName === 'SELECT') {
+            var selOpt = partyIdEl.options[partyIdEl.selectedIndex];
+            if (selOpt && selOpt.value === partyId) {
+                partyName = String(selOpt.text || selOpt.textContent || '').trim();
+            }
+            if (!partyName && typeof jQuery !== 'undefined' && jQuery(partyIdEl).hasClass('select2-hidden-accessible')) {
+                var s2data = jQuery(partyIdEl).select2('data');
+                if (s2data && s2data.length) {
+                    partyName = String(s2data[0].name || s2data[0].text || '').trim();
+                }
+            }
+        }
         var params = new URLSearchParams();
         if (partyId) params.set('customer_id', partyId);
         if (partyName) params.set('customer_name', partyName);
@@ -297,6 +309,11 @@
         var partyIdField = merged.partyIdSelector ? document.querySelector(merged.partyIdSelector) : null;
         if (partyIdField) {
             partyIdField.addEventListener('change', function () {
+                if (partyFieldOrIdReady()) load(merged);
+            });
+        }
+        if (typeof jQuery !== 'undefined' && merged.partyIdSelector) {
+            jQuery(document).off('change.auragoldPrevBalancePartyId').on('change.auragoldPrevBalancePartyId', merged.partyIdSelector, function () {
                 if (partyFieldOrIdReady()) load(merged);
             });
         }

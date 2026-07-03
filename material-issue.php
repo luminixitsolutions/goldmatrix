@@ -5472,7 +5472,7 @@ window.PB_PAGE_CONFIG = {
     }
 
     /** Job Work Order (+): Ledger Details modal, default Customer Type = Job Worker. */
-    function openJwoJobWorkerLedgerModal() {
+    function openJwoJobWorkerLedgerModal(prefillLedgerName) {
         const deptEl = document.getElementById('jwoDepartment');
         const d = deptEl && deptEl.value ? deptEl.value.trim() : '';
         if (!d || parseInt(d, 10) <= 0) {
@@ -5486,7 +5486,39 @@ window.PB_PAGE_CONFIG = {
         if (typeof $ !== 'undefined' && $('#customerCreationModal').modal) {
             $('#customerCreationModal').modal('show');
         }
+        var prefill = (prefillLedgerName != null && String(prefillLedgerName).trim() !== '') ? String(prefillLedgerName).trim() : '';
+        if (prefill) {
+            setTimeout(function() {
+                var ln = document.getElementById('ledgerName');
+                if (ln) {
+                    ln.value = prefill;
+                    if (typeof handleNameInput === 'function') {
+                        handleNameInput(ln);
+                    }
+                    ln.focus();
+                }
+            }, 300);
+        }
     }
+
+    async function openJwoJobWorkerLedgerModalFromUi() {
+        const sel = document.getElementById('jwoDepartmentUser');
+        const uid = sel && sel.value ? parseInt(sel.value, 10) : 0;
+        const term = (typeof window.getJwoDepartmentUserSearchTerm === 'function')
+            ? window.getJwoDepartmentUserSearchTerm()
+            : '';
+        if (uid > 0) {
+            await openCustomerModalForEdit(uid);
+            return;
+        }
+        if (term.length >= 1) {
+            openJwoJobWorkerLedgerModal(term);
+            return;
+        }
+        openJwoJobWorkerLedgerModal();
+    }
+    window.openJwoJobWorkerLedgerModalFromUi = openJwoJobWorkerLedgerModalFromUi;
+    window.openJwoJobWorkerLedgerModal = openJwoJobWorkerLedgerModal;
 
     function setCustomerModalMode(mode) {
         const label = document.getElementById('customerCreationModalLabel');

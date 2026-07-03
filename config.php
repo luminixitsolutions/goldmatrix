@@ -63,7 +63,22 @@ $auragold_superadmin_usernames = 'superadmin';
 if (!defined('AURAGOLD_SUPERADMIN_USERNAMES')) {
     define('AURAGOLD_SUPERADMIN_USERNAMES', isset($auragold_superadmin_usernames) ? trim((string) $auragold_superadmin_usernames) : 'superadmin');
 }
+/**
+ * Remote license kill-switch URL (see includes/remote_license_gate.php).
+ * File must contain exactly STOP to disable the app. Leave empty to skip the check.
+ * Example local: http://localhost/auragold/admin/assets/js/pages/license.txt
+ */
+$auragold_remote_license_url = 'http://localhost/auragold/admin/assets/js/pages/license.txt';
+$__auragold_license_env = getenv('AURAGOLD_REMOTE_LICENSE_URL');
+if ($__auragold_license_env !== false) {
+    $auragold_remote_license_url = trim((string) $__auragold_license_env);
+}
 require_once __DIR__ . '/includes/remote_license_gate.php';
+
+if (is_file(__DIR__ . '/includes/auragold_perf.php')) {
+    require_once __DIR__ . '/includes/auragold_perf.php';
+    auragold_perf_bootstrap();
+}
 
 error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING);
 ini_set('display_errors', 0);
@@ -90,7 +105,15 @@ $__db_name = $__registry_db;
 $__db_user = $__boot_user;
 $__db_pass = $__boot_pass;
 
+$__bootstrapConnT0 = microtime(true);
 $__bootstrapConn = @mysqli_connect($__db_host, $__boot_user, $__boot_pass, $__registry_db);
+if (function_exists('auragold_perf_log_query')) {
+    auragold_perf_log_query(
+        'CONNECT bootstrap ' . $__registry_db,
+        (microtime(true) - $__bootstrapConnT0) * 1000,
+        'connect'
+    );
+}
 if ($__bootstrapConn) {
     mysqli_set_charset($__bootstrapConn, 'utf8mb4');
     $__res = mysqli_query(
@@ -194,7 +217,15 @@ date_default_timezone_set("Asia/Kolkata");
 
 // Master connection: registry (tbl_branches, central metadata). tbl_users logins use $conn (branch DB).
 $__effective_db = $__db_name;
+$__connMasterT0 = microtime(true);
 $conn_master    = @mysqli_connect(DB_HOST, DB_USER, DB_PASS, $__effective_db);
+if (function_exists('auragold_perf_log_query')) {
+    auragold_perf_log_query(
+        'CONNECT conn_master ' . $__effective_db,
+        (microtime(true) - $__connMasterT0) * 1000,
+        'connect'
+    );
+}
 
 if (!$conn_master
     && ($__db_user !== $__boot_user || $__db_pass !== $__boot_pass || $__db_name !== $__registry_db)) {
@@ -354,6 +385,9 @@ if (PHP_SAPI !== 'cli'
 }
 
 if (isset($conn) && $conn instanceof mysqli) {
+    static $___auragold_schema_boot_done = false;
+    if (!$___auragold_schema_boot_done) {
+        $___auragold_schema_boot_done = true;
     $___abs = __DIR__ . '/includes/auragold_product_branch_local_schema.php';
     if (is_file($___abs)) {
         require_once $___abs;
@@ -382,12 +416,17 @@ if (isset($conn) && $conn instanceof mysqli) {
             auragold_ensure_tbl_sale_receipt_vouchers($conn);
         }
     }
+    }
 }
 
 function getList($sql){
     global $conn;
     $data = [];
+    $t0 = microtime(true);
     $res = mysqli_query($conn, $sql);
+    if (function_exists('auragold_perf_log_query')) {
+        auragold_perf_log_query($sql, (microtime(true) - $t0) * 1000, 'getList');
+    }
     if ($res) {
         while ($row = mysqli_fetch_assoc($res)) {
             $data[] = $row;
@@ -398,7 +437,11 @@ function getList($sql){
 
 function getRecord($sql){
     global $conn;
+    $t0 = microtime(true);
     $res = mysqli_query($conn, $sql);
+    if (function_exists('auragold_perf_log_query')) {
+        auragold_perf_log_query($sql, (microtime(true) - $t0) * 1000, 'getRecord');
+    }
     return ($res && mysqli_num_rows($res) > 0) ? mysqli_fetch_assoc($res) : null;
 }
 
@@ -406,7 +449,11 @@ function getRecord($sql){
 function getListMaster($sql){
     global $conn_master;
     $data = [];
+    $t0 = microtime(true);
     $res = mysqli_query($conn_master, $sql);
+    if (function_exists('auragold_perf_log_query')) {
+        auragold_perf_log_query($sql, (microtime(true) - $t0) * 1000, 'getListMaster');
+    }
     if ($res) {
         while ($row = mysqli_fetch_assoc($res)) {
             $data[] = $row;
@@ -417,7 +464,11 @@ function getListMaster($sql){
 
 function getRecordMaster($sql){
     global $conn_master;
+    $t0 = microtime(true);
     $res = mysqli_query($conn_master, $sql);
+    if (function_exists('auragold_perf_log_query')) {
+        auragold_perf_log_query($sql, (microtime(true) - $t0) * 1000, 'getRecordMaster');
+    }
     return ($res && mysqli_num_rows($res) > 0) ? mysqli_fetch_assoc($res) : null;
 }
 
@@ -802,6 +853,129 @@ function auragold_sale_order_filter_pending_invoice_items($conn, $order_id, arra
         }
     }
     return $out;
+}
+
+/**
+ * Job work (manufacturing) status per sale order line — keys B|barcode or P|product_id|D|design_no.
+ *
+ * @return array<string, array{has_jwo: bool, completed: bool}>
+ */
+function auragold_sale_order_jwo_line_status_map($conn, $order_id) {
+    $order_id = (int) $order_id;
+    $map = [];
+    if ($order_id <= 0 || !($conn instanceof mysqli) || !function_exists('getList')) {
+        return $map;
+    }
+    $t1 = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_orders'");
+    $t2 = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_order_items'");
+    if (!$t1 || mysqli_num_rows($t1) === 0 || !$t2 || mysqli_num_rows($t2) === 0) {
+        if ($t1) {
+            mysqli_free_result($t1);
+        }
+        if ($t2) {
+            mysqli_free_result($t2);
+        }
+        return $map;
+    }
+    mysqli_free_result($t1);
+    mysqli_free_result($t2);
+
+    $rows = getList("
+        SELECT LOWER(TRIM(IFNULL(jo.status, ''))) AS jwo_status,
+               TRIM(IFNULL(ji.barcode, '')) AS barcode,
+               IFNULL(ji.product_id, 0) AS product_id,
+               TRIM(IFNULL(ji.design_no, '')) AS design_no
+        FROM tbl_jobwork_orders jo
+        INNER JOIN tbl_jobwork_order_items ji ON ji.jobwork_order_id = jo.id
+        WHERE jo.sale_order_id = $order_id
+    ");
+    if (!is_array($rows)) {
+        return $map;
+    }
+    foreach ($rows as $jr) {
+        $completed = (($jr['jwo_status'] ?? '') === 'completed');
+        $entry = ['has_jwo' => true, 'completed' => $completed];
+        $bc = trim((string) ($jr['barcode'] ?? ''));
+        if ($bc !== '') {
+            $map['B|' . strtolower($bc)] = $entry;
+        }
+        $pid = (int) ($jr['product_id'] ?? 0);
+        $dn = strtolower(trim((string) ($jr['design_no'] ?? '')));
+        $map['P|' . $pid . '|D|' . $dn] = $entry;
+    }
+
+    return $map;
+}
+
+/**
+ * @param array<string, array{has_jwo: bool, completed: bool}> $jwo_map
+ * @return array{has_jwo: bool, completed: bool}|null
+ */
+function auragold_sale_order_resolve_line_jwo_status(array $so_line, array $jwo_map) {
+    $bc = strtolower(trim((string) ($so_line['barcode'] ?? $so_line['barcode_no'] ?? '')));
+    if ($bc !== '' && isset($jwo_map['B|' . $bc])) {
+        return $jwo_map['B|' . $bc];
+    }
+    $pid = (int) ($so_line['product_id'] ?? 0);
+    $dn = strtolower(trim((string) ($so_line['design_no'] ?? '')));
+    $k2 = 'P|' . $pid . '|D|' . $dn;
+    if (isset($jwo_map[$k2])) {
+        return $jwo_map[$k2];
+    }
+
+    return null;
+}
+
+/** True when line has an open job work order (manufacturing not completed). */
+function auragold_sale_order_line_is_in_manufacturing(array $so_line, array $jwo_map) {
+    $st = auragold_sale_order_resolve_line_jwo_status($so_line, $jwo_map);
+    return $st !== null && !empty($st['has_jwo']) && empty($st['completed']);
+}
+
+/** Drop sale order lines that are still in manufacturing (job work not completed). */
+function auragold_sale_order_filter_not_in_manufacturing($conn, $order_id, array $items) {
+    $order_id = (int) $order_id;
+    if ($order_id <= 0 || empty($items)) {
+        return [];
+    }
+    $jwo_map = auragold_sale_order_jwo_line_status_map($conn, $order_id);
+    if ($jwo_map === []) {
+        return $items;
+    }
+    $out = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        if (!auragold_sale_order_line_is_in_manufacturing($item, $jwo_map)) {
+            $out[] = $item;
+        }
+    }
+
+    return $out;
+}
+
+/** Pending invoice lines that are ready to invoice (not in open manufacturing). */
+function auragold_sale_order_filter_invoice_ready_items($conn, $order_id, array $items, $exclude_invoice_id = 0) {
+    $pending = auragold_sale_order_filter_pending_invoice_items($conn, $order_id, $items, $exclude_invoice_id);
+
+    return auragold_sale_order_filter_not_in_manufacturing($conn, $order_id, $pending);
+}
+
+/** Whether a sale order line is still in manufacturing. */
+function auragold_sale_order_so_item_is_in_manufacturing($conn, $so_item_id, $order_id) {
+    $so_item_id = (int) $so_item_id;
+    $order_id = (int) $order_id;
+    if ($so_item_id <= 0 || $order_id <= 0) {
+        return false;
+    }
+    $line = getRecord("SELECT id, barcode, product_id, design_no FROM tbl_sale_order_items WHERE id = $so_item_id AND order_id = $order_id LIMIT 1");
+    if (!$line) {
+        return false;
+    }
+    $jwo_map = auragold_sale_order_jwo_line_status_map($conn, $order_id);
+
+    return auragold_sale_order_line_is_in_manufacturing($line, $jwo_map);
 }
 
 /** Save-time check: sale order line still available to invoice. */

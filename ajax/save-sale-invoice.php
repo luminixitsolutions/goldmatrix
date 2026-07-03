@@ -918,6 +918,11 @@ try {
                     throw new Exception('One or more Sale Order items are already invoiced. Please refresh and try again.');
                 }
             }
+            if (function_exists('auragold_sale_order_so_item_is_in_manufacturing')) {
+                if (auragold_sale_order_so_item_is_in_manufacturing($conn, $src_so, $against_id)) {
+                    throw new Exception('One or more Sale Order items are still in manufacturing. Complete manufacturing first.');
+                }
+            }
         }
         if ($mapped_so_count === 0) {
             throw new Exception('Please select at least one Sale Order item.');

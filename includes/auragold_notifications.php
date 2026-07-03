@@ -158,9 +158,29 @@ if (!function_exists('auragold_notifications_seed_due_today')) {
             return;
         }
 
+        static $doneRequest = [];
+        $reqKey = spl_object_hash($conn);
+        if (!empty($doneRequest[$reqKey])) {
+            return;
+        }
+
+        $dbName = '';
+        $dbRes = @mysqli_query($conn, 'SELECT DATABASE() AS d');
+        if ($dbRes && ($dbRow = mysqli_fetch_assoc($dbRes))) {
+            $dbName = (string) ($dbRow['d'] ?? '');
+        }
+        if ($dbRes) {
+            mysqli_free_result($dbRes);
+        }
+        $today = date('Y-m-d');
+        $cacheFile = __DIR__ . '/../cache/notif_seed_' . md5($dbName . '|' . $today) . '.flag';
+        if (is_file($cacheFile) && (time() - (int) filemtime($cacheFile)) < 3600) {
+            $doneRequest[$reqKey] = true;
+            return;
+        }
+
         auragold_ensure_notifications_table($conn);
 
-        $today = date('Y-m-d');
         $today_disp = auragold_notify_format_display_date($today);
 
         $checks = [
@@ -236,5 +256,12 @@ if (!function_exists('auragold_notifications_seed_due_today')) {
                 );
             }
         }
+
+        $doneRequest[$reqKey] = true;
+        $cacheDir = dirname($cacheFile);
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0755, true);
+        }
+        @touch($cacheFile);
     }
 }

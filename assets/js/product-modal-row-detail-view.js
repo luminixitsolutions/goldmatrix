@@ -675,6 +675,20 @@
         }, 0);
     }
 
+    /** Desktop Row Details modal — sync form fields after product pick / row populate. */
+    function refreshProductRowDetailFormIfOpen(row) {
+        if (!row || isMobileDetailView()) return;
+        var modal = document.getElementById(MODAL_ID);
+        if (!modal || !modal.classList.contains('is-open')) return;
+        if (window.__auragoldCurrentDetailRow !== row) return;
+        var form = document.getElementById('productRowDetailForm');
+        if (!form) return;
+        refreshFormFromRow(row, form);
+        var productLabel = getProductDisplayName(row) || readCellValue(row.querySelector('td[data-column="barcode"]')) || 'Row';
+        var titleEl = modal.querySelector('.product-row-detail-modal__title');
+        if (titleEl) titleEl.textContent = 'Row Details — ' + productLabel;
+    }
+
     function openMobileInlineProductForm(row) {
         if (!row || !isMobileDetailView()) return false;
 
@@ -898,7 +912,8 @@
             + '.product-row-detail-modal__form .product-row-detail-modal__input--calculated{'
             + 'background:#f8fafc !important;color:#334155 !important;}'
             + '.product-row-detail-modal__footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e2e8f0;}'
-            + '#productSelectionModal td[data-column="actions"] .product-row-view-btn:hover{color:#c5a864;}';
+            + '#productSelectionModal td[data-column="actions"] .product-row-view-btn:hover{color:#c5a864;}'
+            + 'body.product-row-detail-modal-open #productSearchModal{z-index:10900 !important;}';
         var css = document.getElementById('product-row-detail-modal-css');
         if (!css) {
             css = document.createElement('style');
@@ -1021,6 +1036,7 @@
     window.exitMobileProductDetails = exitMobileProductDetails;
     window.commitMobileProductDetailsSave = commitMobileProductDetailsSave;
     window.refreshMobileInlineProductFormIfOpen = refreshMobileInlineProductFormIfOpen;
+    window.refreshProductRowDetailFormIfOpen = refreshProductRowDetailFormIfOpen;
     window.patchMobileFormProductField = patchMobileFormProductField;
     window.ensureProductRowViewIcon = ensureProductRowViewIcon;
     window.scanProductRowsForViewIcons = scanProductRowsForViewIcons;

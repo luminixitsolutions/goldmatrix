@@ -137,6 +137,61 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             pointer-events: none;
             opacity: 0.65;
         }
+        .jcat-import-dropdown { position: relative; }
+        .jcat-import-dropdown .dropdown-menu {
+            z-index: 1100;
+            min-width: 200px;
+            margin-top: 4px;
+            border: 1px solid #d6dbea;
+            border-radius: 10px;
+            box-shadow: 0 10px 28px rgba(17, 41, 75, 0.18);
+            padding: 6px 0;
+        }
+        .jcat-import-dropdown .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            color: var(--jcat-navy);
+        }
+        .jcat-excel-import-loader {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(17, 41, 75, 0.35);
+            align-items: center;
+            justify-content: center;
+        }
+        .jcat-excel-import-loader.is-visible {
+            display: flex;
+        }
+        .jcat-excel-import-loader__panel {
+            background: #fff;
+            border-radius: 10px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+            text-align: center;
+            min-width: 220px;
+        }
+        .jcat-excel-import-loader__spinner {
+            width: 36px;
+            height: 36px;
+            margin: 0 auto 0.75rem;
+            border: 3px solid #d6dbea;
+            border-top-color: var(--jcat-gold);
+            border-radius: 50%;
+            animation: jcatExcelSpin 0.7s linear infinite;
+        }
+        .jcat-excel-import-loader__text {
+            margin: 0;
+            color: var(--jcat-navy);
+            font-size: 0.9375rem;
+        }
+        @keyframes jcatExcelSpin {
+            to { transform: rotate(360deg); }
+        }
         .jcat-btn-outline {
             border: 1px solid var(--jcat-navy);
             color: var(--jcat-navy);
@@ -553,7 +608,15 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
                 <i class="feather icon-search" aria-hidden="true"></i>
             </div>
             <div class="jcat-toolbar-right">
-                <button type="button" class="jcat-btn-outline btn btn-sm" id="jcatImport" title="Import">Import</button>
+                <div class="dropdown jcat-import-dropdown">
+                    <button type="button" class="jcat-btn-outline btn btn-sm dropdown-toggle" id="jcatImportBtn"
+                        data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" title="Import">Import</button>
+                    <div class="dropdown-menu dropdown-menu-right">
+                        <a class="dropdown-item js-jcat-excel-import-trigger" href="#"><i class="feather icon-upload mr-2"></i>Import Excel</a>
+                        <a class="dropdown-item js-jcat-excel-sample-download" href="ajax/download-jewelry-catalogue-excel-sample.php"><i class="feather icon-download mr-2"></i>Download Sample</a>
+                    </div>
+                </div>
+                <input type="file" id="jcatExcelImportFile" accept=".xlsx,.xls" style="display:none;" tabindex="-1">
                 <button type="button" class="jcat-icon-btn" id="jcatBtnFilter" title="Advance Filter" aria-label="Advance Filter">
                     <i class="feather icon-filter"></i>
                     <span class="jcat-filter-badge" id="jcatFilterBadge">0</span>
@@ -782,6 +845,13 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
             <button type="button" class="btn btn-sm btn-primary" id="jcatFilterApply">Apply Filter</button>
             <button type="button" class="btn btn-sm btn-outline-danger" id="jcatFilterClear">Clear Filter</button>
         </div>
+    </div>
+</div>
+
+<div id="jcatExcelImportLoader" class="jcat-excel-import-loader" aria-hidden="true">
+    <div class="jcat-excel-import-loader__panel">
+        <div class="jcat-excel-import-loader__spinner" aria-hidden="true"></div>
+        <p class="jcat-excel-import-loader__text">Importing catalogue… Please wait.</p>
     </div>
 </div>
 
@@ -1015,7 +1085,9 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
                 current_qty: parseFloat(it.current_qty) || 0,
                 current_weight: parseFloat(it.current_weight) || 0,
                 product_name: it.product_name || '',
-                design_no: it.design_no || ''
+                design_no: it.design_no || '',
+                catalogue_id: parseInt(it.catalogue_id, 10) || 0,
+                is_catalogue_only: !!it.is_catalogue_only
             };
         });
     }
@@ -1270,9 +1342,7 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
     document.getElementById('jcatRefresh').addEventListener('click', loadCatalog);
     document.getElementById('jcatUpdateRecords').addEventListener('click', loadCatalog);
     document.getElementById('jcatSync').addEventListener('click', function () { loadCatalog(); });
-    document.getElementById('jcatImport').addEventListener('click', function () {
-        alert('Import — use Stock Journal Excel import from Utilities.');
-    });
+    window.jcatReloadCatalog = loadCatalog;
     document.getElementById('jcatDeleteSelected').addEventListener('click', function () {
         var n = Object.keys(selectedBarcodes).length;
         if (!n) { alert('Select items using the checkboxes first.'); return; }
@@ -1469,5 +1539,6 @@ $jcat_can_sale_quot = !function_exists('auragold_nav_show_php_href') || auragold
     loadCatalog();
 })();
 </script>
+<script src="assets/js/jewelry-catalogue-excel-import.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/jewelry-catalogue-excel-import.js'); ?>"></script>
 </body>
 </html>

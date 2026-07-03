@@ -321,6 +321,294 @@ if (!function_exists('auragold_enrich_rows_branch_name_from_registry')) {
     }
 }
 
+if (!function_exists('auragold_working_db_main_branch_id')) {
+    /**
+     * Main branch row (main_branch_id = 0) in the current working / operational DB.
+     * Ids can differ from the central registry (e.g. registry main=1, branch DB main=47).
+     */
+    function auragold_working_db_main_branch_id(): int {
+        static $cached = null;
+        static $cached_for_db = '';
+        global $conn;
+        $db_key = '';
+        if ($conn instanceof mysqli) {
+            $db_key = (string) mysqli_get_server_info($conn) . '|';
+            $db_res = @mysqli_query($conn, 'SELECT DATABASE() AS db');
+            if ($db_res && ($db_row = mysqli_fetch_assoc($db_res))) {
+                $db_key .= (string) ($db_row['db'] ?? '');
+            }
+            if ($db_res) {
+                mysqli_free_result($db_res);
+            }
+        }
+        if ($cached !== null && $cached_for_db === $db_key && $db_key !== '') {
+            return $cached;
+        }
+        $cached = 0;
+        $cached_for_db = $db_key;
+        if (!function_exists('getRecord')) {
+            return 0;
+        }
+        $r = @getRecord('SELECT id FROM tbl_branches WHERE IFNULL(main_branch_id, 0) = 0 ORDER BY id ASC LIMIT 1');
+        $cached = ($r && !empty($r['id'])) ? (int) $r['id'] : 0;
+        return $cached;
+    }
+}
+
+if (!function_exists('auragold_normalize_branch_scope_for_working_db')) {
+    /**
+     * When session/registry scope is the registry main id but ledger rows live under the working DB main id, remap scope.
+     */
+    function auragold_normalize_branch_scope_for_working_db(int $scope_branch_id): int {
+        if ($scope_branch_id <= 0) {
+            return $scope_branch_id;
+        }
+        $registry_main = function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0;
+        $working_main = auragold_working_db_main_branch_id();
+        if ($registry_main > 0 && $scope_branch_id === $registry_main && $working_main > 0 && $working_main !== $registry_main) {
+            return $working_main;
+        }
+        return $scope_branch_id;
+    }
+}
+
+if (!function_exists('auragold_customer_ledger_branch_is_main_scope')) {
+    function auragold_customer_ledger_branch_is_main_scope(int $scope_branch_id): bool {
+        if ($scope_branch_id <= 0) {
+            return false;
+        }
+        $registry_main = function_exists('auragold_settings_main_branch_id') ? (int) auragold_settings_main_branch_id() : 0;
+        $working_main = auragold_working_db_main_branch_id();
+        if ($registry_main > 0 && $scope_branch_id === $registry_main) {
+            return true;
+        }
+        if ($working_main > 0 && $scope_branch_id === $working_main) {
+            return true;
+        }
+        if (function_exists('auragold_branch_root_main_id_for_branch')) {
+            $root = (int) auragold_branch_root_main_id_for_branch($scope_branch_id);
+            if ($root > 0 && $scope_branch_id === $root) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('auragold_account_ledger_resolved_branch_ids')) {
+    /**
+     * Branch id list for ledger queries — same rules as accountledger-report.php (working branch, then tree root / session main).
+     *
+     * @return list<int>
+     */
+    function auragold_account_ledger_resolved_branch_ids(): array {
+        $al_main_branch_id = function_exists('auragold_branch_stock_transfer_tree_root_id')
+            ? (int) auragold_branch_stock_transfer_tree_root_id()
+            : 0;
+        if ($al_main_branch_id <= 0 && function_exists('auragold_settings_main_branch_id')) {
+            $al_main_branch_id = (int) auragold_settings_main_branch_id();
+        }
+        $tr_effective_branch_id = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
+        if ($tr_effective_branch_id <= 0 && $al_main_branch_id <= 0 && session_status() === PHP_SESSION_ACTIVE) {
+            $al_wb = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
+            if ($al_wb > 0 && function_exists('auragold_branch_root_main_id_for_branch')) {
+                $al_main_branch_id = (int) auragold_branch_root_main_id_for_branch($al_wb);
+            }
+        }
+        if ($tr_effective_branch_id > 0) {
+            $ids = [$tr_effective_branch_id];
+        } elseif ($al_main_branch_id > 0) {
+            $ids = [$al_main_branch_id];
+        } else {
+            return [];
+        }
+        if (function_exists('auragold_normalize_branch_scope_for_working_db')) {
+            foreach ($ids as $k => $id) {
+                $ids[$k] = auragold_normalize_branch_scope_for_working_db((int) $id);
+            }
+            $ids = array_values(array_unique(array_filter($ids)));
+        }
+        return $ids;
+    }
+}
+
+if (!function_exists('auragold_account_ledger_branch_scope_sql')) {
+    /**
+     * SQL AND fragment for tbl_customer_ledger branch scope — matches accountledger-report.php legacy NULL/0 on main branch.
+     */
+    function auragold_account_ledger_branch_scope_sql(string $columnPrefix = ''): string {
+        global $conn;
+        $col = ($columnPrefix !== '' ? rtrim($columnPrefix, '.') . '.' : '');
+        if (!($conn instanceof mysqli) || !function_exists('auragold_tbl_has_column') || !auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'branch_id')) {
+            return '';
+        }
+        $ids = auragold_account_ledger_resolved_branch_ids();
+        if ($ids === []) {
+            return '';
+        }
+        $main_for_legacy = function_exists('auragold_working_db_main_branch_id') ? (int) auragold_working_db_main_branch_id() : 0;
+        if ($main_for_legacy <= 0) {
+            $main_for_legacy = function_exists('auragold_branch_stock_transfer_tree_root_id')
+                ? (int) auragold_branch_stock_transfer_tree_root_id()
+                : 0;
+        }
+        if ($main_for_legacy <= 0 && function_exists('auragold_settings_main_branch_id')) {
+            $main_for_legacy = (int) auragold_settings_main_branch_id();
+        }
+        if ($main_for_legacy > 0 && function_exists('auragold_normalize_branch_scope_for_working_db')) {
+            $main_for_legacy = auragold_normalize_branch_scope_for_working_db($main_for_legacy);
+        }
+        $id_list = implode(',', array_map('intval', $ids));
+        $includes_main_legacy = ($main_for_legacy > 0 && in_array($main_for_legacy, $ids, true));
+        if ($includes_main_legacy) {
+            return " AND ({$col}branch_id IN ($id_list) OR {$col}branch_id IS NULL OR {$col}branch_id = 0)";
+        }
+        return " AND {$col}branch_id IN ($id_list)";
+    }
+}
+
+if (!function_exists('auragold_account_ledger_party_cl_balance')) {
+    /**
+     * Closing amount balance for a party — same rules as accountledger-report.php View All Ledger (SUM debit − credit).
+     * Tries customer_name first (ledger report filter), then customer_id; retries branch scope then no branch.
+     *
+     * @return array{found: bool, balance_amount: float, balance_gold: float, balance_silver: float, balance_diamond: float, balance_gemstone: float}
+     */
+    function auragold_account_ledger_party_cl_balance(int $customer_id, string $customer_name, bool $has_balance_gold_pure = false): array {
+        global $conn;
+        $empty = [
+            'found' => false,
+            'balance_amount' => 0.0,
+            'balance_gold' => 0.0,
+            'balance_silver' => 0.0,
+            'balance_diamond' => 0.0,
+            'balance_gemstone' => 0.0,
+        ];
+        if (!($conn instanceof mysqli) || !function_exists('getRecord')) {
+            return $empty;
+        }
+
+        $party_scopes = [];
+        $trim_name = trim($customer_name);
+        if ($trim_name !== '') {
+            $esc_name = mysqli_real_escape_string($conn, $trim_name);
+            $party_scopes[] = "LOWER(TRIM(customer_name)) = LOWER(TRIM('$esc_name'))";
+        }
+        if ($customer_id > 0) {
+            $party_scopes[] = 'customer_id = ' . (int) $customer_id;
+        }
+        if ($party_scopes === []) {
+            return $empty;
+        }
+
+        $branch_sqls = [];
+        if (function_exists('auragold_account_ledger_branch_scope_sql')) {
+            $scoped = auragold_account_ledger_branch_scope_sql('');
+            if ($scoped !== '') {
+                $branch_sqls[] = $scoped;
+            }
+        }
+        if (function_exists('auragold_working_db_main_branch_id')) {
+            $wm = (int) auragold_working_db_main_branch_id();
+            if ($wm > 0 && function_exists('auragold_normalize_branch_scope_for_working_db')) {
+                $wm = auragold_normalize_branch_scope_for_working_db($wm);
+            }
+            if ($wm > 0) {
+                $legacy = ' AND (branch_id = ' . $wm . ' OR branch_id IS NULL OR branch_id = 0)';
+                if (!in_array($legacy, $branch_sqls, true)) {
+                    $branch_sqls[] = $legacy;
+                }
+            }
+        }
+        $branch_sqls[] = '';
+
+        $ledger_excl_pb = " AND COALESCE(transaction_type,'') <> 'previous_balance_payment'";
+        $hedging_metal_sql = "LOWER(COALESCE(description,'')) LIKE '%(hedging)%'";
+        $payment_metal_sql = "(COALESCE(transaction_type,'') = 'payment' AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
+        $rv_pv_metal_sql = "(COALESCE(transaction_type,'') IN ('receipt_voucher','sale_receipt_voucher','payment_voucher') AND (ABS(COALESCE(debit_gold,0)) + ABS(COALESCE(credit_gold,0)) + ABS(COALESCE(debit_silver,0)) + ABS(COALESCE(credit_silver,0)) > 0.00001))";
+        $ledger_metal_view_sql = "($hedging_metal_sql OR $payment_metal_sql OR $rv_pv_metal_sql)";
+
+        foreach ($party_scopes as $party_scope) {
+            foreach ($branch_sqls as $brLedgerAnd) {
+                $cnt = getRecord("SELECT COUNT(*) AS n FROM tbl_customer_ledger WHERE status = 1 AND ($party_scope) $ledger_excl_pb $brLedgerAnd");
+                if ((int) ($cnt['n'] ?? 0) <= 0) {
+                    continue;
+                }
+
+                $amount_row = getRecord("
+                    SELECT COALESCE(SUM(debit_amount - credit_amount), 0) AS net_amt
+                    FROM tbl_customer_ledger
+                    WHERE status = 1 AND ($party_scope) $ledger_excl_pb $brLedgerAnd
+                ");
+                $balance_amount = (float) ($amount_row['net_amt'] ?? 0);
+
+                $metal_cl_row = getRecord("
+                    SELECT
+                        COALESCE(SUM(debit_gold - credit_gold), 0) AS net_gold,
+                        COALESCE(SUM(debit_silver - credit_silver), 0) AS net_silver
+                        " . ($has_balance_gold_pure ? ", COALESCE(SUM(debit_gold_pure - credit_gold_pure), 0) AS net_gold_pure" : "") . "
+                    FROM tbl_customer_ledger
+                    WHERE status = 1 AND ($party_scope) AND ($ledger_metal_view_sql)
+                    $brLedgerAnd
+                ");
+                $balance_gold = $has_balance_gold_pure && isset($metal_cl_row['net_gold_pure'])
+                    ? (float) $metal_cl_row['net_gold_pure']
+                    : (float) ($metal_cl_row['net_gold'] ?? 0);
+                $balance_silver = (float) ($metal_cl_row['net_silver'] ?? 0);
+
+                $diamond_select = '';
+                if (function_exists('auragold_tbl_has_column')) {
+                    if (auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'balance_diamond')) {
+                        $diamond_select .= ', balance_diamond';
+                    }
+                    if (auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'balance_gemstone')) {
+                        $diamond_select .= ', balance_gemstone';
+                    }
+                }
+                $last_row = getRecord("
+                    SELECT balance_amount $diamond_select
+                    FROM tbl_customer_ledger
+                    WHERE status = 1 AND ($party_scope)
+                    $brLedgerAnd
+                    ORDER BY id DESC
+                    LIMIT 1
+                ");
+
+                return [
+                    'found' => true,
+                    'balance_amount' => $balance_amount,
+                    'balance_gold' => $balance_gold,
+                    'balance_silver' => $balance_silver,
+                    'balance_diamond' => (float) ($last_row['balance_diamond'] ?? 0),
+                    'balance_gemstone' => (float) ($last_row['balance_gemstone'] ?? 0),
+                ];
+            }
+        }
+
+        return $empty;
+    }
+}
+
+if (!function_exists('auragold_customer_ledger_branch_and_sql')) {
+    /**
+     * SQL AND fragment for tbl_customer_ledger branch scope (includes legacy NULL/0 rows on main branch).
+     */
+    function auragold_customer_ledger_branch_and_sql(int $scope_branch_id): string {
+        if ($scope_branch_id <= 0) {
+            return '';
+        }
+        global $conn;
+        if (!($conn instanceof mysqli) || !function_exists('auragold_tbl_has_column') || !auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'branch_id')) {
+            return ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
+        }
+        $scope_branch_id = auragold_normalize_branch_scope_for_working_db($scope_branch_id);
+        if (auragold_customer_ledger_branch_is_main_scope($scope_branch_id)) {
+            return ' AND (branch_id = ' . (int) $scope_branch_id . ' OR branch_id IS NULL OR branch_id = 0)';
+        }
+        return ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
+    }
+}
+
 if (!function_exists('auragold_settings_main_branch_id')) {
     /**
      * First main branch (main_branch_id = 0), for defaulting legacy settings.
@@ -688,6 +976,65 @@ if (!function_exists('auragold_sql_and_branch_scope')) {
     }
 }
 
+if (!function_exists('auragold_metal_carat_shared_master_tables')) {
+    /** Master tables whose rows are shared by branch_id when branches use the same operational database. */
+    function auragold_metal_carat_shared_master_tables(): array {
+        return ['tbl_metal', 'tbl_carat'];
+    }
+}
+
+if (!function_exists('auragold_branch_operational_db_name')) {
+    /** tbl_branches.db_name for a registry branch id, or DB_NAME when unset. */
+    function auragold_branch_operational_db_name(int $branchId): string {
+        if ($branchId <= 0) {
+            return defined('DB_NAME') ? (string) DB_NAME : '';
+        }
+        if (function_exists('getRecordMaster')) {
+            $row = @getRecordMaster(
+                'SELECT db_name FROM tbl_branches WHERE id = ' . (int) $branchId . ' LIMIT 1'
+            );
+            $db = trim((string) ($row['db_name'] ?? ''));
+            if ($db !== '') {
+                return $db;
+            }
+        }
+        return defined('DB_NAME') ? (string) DB_NAME : '';
+    }
+}
+
+if (!function_exists('auragold_branches_share_operational_database')) {
+    function auragold_branches_share_operational_database(int $branchA, int $branchB): bool {
+        if ($branchA <= 0 || $branchB <= 0 || $branchA === $branchB) {
+            return $branchA > 0 && $branchA === $branchB;
+        }
+        $dbA = auragold_branch_operational_db_name($branchA);
+        $dbB = auragold_branch_operational_db_name($branchB);
+        return $dbA !== '' && $dbB !== '' && strcasecmp($dbA, $dbB) === 0;
+    }
+}
+
+if (!function_exists('auragold_metal_carat_master_branch_id')) {
+    /**
+     * Branch id used to read tbl_metal / tbl_carat when multiple registry branches share one database.
+     * Sub-branches reuse the main branch master rows (same ids); no duplicate tbl_metal rows are created.
+     */
+    function auragold_metal_carat_master_branch_id(int $scopeBranchId): int {
+        if ($scopeBranchId <= 0) {
+            return 0;
+        }
+        $root = function_exists('auragold_branch_root_main_id_for_branch')
+            ? (int) auragold_branch_root_main_id_for_branch($scopeBranchId)
+            : $scopeBranchId;
+        if ($root <= 0) {
+            $root = $scopeBranchId;
+        }
+        if ($root !== $scopeBranchId && auragold_branches_share_operational_database($scopeBranchId, $root)) {
+            return $root;
+        }
+        return $scopeBranchId;
+    }
+}
+
 if (!function_exists('auragold_master_list_sql_suffix')) {
     /**
      * Append to WHERE clauses on master tables (tbl_* managed under Masters screen).
@@ -712,11 +1059,19 @@ if (!function_exists('auragold_master_list_sql_suffix')) {
         if ($eff <= 0) {
             return '';
         }
+        $scopeBranchId = (int) $eff;
+        if (in_array($table, auragold_metal_carat_shared_master_tables(), true)
+            && function_exists('auragold_metal_carat_master_branch_id')) {
+            $scopeBranchId = auragold_metal_carat_master_branch_id($scopeBranchId);
+            if ($scopeBranchId <= 0) {
+                return '';
+            }
+        }
         $col = $branchColumnSql !== '' ? $branchColumnSql : 'branch_id';
         if (!preg_match('/^[a-zA-Z0-9_.]+$/', $col)) {
             $col = 'branch_id';
         }
-        return ' AND ' . $col . ' = ' . (int) $eff . ' ';
+        return ' AND ' . $col . ' = ' . (int) $scopeBranchId . ' ';
     }
 }
 
@@ -739,11 +1094,19 @@ if (!function_exists('auragold_master_list_sql_for_branch_id')) {
         if (!auragold_tbl_has_column($conn, $table, 'branch_id')) {
             return '';
         }
+        $scopeBranchId = (int) $branchId;
+        if (in_array($table, auragold_metal_carat_shared_master_tables(), true)
+            && function_exists('auragold_metal_carat_master_branch_id')) {
+            $scopeBranchId = auragold_metal_carat_master_branch_id($scopeBranchId);
+            if ($scopeBranchId <= 0) {
+                return '';
+            }
+        }
         $col = $branchColumnSql !== '' ? $branchColumnSql : 'branch_id';
         if (!preg_match('/^[a-zA-Z0-9_.]+$/', $col)) {
             $col = 'branch_id';
         }
-        return ' AND ' . $col . ' = ' . (int) $branchId . ' ';
+        return ' AND ' . $col . ' = ' . (int) $scopeBranchId . ' ';
     }
 }
 
@@ -1136,8 +1499,9 @@ if (!function_exists('auragold_copy_currency_and_rates_between_branches')) {
 
 if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
     /**
-     * Copy Metals, GST (tax master), Currency (+ exchange rates), Location, Unit from main branch row into a new sub-branch.
-     * Safe to call multiple times: skips if sub-branch already has tbl_metal rows.
+     * Copy GST (tax master), Currency (+ exchange rates), Location, Unit from main branch into a new sub-branch.
+     * tbl_metal / tbl_carat are not copied when branches share a database (same PK ids as main branch).
+     * Safe to call multiple times: skips if sub-branch already has tbl_location rows.
      *
      * @return array{ok:bool,skipped?:bool,tables?:array<string,int>,message?:string}
      */
@@ -1146,22 +1510,17 @@ if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
         if (!$conn instanceof mysqli || $mainBranchId <= 0 || $subBranchId <= 0 || $mainBranchId === $subBranchId) {
             return $out;
         }
-        auragold_ensure_table_branch_id_column($conn, 'tbl_metal');
-        $chk = @getRecord('SELECT COUNT(*) AS c FROM tbl_metal WHERE branch_id = ' . (int) $subBranchId);
+        auragold_ensure_table_branch_id_column($conn, 'tbl_location');
+        $chk = @getRecord('SELECT COUNT(*) AS c FROM tbl_location WHERE branch_id = ' . (int) $subBranchId);
         if ($chk && (int) ($chk['c'] ?? 0) > 0) {
             return array_merge($out, ['skipped' => true]);
         }
-        $preserveIdTables = ['tbl_metal' => true, 'tbl_carat' => true];
-        $simple           = ['tbl_location', 'tbl_unit', 'tbl_metal', 'tbl_tax_master', 'tbl_carat'];
+        $simple = ['tbl_location', 'tbl_unit', 'tbl_tax_master'];
         foreach ($simple as $t) {
             if (!auragold_tbl_has_column($conn, $t, 'branch_id')) {
                 continue;
             }
-            if (!empty($preserveIdTables[$t]) && function_exists('auragold_copy_master_rows_preserve_id_branch')) {
-                $n = auragold_copy_master_rows_preserve_id_branch($conn, $t, $mainBranchId, $subBranchId);
-            } else {
-                $n = auragold_copy_master_rows_simple_branch($conn, $t, $mainBranchId, $subBranchId);
-            }
+            $n = auragold_copy_master_rows_simple_branch($conn, $t, $mainBranchId, $subBranchId);
             if ($n >= 0) {
                 $out['tables'][$t] = $n;
             }
@@ -1178,6 +1537,10 @@ if (!function_exists('auragold_seed_subbranch_carat_from_main_if_empty')) {
      */
     function auragold_seed_subbranch_carat_from_main_if_empty(mysqli $conn, int $mainBranchId, int $subBranchId): void {
         if ($mainBranchId <= 0 || $subBranchId <= 0 || $mainBranchId === $subBranchId) {
+            return;
+        }
+        if (function_exists('auragold_branches_share_operational_database')
+            && auragold_branches_share_operational_database($subBranchId, $mainBranchId)) {
             return;
         }
         auragold_ensure_table_branch_id_column($conn, 'tbl_carat');

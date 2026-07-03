@@ -3794,6 +3794,39 @@
             });
     }
 
+    function auragoldApplyGroupImageToModalRowPhoto(row, groupImageRaw) {
+        if (!row || groupImageRaw == null || String(groupImageRaw).trim() === '') return;
+        var boot = (typeof global.PRODUCT_LIST_TABLE_BOOT === 'object' && global.PRODUCT_LIST_TABLE_BOOT) ? global.PRODUCT_LIST_TABLE_BOOT : null;
+        var noImg = (boot && boot.noImageSrc) ? String(boot.noImageSrc) : 'no_image.jpg';
+        var payload = auragoldCoParseGroupImageAttr(groupImageRaw);
+        var primary = '';
+        var urls = [];
+        if (typeof payload === 'string') {
+            primary = payload.trim();
+            if (primary) urls = [primary];
+        } else if (payload && typeof payload === 'object') {
+            if (payload.primary) primary = String(payload.primary).trim();
+            if (payload.images && Array.isArray(payload.images)) {
+                urls = payload.images.map(function(u) { return u ? String(u).trim() : ''; }).filter(Boolean);
+            }
+            if (!primary && urls.length) primary = urls[0];
+        }
+        if (!primary) return;
+        var photoCell = row.querySelector('[data-column="photo"].product-row-photo') || row.querySelector('td[data-column="photo"]');
+        if (!photoCell) return;
+        var img = photoCell.querySelector('.product-photo-thumb') || photoCell.querySelector('img');
+        var placeholder = photoCell.querySelector('.product-photo-placeholder') || photoCell.querySelector('.text-muted');
+        if (img) {
+            img.src = primary;
+            img.style.display = '';
+            img.onerror = function() { this.onerror = null; this.src = noImg; };
+        }
+        if (placeholder) placeholder.style.display = 'none';
+        var storePayload = { primary: primary, images: urls.length ? urls.slice() : [primary] };
+        try { row.setAttribute('data-group-image', JSON.stringify(storePayload)); } catch (e1) {}
+        row.removeAttribute('data-journal-photo');
+    }
+
     function auragoldApplyJournalImagesToModalRowPhoto(row, product) {
         if (!row || !product) return;
         var boot = (typeof global.PRODUCT_LIST_TABLE_BOOT === 'object' && global.PRODUCT_LIST_TABLE_BOOT) ? global.PRODUCT_LIST_TABLE_BOOT : null;
@@ -3855,6 +3888,7 @@
     global.auragoldCoParseGroupImageAttr = auragoldCoParseGroupImageAttr;
     global.auragoldMainTableBarcodeFromRow = auragoldMainTableBarcodeFromRow;
     global.auragoldRefreshProductTableRowPhotoFromJournal = auragoldRefreshProductTableRowPhotoFromJournal;
+    global.auragoldApplyGroupImageToModalRowPhoto = auragoldApplyGroupImageToModalRowPhoto;
     global.auragoldApplyJournalImagesToModalRowPhoto = auragoldApplyJournalImagesToModalRowPhoto;
 })(typeof window !== 'undefined' ? window : this);
 
@@ -4109,6 +4143,12 @@
             window.populateCaratSelectForModalRow(caratSel, row);
         }
         if (md.carat) setModalCellValue(row, 'carat', md.carat, false);
+
+        if (md.group_image != null && String(md.group_image).trim() !== '') {
+            if (typeof window.auragoldApplyGroupImageToModalRowPhoto === 'function') {
+                window.auragoldApplyGroupImageToModalRowPhoto(row, md.group_image);
+            }
+        }
 
         if (typeof window.auragoldPopulateModalSpecSelectsForRow === 'function') {
             window.auragoldPopulateModalSpecSelectsForRow(row);

@@ -24,29 +24,44 @@ $main_bid = function_exists('auragold_settings_main_branch_id') ? (int) auragold
 if ($ledger_has_branch && $scope_branch_id <= 0 && function_exists('auragold_effective_branch_id')) {
     $scope_branch_id = (int) auragold_effective_branch_id();
 }
+if ($ledger_has_branch && $scope_branch_id <= 0 && function_exists('auragold_account_ledger_resolved_branch_ids')) {
+    $resolved_pb = auragold_account_ledger_resolved_branch_ids();
+    if (!empty($resolved_pb[0])) {
+        $scope_branch_id = (int) $resolved_pb[0];
+    }
+}
 if ($ledger_has_branch && $scope_branch_id <= 0 && $main_bid > 0) {
     $scope_branch_id = $main_bid;
 }
-// Strict login/working branch only (no parent-main merge). Otherwise Previous Balance pulls Main-branch ledger / global summary while Account Ledger "opening" for Branch 1 stays 0.
+if (function_exists('auragold_normalize_branch_scope_for_working_db')) {
+    $scope_branch_id = auragold_normalize_branch_scope_for_working_db($scope_branch_id);
+}
+// Same branch scope as accountledger-report.php so Previous Balance CL matches Account Ledger.
 $brLedgerAnd = '';
-if ($ledger_has_branch && $scope_branch_id > 0) {
-    if ($main_bid > 0 && $scope_branch_id === $main_bid) {
-        $brLedgerAnd = ' AND (branch_id = ' . (int) $scope_branch_id . ' OR branch_id IS NULL OR branch_id = 0)';
-    } else {
-        $brLedgerAnd = ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
-    }
+if ($ledger_has_branch && function_exists('auragold_account_ledger_branch_scope_sql')) {
+    $brLedgerAnd = auragold_account_ledger_branch_scope_sql('');
+} elseif ($ledger_has_branch && $scope_branch_id > 0) {
+    $brLedgerAnd = function_exists('auragold_customer_ledger_branch_and_sql')
+        ? auragold_customer_ledger_branch_and_sql($scope_branch_id)
+        : ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
 }
 $si_has_branch = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_sale_invoices', 'branch_id');
 $brSiAnd = '';
-if ($si_has_branch && $scope_branch_id > 0) {
-    if ($main_bid > 0 && $scope_branch_id === $main_bid) {
-        $brSiAnd = ' AND (branch_id = ' . (int) $scope_branch_id . ' OR branch_id IS NULL OR branch_id = 0)';
-    } else {
-        $brSiAnd = ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
+if ($si_has_branch) {
+    if (function_exists('auragold_account_ledger_branch_scope_sql')) {
+        $brSiAnd = auragold_account_ledger_branch_scope_sql('');
+    } elseif ($scope_branch_id > 0) {
+        $si_scope_is_main = function_exists('auragold_customer_ledger_branch_is_main_scope')
+            && auragold_customer_ledger_branch_is_main_scope($scope_branch_id);
+        if ($si_scope_is_main) {
+            $brSiAnd = ' AND (branch_id = ' . (int) $scope_branch_id . ' OR branch_id IS NULL OR branch_id = 0)';
+        } else {
+            $brSiAnd = ' AND COALESCE(branch_id, 0) = ' . (int) $scope_branch_id;
+        }
     }
 }
 // When branch-scoped, do not use tbl_customer_balance — it is not per-branch and causes wrong Previous Balance vs Account Ledger.
-$skip_global_customer_balance = ($ledger_has_branch && $scope_branch_id > 0);
+$skip_global_customer_balance = ($ledger_has_branch && ($brLedgerAnd !== '' || $scope_branch_id > 0));
 
 if ($customer_id <= 0 && empty($customer_name)) {
     echo json_encode([
@@ -174,12 +189,49 @@ function auragold_get_customer_balance_ledger_cl_fast(
 }
 
 $ledger_scope_for_cl = '';
-if ($customer_id > 0) {
-    $ledger_scope_for_cl = 'customer_id = ' . (int)$customer_id;
-} elseif (!empty($customer_name)) {
-    $esc_sum_name = mysqli_real_escape_string($conn, trim((string)$customer_name));
+if (!empty($customer_name)) {
+    $esc_sum_name = mysqli_real_escape_string($conn, trim((string) $customer_name));
     if ($esc_sum_name !== '') {
         $ledger_scope_for_cl = "LOWER(TRIM(customer_name)) = LOWER(TRIM('$esc_sum_name'))";
+    }
+}
+if ($ledger_scope_for_cl === '' && $customer_id > 0) {
+    $ledger_scope_for_cl = 'customer_id = ' . (int) $customer_id;
+}
+
+if ($purchase_ledger_prev_balance && function_exists('auragold_account_ledger_party_cl_balance')) {
+    $cl_balance = auragold_account_ledger_party_cl_balance($customer_id, $customer_name, $has_balance_gold_pure);
+    if (!empty($cl_balance['found'])) {
+        $original_amount = (float) ($cl_balance['balance_amount'] ?? 0);
+        $original_gold = (float) ($cl_balance['balance_gold'] ?? 0);
+        $original_silver = (float) ($cl_balance['balance_silver'] ?? 0);
+        $balance_diamond = (float) ($cl_balance['balance_diamond'] ?? 0);
+        $balance_gemstone = (float) ($cl_balance['balance_gemstone'] ?? 0);
+        echo json_encode([
+            'status' => 'success',
+            'balance' => [
+                'amount' => $original_amount,
+                'gold' => $original_gold,
+                'silver' => $original_silver,
+                'diamond' => $balance_diamond,
+                'gemstone' => $balance_gemstone,
+            ],
+            'advance' => [
+                'amount' => 0,
+                'total_amount' => 0,
+                'used_adjusted_balance' => 0,
+                'gold' => 0,
+                'silver' => 0,
+            ],
+            'original_balance' => [
+                'amount' => $original_amount,
+                'gold' => $original_gold,
+                'silver' => $original_silver,
+                'diamond' => $balance_diamond,
+                'gemstone' => $balance_gemstone,
+            ],
+        ]);
+        exit;
     }
 }
 
@@ -346,8 +398,8 @@ if (!$balance && $type === 'supplier') {
     }
 }
 
-// If still not found, get balance from last sale invoice's balance_amt
-if (!$balance) {
+// If still not found, get balance from last sale invoice's balance_amt (skip when ledger CL mode — must match Account Ledger, not draft SI balance_amt)
+if (!$balance && !$purchase_ledger_prev_balance) {
     $invoice_where = "status != 'cancelled'";
     if ($customer_id > 0) {
         $invoice_where = "customer_id = $customer_id AND status != 'cancelled'";

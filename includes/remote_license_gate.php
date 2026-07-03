@@ -12,17 +12,37 @@ if (PHP_SAPI === 'cli') {
     return;
 }
 
-$license_url = 'http://localhost/auragold/admin/assets/js/pages/license.txt';
+/** Set in config.php as $auragold_remote_license_url (empty = disabled). */
+$license_url = isset($auragold_remote_license_url) ? trim((string) $auragold_remote_license_url) : '';
 if ($license_url === '') {
     return;
 }
+/** Skip remote check on local dev — avoids 2s HTTP timeout on every cache miss. */
+if (defined('AURAGOLD_PROJECT') && (string) AURAGOLD_PROJECT === 'local') {
+    return;
+}
 
-$license_ctx = stream_context_create([
-    'http' => ['timeout' => 5, 'ignore_errors' => true],
-    'ssl'  => ['verify_peer' => true, 'verify_peer_name' => true],
-]);
-$license_response = @file_get_contents($license_url, false, $license_ctx);
-if ($license_response === false || trim($license_response) !== 'STOP') {
+/** Avoid blocking every page load on a slow/unreachable license URL (cache 1 hour). */
+$__license_cache_file = __DIR__ . '/../cache/remote_license.cache';
+$__license_cache_ttl  = 3600;
+$__license_stop       = false;
+if (is_file($__license_cache_file) && (time() - (int) filemtime($__license_cache_file)) < $__license_cache_ttl) {
+    $__license_stop = trim((string) @file_get_contents($__license_cache_file)) === 'STOP';
+} else {
+    $license_ctx = stream_context_create([
+        'http' => ['timeout' => 2, 'ignore_errors' => true],
+        'ssl'  => ['verify_peer' => true, 'verify_peer_name' => true],
+    ]);
+    $license_response = @file_get_contents($license_url, false, $license_ctx);
+    $__license_stop = ($license_response !== false && trim($license_response) === 'STOP');
+    $cacheDir = dirname($__license_cache_file);
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0755, true);
+    }
+    @file_put_contents($__license_cache_file, $__license_stop ? 'STOP' : 'OK');
+}
+
+if (!$__license_stop) {
     return;
 }
 

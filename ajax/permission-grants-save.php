@@ -101,4 +101,9 @@ foreach ($allowed as $key => $_) {
 mysqli_stmt_close($stmt);
 mysqli_commit($conn);
 
+require_once __DIR__ . '/../includes/permission_helpers.php';
+if (function_exists('auragold_permission_invalidate_session_cache')) {
+    auragold_permission_invalidate_session_cache($userId);
+}
+
 echo json_encode(['ok' => true, 'message' => 'Permissions saved.']);

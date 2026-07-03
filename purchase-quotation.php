@@ -3217,7 +3217,7 @@ text-transform: uppercase;
 <?php include 'includes/common-modal.php'; ?>
 <?php auragold_echo_party_select2_styles(); ?>
 <?php include 'footer-script.php';?>
-<?php auragold_echo_party_select2_scripts(); ?>
+<?php auragold_echo_party_select2_scripts(['placeholder' => 'Select supplier...']); ?>
 
 <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 

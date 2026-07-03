@@ -845,8 +845,29 @@
                     design_no: designNo,
                     rows: rows,
                     metal_id: data.metal_id || 0,
-                    title: data.title || ''
+                    title: data.title || '',
+                    group_image: data.group_image || ''
                 };
+
+                var catalogueGroupImage = data.group_image || '';
+                if (!catalogueGroupImage) {
+                    for (var gi = 0; gi < rows.length; gi++) {
+                        if (rows[gi].group_image && String(rows[gi].group_image).trim()) {
+                            catalogueGroupImage = rows[gi].group_image;
+                            break;
+                        }
+                    }
+                }
+                if (catalogueGroupImage) {
+                    window.productModalGroupImageByTab = window.productModalGroupImageByTab || {};
+                    var tabKey = data.metal_id ? String(data.metal_id) : '';
+                    var parsedGi = (typeof window.auragoldCoParseGroupImageAttr === 'function')
+                        ? window.auragoldCoParseGroupImageAttr(catalogueGroupImage)
+                        : catalogueGroupImage;
+                    if (parsedGi) {
+                        window.productModalGroupImageByTab[tabKey] = parsedGi;
+                    }
+                }
 
                 clearProductListBlank();
             })

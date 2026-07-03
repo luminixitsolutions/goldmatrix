@@ -299,6 +299,7 @@ $transaction_list_types = [
     '' => 'All',
     'sale_invoice' => 'Sale Invoice',
     'sale_order' => 'Sale Order',
+    'jobwork_order' => 'Job Work Order',
     'purchase_invoice' => 'Purchase Invoice',
     'sale_return' => 'Sale Return',
     'purchase_return' => 'Purchase Return',
@@ -508,6 +509,59 @@ if ($so_exists && ($transaction_voucher_filter === '' || $transaction_voucher_fi
             'branch_name' => $so_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
             'party_email' => trim((string) ($r['party_email'] ?? '')),
         ];
+    }
+}
+
+// Job Work Orders (against Sale Order)
+$jwo_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_jobwork_orders'");
+$jwo_tr_exists = $jwo_tr_check && mysqli_num_rows($jwo_tr_check) > 0;
+if ($jwo_tr_check) {
+    mysqli_free_result($jwo_tr_check);
+}
+if ($jwo_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'jobwork_order')) {
+    $jwo_tr_has_br = auragold_tbl_has_column($conn, 'tbl_jobwork_orders', 'branch_id');
+    $jwo_tr_where = "(status IS NULL OR status = '' OR LOWER(TRIM(status)) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $jwo_tr_where .= " AND order_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $jwo_tr_where .= " AND order_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $jwo_tr_where .= " AND (jobwork_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR sale_order_no LIKE '%$search%')";
+    }
+    if ($jwo_tr_has_br && $tr_branch_filter_sql !== '') {
+        $jwo_tr_where .= $tr_branch_filter_sql;
+    }
+    $jwo_tr_sel = 'id, jobwork_no, sale_order_id, sale_order_no, customer_name, order_date, grand_total, status';
+    if ($jwo_tr_has_br) {
+        $jwo_tr_sel .= ', branch_id';
+    }
+    $jwo_tr_rows = getList("SELECT $jwo_tr_sel FROM tbl_jobwork_orders WHERE $jwo_tr_where ORDER BY order_date DESC, id DESC");
+    if (is_array($jwo_tr_rows)) {
+        foreach ($jwo_tr_rows as $r) {
+            $sale_order_no = trim((string) ($r['sale_order_no'] ?? ''));
+            $sale_order_id = (int) ($r['sale_order_id'] ?? 0);
+            $so_link = $sale_order_id > 0 ? ('sale-order.php?id=' . $sale_order_id) : '';
+            $all_transactions[] = [
+                'type' => 'jobwork_order',
+                'type_label' => 'JOB WORK ORDER',
+                'voucher_no' => $r['jobwork_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => 'NA',
+                'date' => $r['order_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => 0,
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'jobwork-order.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'jobwork-order-print.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $jwo_tr_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+                'against_sale_order_no' => $sale_order_no,
+                'against_sale_order_id' => $sale_order_id,
+                'against_sale_order_link' => $so_link,
+                'voucher_ex_col3' => $sale_order_no !== '' ? ('Against ' . $sale_order_no) : 'NA',
+            ];
+        }
     }
 }
 
@@ -1353,12 +1407,16 @@ if ($active_tab === 'transactions' && function_exists('auragold_si_invoice_nos_w
 
 // Sale orders linked to Job Work Order(s) — delete/update blocked until JWQ + JWO removed
 $so_ids_with_jwo = [];
+$jwo_ids_with_queue = [];
 if ($active_tab === 'transactions') {
     if (!function_exists('auragold_sale_order_ids_with_jobwork_orders') && is_file(__DIR__ . '/includes/auragold_sale_order_jobwork_lock.php')) {
         require_once __DIR__ . '/includes/auragold_sale_order_jobwork_lock.php';
     }
     if (function_exists('auragold_sale_order_ids_with_jobwork_orders')) {
         $so_ids_with_jwo = auragold_sale_order_ids_with_jobwork_orders($conn);
+    }
+    if (function_exists('auragold_jobwork_order_ids_with_queue_activity')) {
+        $jwo_ids_with_queue = auragold_jobwork_order_ids_with_queue_activity($conn);
     }
 }
 
@@ -2371,6 +2429,7 @@ html, body {
 .voucher-purchase_invoice { background: #db2777; }
 .voucher-sale_invoice { background: #059669; }
 .voucher-sale_order { background: #2563eb; }
+.voucher-jobwork_order { background: #6366f1; }
 .voucher-sale_return { background: #d97706; }
 .voucher-purchase_return { background: #be185d; }
 .voucher-sale_quotation { background: #4f46e5; }
@@ -3041,14 +3100,19 @@ button.action-icon {
                 $is_sfd = (($t['type'] ?? '') === 'sale_fixing_direct');
                 $is_pfd = (($t['type'] ?? '') === 'purchase_fixing_direct');
                 $is_ojb = (($t['type'] ?? '') === 'old_jewelry_scrap_invoice');
+                $is_jwo = (($t['type'] ?? '') === 'jobwork_order');
                 $is_fixing_row = $is_sfd || $is_pfd;
                 $voucher_key_upper = strtoupper(trim((string)($t['voucher_no'] ?? '')));
                 $pi_delete_blocked = (($t['type'] ?? '') === 'purchase_invoice') && $voucher_key_upper !== '' && !empty($pi_invoice_nos_with_sfd[$voucher_key_upper]);
                 $si_delete_blocked = (($t['type'] ?? '') === 'sale_invoice') && $voucher_key_upper !== '' && !empty($si_invoice_nos_with_pfd[$voucher_key_upper]);
                 $so_delete_blocked = (($t['type'] ?? '') === 'sale_order') && !empty($so_ids_with_jwo[(int) ($t['id'] ?? 0)]);
+                $jwo_delete_blocked = $is_jwo && (
+                    !empty($jwo_ids_with_queue[(int) ($t['id'] ?? 0)])
+                    || (function_exists('auragold_jobwork_order_has_invoice') && auragold_jobwork_order_has_invoice($conn, (int) ($t['id'] ?? 0)))
+                );
                 $ojb_delete_blocked = $is_ojb && !empty($t['linked_from_purchase']);
-                $txn_delete_blocked = $pi_delete_blocked || $si_delete_blocked || $so_delete_blocked || $ojb_delete_blocked;
-                $txn_delete_title = $pi_delete_blocked ? 'Delete the sale fixing first' : ($si_delete_blocked ? 'Delete the purchase fixing first' : ($so_delete_blocked ? 'Delete Jobwork Queue, then Job Work Order, first' : ($ojb_delete_blocked ? 'Remove scrap payment on Purchase Invoice or delete the PI' : 'Delete')));
+                $txn_delete_blocked = $pi_delete_blocked || $si_delete_blocked || $so_delete_blocked || $jwo_delete_blocked || $ojb_delete_blocked;
+                $txn_delete_title = $pi_delete_blocked ? 'Delete the sale fixing first' : ($si_delete_blocked ? 'Delete the purchase fixing first' : ($so_delete_blocked ? 'Delete Job Work Order first (Transaction Report), then this Sale Order' : ($jwo_delete_blocked ? 'Delete Jobwork Queue records first (Manufacturing Process), then delete this Job Work Order' : ($ojb_delete_blocked ? 'Remove scrap payment on Purchase Invoice or delete the PI' : 'Delete'))));
                 if (!empty($t['no_delete_from_report'])) {
                     $txn_delete_blocked = true;
                     $txn_delete_title = 'Open the voucher screen to delete or adjust this entry';
@@ -3074,6 +3138,15 @@ button.action-icon {
                             $ap_ojb = trim((string) ($t['against_pi'] ?? ''));
                             if ($ap_ojb !== '') {
                                 echo '<a href="' . htmlspecialchars($t['link']) . '" class="voucher-no-link" title="' . htmlspecialchars($vn_title) . '">' . $vn_base . ' <span style="color:#dc2626;font-weight:600;">(Against of ' . htmlspecialchars($ap_ojb) . ')</span></a>';
+                            } else {
+                                echo '<a href="' . htmlspecialchars($t['link']) . '" class="voucher-no-link" title="' . htmlspecialchars($vn_title) . '">' . $vn_base . '</a>';
+                            }
+                        } elseif ($is_jwo) {
+                            $vn_title = 'Edit';
+                            $vn_base = htmlspecialchars($t['voucher_no'] ?? '');
+                            $aso = trim((string) ($t['against_sale_order_no'] ?? ''));
+                            if ($aso !== '') {
+                                echo '<a href="' . htmlspecialchars($t['link']) . '" class="voucher-no-link" title="' . htmlspecialchars($vn_title) . '">' . $vn_base . ' <span style="color:#dc2626;font-weight:600;">(Against of ' . htmlspecialchars($aso) . ')</span></a>';
                             } else {
                                 echo '<a href="' . htmlspecialchars($t['link']) . '" class="voucher-no-link" title="' . htmlspecialchars($vn_title) . '">' . $vn_base . '</a>';
                             }

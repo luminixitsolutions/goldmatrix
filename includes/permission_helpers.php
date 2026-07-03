@@ -66,28 +66,67 @@ function auragold_permission_effective_map_for_session_user($conn, $userId)
 }
 
 /**
- * Whether the logged-in tbl_users account may perform $permKey.
- * Branch / non-tbl_users sessions: always true (not user-wise restricted here).
- * If the user has no rows in tbl_user_permission_grants: allow all (legacy).
- * If any row exists: missing key = denied; explicit 1 = allow, 0 = deny.
+ * Clear cached permission map (call after grants are saved).
  */
-function auragold_user_can($permKey)
+function auragold_permission_invalidate_session_cache(?int $userId = null): void
 {
+    if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+        unset($_SESSION['auragold_perm_runtime_v1']);
+    }
+    $GLOBALS['auragold_perm_runtime_state'] = null;
+}
+
+/**
+ * Load permission state once per request (and cache in session between requests).
+ *
+ * @return array{legacy_allow_all:bool,map:array<string,int>,user_id:int,branch_id:int}
+ */
+function auragold_permission_runtime_state()
+{
+    if (isset($GLOBALS['auragold_perm_runtime_state']) && is_array($GLOBALS['auragold_perm_runtime_state'])) {
+        return $GLOBALS['auragold_perm_runtime_state'];
+    }
+
+    $default = [
+        'legacy_allow_all' => true,
+        'map'              => [],
+        'user_id'          => 0,
+        'branch_id'        => 0,
+    ];
+
     if (!function_exists('auragold_session_is_admin_login_type')) {
         require_once __DIR__ . '/session_login_type.php';
     }
     $src = isset($_SESSION['login_source']) ? (string) $_SESSION['login_source'] : '';
     if ($src !== 'user') {
-        return true;
+        $GLOBALS['auragold_perm_runtime_state'] = $default;
+        return $default;
     }
     $uid = (int) ($_SESSION['user_id'] ?? 0);
     if ($uid <= 0) {
-        return true;
+        $GLOBALS['auragold_perm_runtime_state'] = $default;
+        return $default;
     }
     global $conn;
     if (empty($conn) || !($conn instanceof mysqli)) {
-        return true;
+        $GLOBALS['auragold_perm_runtime_state'] = $default;
+        return $default;
     }
+
+    if (!function_exists('auragold_effective_branch_id')) {
+        require_once __DIR__ . '/auragold_branch_data_scope.php';
+    }
+    $eff = (int) auragold_effective_branch_id();
+
+    $sessKey = 'auragold_perm_runtime_v1';
+    if (!empty($_SESSION[$sessKey]) && is_array($_SESSION[$sessKey])) {
+        $cached = $_SESSION[$sessKey];
+        if ((int) ($cached['user_id'] ?? 0) === $uid && (int) ($cached['branch_id'] ?? 0) === $eff) {
+            $GLOBALS['auragold_perm_runtime_state'] = $cached;
+            return $cached;
+        }
+    }
+
     if (!function_exists('auragold_ensure_user_permissions_table')) {
         require_once __DIR__ . '/permissions_schema.php';
     }
@@ -99,6 +138,36 @@ function auragold_user_can($permKey)
         $cnt = (int) ($cr['c'] ?? 0);
     }
     if ($cnt === 0) {
+        $state = $default;
+        $state['user_id']   = $uid;
+        $state['branch_id'] = $eff;
+        $_SESSION[$sessKey] = $state;
+        $GLOBALS['auragold_perm_runtime_state'] = $state;
+        return $state;
+    }
+
+    $map = auragold_permission_effective_map_for_session_user($conn, $uid);
+    $state = [
+        'legacy_allow_all' => false,
+        'map'              => is_array($map) ? $map : [],
+        'user_id'          => $uid,
+        'branch_id'        => $eff,
+    ];
+    $_SESSION[$sessKey] = $state;
+    $GLOBALS['auragold_perm_runtime_state'] = $state;
+    return $state;
+}
+
+/**
+ * Whether the logged-in tbl_users account may perform $permKey.
+ * Branch / non-tbl_users sessions: always true (not user-wise restricted here).
+ * If the user has no rows in tbl_user_permission_grants: allow all (legacy).
+ * If any row exists: missing key = denied; explicit 1 = allow, 0 = deny.
+ */
+function auragold_user_can($permKey)
+{
+    $state = auragold_permission_runtime_state();
+    if (!empty($state['legacy_allow_all'])) {
         return true;
     }
 
@@ -106,7 +175,7 @@ function auragold_user_can($permKey)
     if ($key === '') {
         return false;
     }
-    $map = auragold_permission_effective_map_for_session_user($conn, $uid);
+    $map = $state['map'] ?? [];
     if (!array_key_exists($key, $map)) {
         return false;
     }

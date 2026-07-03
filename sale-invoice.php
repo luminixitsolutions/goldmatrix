@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/includes/session_init.php';
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 if (function_exists('auragold_ensure_sale_invoice_against_id')) {
     auragold_ensure_sale_invoice_against_id($conn);
 }
@@ -18,12 +19,24 @@ if (!empty($conn_master) && $conn_master instanceof mysqli) {
 }
 require_once __DIR__ . '/includes/user_management_schema.php';
 
-// Working branch: same resolution as barcode scan / GST (effective + session fallbacks). Used for metal tabs + later owner state.
-$auragold_working_branch_id = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
+// Working branch: align with account ledger / previous balance scope (same as accountledger-report.php).
+$auragold_working_branch_id = 0;
+if (function_exists('auragold_account_ledger_resolved_branch_ids')) {
+    $resolved_si_branch = auragold_account_ledger_resolved_branch_ids();
+    if (!empty($resolved_si_branch[0])) {
+        $auragold_working_branch_id = (int) $resolved_si_branch[0];
+    }
+}
+if ($auragold_working_branch_id <= 0) {
+    $auragold_working_branch_id = function_exists('auragold_effective_branch_id') ? (int) auragold_effective_branch_id() : 0;
+}
 if ($auragold_working_branch_id <= 0 && !empty($_SESSION['working_branch_id'])) {
     $auragold_working_branch_id = (int) $_SESSION['working_branch_id'];
 } elseif ($auragold_working_branch_id <= 0 && !empty($_SESSION['branch_id'])) {
     $auragold_working_branch_id = (int) $_SESSION['branch_id'];
+}
+if ($auragold_working_branch_id > 0 && function_exists('auragold_normalize_branch_scope_for_working_db')) {
+    $auragold_working_branch_id = auragold_normalize_branch_scope_for_working_db($auragold_working_branch_id);
 }
 
 // Load Metals for category tabs — only rows for this branch in tbl_metal master (avoid duplicate Gold/Silver tabs from every branch)
@@ -3599,12 +3612,21 @@ text-transform: uppercase;
                 </button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-2" id="siSoItemPickHint">Choose items to add to this sale invoice. Already invoiced items are not shown.</p>
+                <p class="text-muted small mb-2" id="siSoItemPickHint">Choose items to add to this sale invoice. Already invoiced and in-manufacturing lines are hidden.</p>
+                <div class="row align-items-center mb-2">
+                    <div class="col-md-6 mb-2 mb-md-0">
+                        <input type="text" class="form-control form-control-sm" id="siSoItemPickSearch" placeholder="Search by Barcode or Design No..." autocomplete="off">
+                    </div>
+                    <div class="col-md-6 text-md-right text-muted small">
+                        <span id="siSoItemPickSelectedCount">0 selected</span>
+                    </div>
+                </div>
                 <div class="table-responsive" style="max-height: min(65vh, 560px); overflow-y: auto;">
                     <table class="table table-sm table-hover table-bordered mb-0">
                         <thead class="thead-light" style="position: sticky; top: 0; z-index: 1; background-color: #1e3a5f;">
                             <tr>
-                                <th style="width: 40px; color: #fff;"><input type="checkbox" id="siSoItemPickSelectAll" checked title="Select all"></th>
+                                <th style="width: 40px; color: #fff;"><input type="checkbox" id="siSoItemPickSelectAll" title="Select all visible"></th>
+                                <th style="width: 72px; color: #fff;">Photo</th>
                                 <th style="color: #fff;">Barcode</th>
                                 <th style="color: #fff;">Design No.</th>
                                 <th style="color: #fff;">Product</th>
@@ -3616,7 +3638,7 @@ text-transform: uppercase;
                             </tr>
                         </thead>
                         <tbody id="siSoItemPickTbody">
-                            <tr><td colspan="9" class="text-center text-muted py-4">No items</td></tr>
+                            <tr><td colspan="10" class="text-center text-muted py-4">No items</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3640,7 +3662,45 @@ text-transform: uppercase;
 <script src="assets/js/product-modal-add-item-common.js"></script>
 <link rel="stylesheet" href="assets/libs/select2/select2.css">
 <script src="assets/libs/select2/select2.js"></script>
-<script src="assets/js/sale-invoice-customer-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/sale-invoice-customer-select2.js'); ?>"></script>
+<?php auragold_echo_party_select2_config_script([
+    'wrap_class' => 'si-customer-select2-wrap',
+    'placeholder' => 'Select customer...',
+]); ?>
+<script>
+window.AURAGOLD_WORKING_BRANCH_ID = <?php echo (int) $auragold_working_branch_id; ?>;
+window.PB_PAGE_CONFIG = {
+    partyNameSelector: '#customerName',
+    partyIdSelector: '#customerId',
+    balanceType: 'customer',
+    branchId: <?php echo (int) $auragold_working_branch_id; ?>,
+    ledgerClBalance: true,
+    purchaseLedgerPrevBalance: false,
+    onAfterLoad: function () { if (typeof updateSummaryPanel === 'function') updateSummaryPanel(); },
+    onAfterClear: function () { if (typeof updateSummaryPanel === 'function') updateSummaryPanel(); },
+    skipIfEditMode: false
+};
+</script>
+<script src="js/previous-balance-common.js"></script>
+<script src="assets/js/auragold-party-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/auragold-party-select2.js'); ?>"></script>
+<script>
+(function () {
+    function siTryLoadPreviousBalance() {
+        var cidEl = document.getElementById('customerId');
+        var cid = cidEl ? String(cidEl.value || '').trim() : '';
+        if (!cid || typeof window.loadCustomerBalance !== 'function') return;
+        window.loadCustomerBalance();
+    }
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).on('select2:select select2:clear', '#customerId', function () {
+            setTimeout(siTryLoadPreviousBalance, 50);
+        });
+    }
+    jQuery(function () {
+        setTimeout(siTryLoadPreviousBalance, 600);
+        setTimeout(siTryLoadPreviousBalance, 1800);
+    });
+})();
+</script>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
@@ -3666,22 +3726,6 @@ text-transform: uppercase;
     window.siSaveBlockedByPurchaseFixing = <?php echo !empty($si_save_blocked_by_purchase_fixing) ? 'true' : 'false'; ?>;
     window.siSaveBlockedByPurchaseFixingTip = <?php echo json_encode($si_pfd_save_blocked_tip, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 </script>
-<script>
-window.AURAGOLD_WORKING_BRANCH_ID = <?php echo (int) $auragold_working_branch_id; ?>;
-window.PB_PAGE_CONFIG = {
-    partyNameSelector: '#customerName',
-    partyIdSelector: '#customerId',
-    balanceType: 'customer',
-    branchId: <?php echo (int) $auragold_working_branch_id; ?>,
-    ledgerClBalance: true,
-    purchaseLedgerPrevBalance: false,
-    onAfterLoad: function () { if (typeof updateSummaryPanel === 'function') updateSummaryPanel(); },
-    onAfterClear: function () { if (typeof updateSummaryPanel === 'function') updateSummaryPanel(); },
-    skipIfEditMode: true,
-    skipAutoLoad: function () { return !!window.isPurchaseInvoiceEditMode; }
-};
-</script>
-<script src="js/previous-balance-common.js"></script>
 <script>
     <?php
     // Embed edit order/items/payments so form populates on page load (no AJAX dependency for direct ?id= load)
@@ -4574,32 +4618,6 @@ window.PB_PAGE_CONFIG = {
             }
         });
 
-        // Customer Select2: Enter in search opens add-customer modal with typed name
-        $(document).on('keydown', '.si-customer-select2-wrap .select2-search__field', function(e) {
-            if (e.key !== 'Enter') return;
-            var term = (typeof window.getSaleInvoiceCustomerSearchTerm === 'function')
-                ? window.getSaleInvoiceCustomerSearchTerm()
-                : String($(this).val() || '').trim();
-            var cid = parseInt($('#customerId').val() || selectedCustomerId || 0, 10) || 0;
-            if (cid > 0 || !term) return;
-            e.preventDefault();
-            if ($('#customerId').hasClass('select2-hidden-accessible')) {
-                $('#customerId').select2('close');
-            }
-            initNewLedgerModalDefaults();
-            $('#customerCreationModal').modal('show');
-            setTimeout(function() {
-                const ledgerNameField = $('#ledgerName');
-                if (ledgerNameField.length) {
-                    ledgerNameField.val(term);
-                    if (typeof handleNameInput === 'function') {
-                        handleNameInput(ledgerNameField[0]);
-                    }
-                    ledgerNameField.focus();
-                }
-            }, 300);
-        });
-        
         // ================== AGAINST OF: pick source document (customer required) ==================
         var siCurrentAgainstType = '';
         var siAgainstOrderSearchTimeout = null;
@@ -4768,7 +4786,7 @@ window.PB_PAGE_CONFIG = {
             if (typeof refreshProductListBarcodeGroups === 'function') refreshProductListBarcodeGroups();
         }
 
-        var siPendingSoPick = { selectedId: '', docNo: '', items: [] };
+        var siPendingSoPick = { selectedId: '', docNo: '', items: [], selected: {}, searchTerm: '' };
 
         function siFormatSoPickCell(val) {
             if (val == null || val === '') return '—';
@@ -4780,53 +4798,205 @@ window.PB_PAGE_CONFIG = {
             return String(val);
         }
 
-        function siOpenSoItemPickModal(selectedId, docNo, items) {
-            siPendingSoPick = { selectedId: selectedId, docNo: docNo, items: items || [] };
+        function siSoPickEscapeHtml(val) {
+            return String(val == null ? '' : val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        }
+
+        function siSoPickNoImageSrc() {
+            var boot = window.PRODUCT_LIST_TABLE_BOOT || {};
+            return boot.noImageSrc || 'no_image.jpg';
+        }
+
+        function siSoPickPrimaryImageUrl(item) {
+            var noImg = siSoPickNoImageSrc();
+            if (!item) return { url: noImg, hasImage: false };
+            if (item.group_image) {
+                var gi = (typeof window.auragoldCoParseGroupImageAttr === 'function')
+                    ? window.auragoldCoParseGroupImageAttr(item.group_image)
+                    : item.group_image;
+                if (gi && typeof gi === 'object') {
+                    if (gi.primary) return { url: String(gi.primary), hasImage: true };
+                    if (gi.images && gi.images[0]) return { url: String(gi.images[0]), hasImage: true };
+                } else if (typeof gi === 'string' && gi.trim()) {
+                    return { url: gi.trim(), hasImage: true };
+                }
+            }
+            if (item.images) {
+                try {
+                    var dec = typeof item.images === 'string' ? JSON.parse(item.images) : item.images;
+                    if (dec && dec.images && dec.images[0]) {
+                        var p = String(dec.images[0]);
+                        if (/^https?:\/\//i.test(p) || p.indexOf('uploads/') >= 0) {
+                            return { url: p, hasImage: true };
+                        }
+                    }
+                } catch (eImg) { /* ignore */ }
+            }
+            return { url: noImg, hasImage: false };
+        }
+
+        function siSoPickItemMatchesSearch(item, term) {
+            if (!term) return true;
+            var t = term.toLowerCase();
+            var bc = String(item.barcode || item.barcode_no || '').toLowerCase();
+            var dn = String(item.design_no || '').toLowerCase();
+            return bc.indexOf(t) >= 0 || dn.indexOf(t) >= 0;
+        }
+
+        function siSoPickUpdateSelectedCount() {
+            var el = document.getElementById('siSoItemPickSelectedCount');
+            if (!el) return;
+            var n = Object.keys(siPendingSoPick.selected || {}).length;
+            el.textContent = n + ' selected';
+        }
+
+        function siSoPickSyncSelectAllCheckbox() {
+            var selAll = document.getElementById('siSoItemPickSelectAll');
+            if (!selAll) return;
+            var visible = document.querySelectorAll('#siSoItemPickTbody tr[data-item-index]');
+            if (!visible.length) {
+                selAll.checked = false;
+                selAll.indeterminate = false;
+                return;
+            }
+            var checkedCount = 0;
+            visible.forEach(function(tr) {
+                var idx = tr.getAttribute('data-item-index');
+                if (siPendingSoPick.selected[idx]) checkedCount++;
+            });
+            selAll.checked = checkedCount === visible.length;
+            selAll.indeterminate = checkedCount > 0 && checkedCount < visible.length;
+        }
+
+        function siSoPickRenderRows() {
             var tbody = document.getElementById('siSoItemPickTbody');
             if (!tbody) return;
-            if (!items || items.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No remaining items</td></tr>';
-            } else {
-                tbody.innerHTML = items.map(function(item, idx) {
-                    var bc = item.barcode || item.barcode_no || '';
-                    var dn = item.design_no || '';
-                    var pn = item.product_name || item.name || '';
-                    var qty = item.quantity != null ? item.quantity : '';
-                    var gw = item.gross_weight != null ? item.gross_weight : (item.gross_wt != null ? item.gross_wt : '');
-                    var nw = item.net_weight != null ? item.net_weight : (item.net_wt != null ? item.net_wt : '');
-                    var rate = item.rate != null ? item.rate : (item.metal_rate != null ? item.metal_rate : '');
-                    var amt = item.amount != null ? item.amount : (item.net_amount != null ? item.net_amount : (item.net_amt != null ? item.net_amt : ''));
-                    return '<tr>' +
-                        '<td class="text-center"><input type="checkbox" class="si-so-item-pick-cb" data-item-index="' + idx + '" checked></td>' +
-                        '<td>' + (bc ? String(bc).replace(/</g, '&lt;') : '—') + '</td>' +
-                        '<td>' + (dn ? String(dn).replace(/</g, '&lt;') : '—') + '</td>' +
-                        '<td>' + (pn ? String(pn).replace(/</g, '&lt;') : '—') + '</td>' +
-                        '<td class="text-right">' + siFormatSoPickCell(qty) + '</td>' +
-                        '<td class="text-right">' + siFormatSoPickCell(gw) + '</td>' +
-                        '<td class="text-right">' + siFormatSoPickCell(nw) + '</td>' +
-                        '<td class="text-right">' + siFormatSoPickCell(rate) + '</td>' +
-                        '<td class="text-right">' + siFormatSoPickCell(amt) + '</td>' +
-                        '</tr>';
-                }).join('');
+            var items = siPendingSoPick.items || [];
+            var term = String(siPendingSoPick.searchTerm || '').trim();
+            var noImg = siSoPickNoImageSrc();
+            if (!items.length) {
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No remaining items</td></tr>';
+                siSoPickUpdateSelectedCount();
+                siSoPickSyncSelectAllCheckbox();
+                return;
             }
+            var html = [];
+            items.forEach(function(item, idx) {
+                if (!siSoPickItemMatchesSearch(item, term)) return;
+                var bc = item.barcode || item.barcode_no || '';
+                var dn = item.design_no || '';
+                var pn = item.product_name || item.name || '';
+                var qty = item.quantity != null ? item.quantity : '';
+                var gw = item.gross_weight != null ? item.gross_weight : (item.gross_wt != null ? item.gross_wt : '');
+                var nw = item.net_weight != null ? item.net_weight : (item.net_wt != null ? item.net_wt : '');
+                var rate = item.rate != null ? item.rate : (item.metal_rate != null ? item.metal_rate : '');
+                var amt = item.amount != null ? item.amount : (item.net_amount != null ? item.net_amount : (item.net_amt != null ? item.net_amt : ''));
+                var imgInfo = siSoPickPrimaryImageUrl(item);
+                var checked = !!siPendingSoPick.selected[String(idx)];
+                var photoCell = imgInfo.hasImage
+                    ? '<img src="' + siSoPickEscapeHtml(imgInfo.url) + '" alt="" class="si-so-pick-thumb" style="width:44px;height:44px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;" onerror="this.onerror=null;this.src=\'' + siSoPickEscapeHtml(noImg) + '\';">'
+                    : '<span class="text-muted small d-inline-block text-center" style="width:44px;line-height:1.2;">No<br>image</span>';
+                html.push('<tr data-item-index="' + idx + '">' +
+                    '<td class="text-center"><input type="checkbox" class="si-so-item-pick-cb" data-item-index="' + idx + '"' + (checked ? ' checked' : '') + '></td>' +
+                    '<td class="text-center align-middle">' + photoCell + '</td>' +
+                    '<td>' + (bc ? siSoPickEscapeHtml(bc) : '—') + '</td>' +
+                    '<td>' + (dn ? siSoPickEscapeHtml(dn) : '—') + '</td>' +
+                    '<td>' + (pn ? siSoPickEscapeHtml(pn) : '—') + '</td>' +
+                    '<td class="text-right">' + siFormatSoPickCell(qty) + '</td>' +
+                    '<td class="text-right">' + siFormatSoPickCell(gw) + '</td>' +
+                    '<td class="text-right">' + siFormatSoPickCell(nw) + '</td>' +
+                    '<td class="text-right">' + siFormatSoPickCell(rate) + '</td>' +
+                    '<td class="text-right">' + siFormatSoPickCell(amt) + '</td>' +
+                    '</tr>');
+            });
+            if (!html.length) {
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No items match your search</td></tr>';
+            } else {
+                tbody.innerHTML = html.join('');
+            }
+            siSoPickUpdateSelectedCount();
+            siSoPickSyncSelectAllCheckbox();
+        }
+
+        function siOpenSoItemPickModal(selectedId, docNo, items) {
+            siPendingSoPick = {
+                selectedId: selectedId,
+                docNo: docNo,
+                items: items || [],
+                selected: {},
+                searchTerm: ''
+            };
+            var searchEl = document.getElementById('siSoItemPickSearch');
+            if (searchEl) searchEl.value = '';
             var hint = document.getElementById('siSoItemPickHint');
-            if (hint) hint.textContent = 'Order ' + (docNo || selectedId) + ': choose items to add. Already invoiced lines are hidden.';
+            if (hint) {
+                hint.textContent = 'Order ' + (docNo || selectedId) + ': search by barcode or design no., tick items to add (selections are kept while you search). Already invoiced and in-manufacturing lines are hidden.';
+            }
             var selAll = document.getElementById('siSoItemPickSelectAll');
-            if (selAll) selAll.checked = true;
+            if (selAll) {
+                selAll.checked = false;
+                selAll.indeterminate = false;
+            }
+            siSoPickRenderRows();
             $('#againstOrderModal').modal('hide');
             $('#siSoItemPickModal').modal('show');
+            setTimeout(function() {
+                if (searchEl) searchEl.focus();
+            }, 350);
         }
+
+        var siSoItemPickSearchTimer = null;
+        $(document).on('input', '#siSoItemPickSearch', function() {
+            var self = this;
+            clearTimeout(siSoItemPickSearchTimer);
+            siSoItemPickSearchTimer = setTimeout(function() {
+                siPendingSoPick.searchTerm = String(self.value || '').trim();
+                siSoPickRenderRows();
+            }, 180);
+        });
 
         $(document).on('change', '#siSoItemPickSelectAll', function() {
             var checked = this.checked;
-            document.querySelectorAll('#siSoItemPickTbody .si-so-item-pick-cb').forEach(function(cb) { cb.checked = checked; });
+            document.querySelectorAll('#siSoItemPickTbody tr[data-item-index]').forEach(function(tr) {
+                var idx = String(tr.getAttribute('data-item-index') || '');
+                if (idx === '') return;
+                if (checked) {
+                    siPendingSoPick.selected[idx] = true;
+                } else {
+                    delete siPendingSoPick.selected[idx];
+                }
+                var cb = tr.querySelector('.si-so-item-pick-cb');
+                if (cb) cb.checked = checked;
+            });
+            siSoPickUpdateSelectedCount();
+            siSoPickSyncSelectAllCheckbox();
+        });
+
+        $(document).on('change', '#siSoItemPickTbody .si-so-item-pick-cb', function() {
+            var idx = String(this.getAttribute('data-item-index') || '');
+            if (idx === '') return;
+            if (this.checked) {
+                siPendingSoPick.selected[idx] = true;
+            } else {
+                delete siPendingSoPick.selected[idx];
+            }
+            siSoPickUpdateSelectedCount();
+            siSoPickSyncSelectAllCheckbox();
         });
 
         $('#siSoItemPickDoneBtn').on('click', function() {
             var picked = [];
-            document.querySelectorAll('#siSoItemPickTbody .si-so-item-pick-cb:checked').forEach(function(cb) {
-                var idx = parseInt(cb.getAttribute('data-item-index') || '-1', 10);
-                if (idx >= 0 && siPendingSoPick.items[idx]) picked.push(siPendingSoPick.items[idx]);
+            var sel = siPendingSoPick.selected || {};
+            Object.keys(sel).forEach(function(key) {
+                var idx = parseInt(key, 10);
+                if (idx >= 0 && siPendingSoPick.items[idx]) {
+                    picked.push(siPendingSoPick.items[idx]);
+                }
+            });
+            picked.sort(function(a, b) {
+                var ia = siPendingSoPick.items.indexOf(a);
+                var ib = siPendingSoPick.items.indexOf(b);
+                return ia - ib;
             });
             if (picked.length === 0) {
                 alert('Please select at least one item.');
@@ -4860,7 +5030,13 @@ window.PB_PAGE_CONFIG = {
                     var items = (data && data.items) ? data.items : [];
                     if (type === 'Sale Order') {
                         if (items.length === 0) {
-                            alert('All items of this Sale Order are already invoiced.');
+                            var hiddenMfg = parseInt(data.hidden_in_manufacturing, 10) || 0;
+                            var emptyMsg = hiddenMfg > 0
+                                ? (hiddenMfg === 1
+                                    ? '1 item is still in manufacturing. Complete the job work order first, then invoice it here.'
+                                    : (hiddenMfg + ' items are still in manufacturing. Complete manufacturing first, then invoice them here.'))
+                                : 'All items of this Sale Order are already invoiced.';
+                            alert(emptyMsg);
                             return;
                         }
                         siOpenSoItemPickModal(selectedId, docNo, items);
@@ -6569,6 +6745,8 @@ window.PB_PAGE_CONFIG = {
             // Keep metal = current tab (Diamond & Stones). Products like Gold Bar have Jewellery on their Diamond & Stones characteristic, not on Gold metal.
         }
         window.productSearchMetalId = metalIdForSearch;
+
+        var searchModalZ = document.body.classList.contains('product-row-detail-modal-open') ? 10900 : 10700;
         
         // Create modal HTML
         const modalHtml = `
@@ -6579,7 +6757,7 @@ window.PB_PAGE_CONFIG = {
                 right: 0;
                 bottom: 0;
                 background: rgba(0,0,0,0.5);
-                z-index: 10700;
+                z-index: ${searchModalZ};
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -7216,6 +7394,9 @@ window.PB_PAGE_CONFIG = {
         }
         if (typeof window.auragoldApplyJournalImagesToModalRowPhoto === 'function') {
             window.auragoldApplyJournalImagesToModalRowPhoto(row, product);
+        }
+        if (typeof window.refreshProductRowDetailFormIfOpen === 'function') {
+            window.refreshProductRowDetailFormIfOpen(row);
         }
     }
     
@@ -12228,22 +12409,14 @@ window.PB_PAGE_CONFIG = {
         if (typeof renderPaymentCommentsList === 'function') renderPaymentCommentsList();
         console.log('populateOrderForm: form fields set, loading items and totals');
         
-        // Populate previous balance from saved order
-        const prevBalanceAmtEl = document.getElementById('previousBalanceAmount');
-        const prevBalanceGoldEl = document.getElementById('previousBalanceGold');
-        const prevBalanceSilverEl = document.getElementById('previousBalanceSilver');
-        const prevBalanceDiamondEl = document.getElementById('previousBalanceDiamond');
-        const prevBalanceGemstoneEl = document.getElementById('previousBalanceGemstone');
-        const prevAmt = parseFloat(order.previous_balance || 0);
-        const prevGold = parseFloat(order.previous_gold || 0);
-        const prevSilver = parseFloat(order.previous_silver || 0);
-        const prevDiamond = parseFloat(order.previous_diamond || 0);
-        const prevGemstone = parseFloat(order.previous_gemstone || 0);
-        if (prevBalanceAmtEl) formatSalePreviousBalanceAmount(prevBalanceAmtEl, prevAmt);
-        if (prevBalanceGoldEl) formatSalePreviousBalanceMetal(prevBalanceGoldEl, prevGold, 3, 'data-original-gold');
-        if (prevBalanceSilverEl) formatSalePreviousBalanceMetal(prevBalanceSilverEl, prevSilver, 3, 'data-original-silver');
-        if (prevBalanceDiamondEl) formatSalePreviousBalanceMetal(prevBalanceDiamondEl, prevDiamond, 3, 'data-original-diamond');
-        if (prevBalanceGemstoneEl) formatSalePreviousBalanceMetal(prevBalanceGemstoneEl, prevGemstone, 3, 'data-original-gemstone');
+        // Previous balance: always from live ledger (matches Account Ledger), not saved invoice snapshot.
+        function siRefreshLivePreviousBalance() {
+            if (typeof loadCustomerBalance === 'function') {
+                loadCustomerBalance();
+            }
+        }
+        siRefreshLivePreviousBalance();
+        setTimeout(siRefreshLivePreviousBalance, 400);
         
         // Clear existing products from Product List table
         const productTableBody = document.getElementById('productTableBody');
@@ -12553,8 +12726,6 @@ window.PB_PAGE_CONFIG = {
             orderSearchInput.value = '';
         }
         
-        // Do not call loadCustomerBalance when loading for edit - we already set previous balance from order.
-        // When creating a new invoice, balance is loaded when user selects customer (blur/click on customer field).
     }
     
     // Load order on page load when ?id= is in URL (edit mode) - run after window.load so DOM (product table, summary) is ready

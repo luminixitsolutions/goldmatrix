@@ -403,6 +403,12 @@ function auragold_enforce_session_operational_health() {
     if (!function_exists('session_status') || session_status() !== PHP_SESSION_ACTIVE) {
         return;
     }
+    $healthKey = 'auragold_sess_health_checked_at';
+    if (!empty($_SESSION[$healthKey]) && (time() - (int) $_SESSION[$healthKey]) < 90) {
+        return;
+    }
+    $_SESSION[$healthKey] = time();
+
     $uid = (int) ($_SESSION['user_id'] ?? 0);
     if ($uid <= 0) {
         return;

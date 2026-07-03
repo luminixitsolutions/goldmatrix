@@ -1,6 +1,7 @@
 <?php 
 session_start();
 require_once 'config.php';
+require_once __DIR__ . '/includes/auragold_party_select2.php';
 require_once __DIR__ . '/includes/auragold-gst-page-vars.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
@@ -3152,16 +3153,19 @@ text-transform: uppercase;
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="form-group">
-                                                    <label><?php echo $is_jobwork_from_sale_order ? 'Customer Name' : 'Name *'; ?></label>
-                                                    <div style="position: relative;">
-                                                        <input type="text" class="form-control form-control-sm" id="customerName" placeholder="Enter customer name" <?php echo $is_jobwork_from_sale_order ? 'readonly' : ''; ?> required style="padding-right: 35px;" autocomplete="off" value="<?php echo (!empty($is_jobwork_from_sale_order) && !empty($edit_order) && is_array($edit_order) && !empty($edit_order['customer_name'])) ? htmlspecialchars((string)$edit_order['customer_name'], ENT_QUOTES, 'UTF-8') : ''; ?>">
-                                                        <input type="hidden" id="customerId" name="customer_id" value="<?php echo (!empty($is_jobwork_from_sale_order) && !empty($edit_order) && is_array($edit_order) && !empty($edit_order['customer_id'])) ? (int)$edit_order['customer_id'] : ''; ?>">
-                                                        <input type="hidden" id="customerBillingState" name="customer_billing_state" value="">
-                                                        <?php if (!$is_jobwork_from_sale_order): ?>
-                                                        <i class="feather icon-plus add-customer-icon" id="addCustomerBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #c5a864; font-size: 1.1rem; z-index: 10; pointer-events: auto;" title="Add New Customer"></i>
-                                                        <?php endif; ?>
-                                                        <div id="customerSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 2px;"></div>
-                                                    </div>
+                                                    <label>Name *</label>
+                                                    <?php
+                                                    $jwo_party_id = 0;
+                                                    $jwo_party_name = '';
+                                                    if (!empty($edit_order) && is_array($edit_order)) {
+                                                        $jwo_party_id = (int) ($edit_order['customer_id'] ?? 0);
+                                                        $jwo_party_name = trim((string) ($edit_order['customer_name'] ?? ''));
+                                                    }
+                                                    auragold_party_select2_field([
+                                                        'value_id' => $jwo_party_id,
+                                                        'value_name' => $jwo_party_name,
+                                                    ]);
+                                                    ?>
                                                 </div>
                                             </div>
                                         <div class="col-md-6">
@@ -3649,8 +3653,8 @@ require __DIR__ . '/includes/voucher_diamond_stone_assets.php';
 
 <?php include 'footer-script.php';?>
 
-<link rel="stylesheet" href="assets/libs/select2/select2.css">
-<script src="assets/libs/select2/select2.js"></script>
+<?php auragold_echo_party_select2_styles(); ?>
+<?php auragold_echo_party_select2_scripts(); ?>
 <script src="assets/js/jwo-department-user-select2.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/jwo-department-user-select2.js'); ?>"></script>
 
 <script src="assets/js/product-modal-add-item-common.js"></script>
@@ -4377,20 +4381,6 @@ window.PB_PAGE_CONFIG = {
             }
         });
 
-        // JWO Name: Enter in Select2 search opens ledger modal when no account selected
-        $(document).on('keydown', '.jwo-dept-user-select2-wrap .select2-search__field', function(e) {
-            if (!window.jwoHasDepartmentUserTables) return;
-            if (e.key !== 'Enter') return;
-            var term = String($(this).val() || '').trim();
-            if (!term) return;
-            var sel = document.getElementById('jwoDepartmentUser');
-            if (sel && sel.value) return;
-            e.preventDefault();
-            if (typeof openJwoJobWorkerLedgerModalFromUi === 'function') {
-                openJwoJobWorkerLedgerModalFromUi();
-            }
-        });
-
         // ================== AGAINST OF: Sale Quotation / Task / Event ==================
         var currentAgainstType = '';
         var againstOrderSearchTimeout = null;
@@ -4674,8 +4664,10 @@ window.PB_PAGE_CONFIG = {
                     focused.click();
                 } else if (visibleItems.length > 0) {
                     visibleItems.first().click();
+                } else if (String($(this).val() || '').trim().length > 0 && typeof window.openNewPartyModalWithName === 'function') {
+                    suggestionsDiv.hide();
+                    window.openNewPartyModalWithName(String($(this).val() || '').trim());
                 }
-                // New ledger: use (+) beside the name field, not Enter (avoids accidental modal on readonly / stray focus)
             } else if (e.key === 'Escape') {
                 suggestionsDiv.hide();
             }
@@ -5269,6 +5261,9 @@ window.PB_PAGE_CONFIG = {
         openJwoJobWorkerLedgerModal();
     }
 
+    window.openJwoJobWorkerLedgerModalFromUi = openJwoJobWorkerLedgerModalFromUi;
+    window.openJwoJobWorkerLedgerModal = openJwoJobWorkerLedgerModal;
+
     function setCustomerModalMode(mode) {
         const label = document.getElementById('customerCreationModalLabel');
         const saveBtn = document.getElementById('customerModalSaveBtn');
@@ -5507,17 +5502,22 @@ window.PB_PAGE_CONFIG = {
                 
                 // Update the customer in the main form (not when JWO is tied to a sale order — customer is fixed)
                 if (!window.isJobworkFromSaleOrder) {
-                    if (data.customer_name && document.getElementById('customerName')) {
-                        document.getElementById('customerName').value = data.customer_name;
-                    }
-                    if (data.customer_id && document.getElementById('customerId')) {
-                        document.getElementById('customerId').value = data.customer_id;
-                        selectedCustomerId = data.customer_id;
-                        if (typeof jQuery !== 'undefined') {
-                            jQuery('#customerId').trigger('change');
-                        } else if (typeof window.updateSaleInvoiceAddItemButtonState === 'function') {
-                            window.updateSaleInvoiceAddItemButtonState();
+                    if (data.customer_id) {
+                        var cname = (data.customer_name || '').trim();
+                        if (typeof window.setAuragoldPartyValue === 'function') {
+                            window.setAuragoldPartyValue(data.customer_id, cname);
+                        } else {
+                            if (cname && document.getElementById('customerName')) {
+                                document.getElementById('customerName').value = cname;
+                            }
+                            if (document.getElementById('customerId')) {
+                                document.getElementById('customerId').value = data.customer_id;
+                            }
+                            if (typeof jQuery !== 'undefined') {
+                                jQuery('#customerId').trigger('change');
+                            }
                         }
+                        selectedCustomerId = data.customer_id;
                         setTimeout(function() {
                             if (typeof loadCustomerBalance === 'function') {
                                 loadCustomerBalance();

@@ -428,7 +428,8 @@ if ($newId > 0
         $db_pass_req
     );
     $metalCaratCopyDetail = trim((string) ($mc['message'] ?? ''));
-    $metalCaratCopiedOk   = !empty($mc['ok']) && (int) ($mc['metals'] ?? 0) > 0;
+    $metalCaratCopiedOk   = !empty($mc['ok'])
+        && ((int) ($mc['metals'] ?? 0) > 0 || !empty($mc['shared_master']));
     if (empty($mc['ok'])) {
         error_log('AuraGold save_branch: metal/carat copy from main: ' . $metalCaratCopyDetail);
     }
@@ -456,6 +457,40 @@ if ($newId > 0
     }
 }
 
+$userSeed = ['ok' => true, 'message' => ''];
+if ($newId > 0 && $db_name_req !== '' && function_exists('auragold_mysqli_connect_branch_or_registry')) {
+    $dConn = auragold_mysqli_connect_branch_or_registry(
+        defined('DB_HOST') ? DB_HOST : 'localhost',
+        $db_name_req,
+        $db_users_req,
+        $db_pass_req
+    );
+    if ($dConn) {
+        mysqli_set_charset($dConn, 'utf8mb4');
+        $userSeed = auragold_main_branch_reset_tbl_users_default_admin(
+            $conn_master,
+            $dConn,
+            (int) $main_branch_id,
+            [
+                'branch_name' => $branch_name,
+                'contact1'    => $contact1,
+                'contact2'    => $contact2,
+                'mail'        => $mail,
+                'address'     => $address,
+                'country'     => $country,
+                'status'      => $status,
+            ]
+        );
+        mysqli_close($dConn);
+        if (empty($userSeed['ok'])) {
+            error_log('AuraGold save_branch: default admin seed failed: ' . ($userSeed['message'] ?? ''));
+        }
+    } else {
+        $userSeed = ['ok' => false, 'message' => 'Could not connect to the new branch database to create the default admin user.'];
+        error_log('AuraGold save_branch: could not connect for tbl_users seed: ' . mysqli_connect_error());
+    }
+}
+
 if ($newId > 0 && (int) $main_branch_id > 0) {
     if (!function_exists('auragold_branch_sync_family_tbl_to_all_peer_databases')) {
         require_once dirname(__DIR__) . '/includes/branch_database_provision.php';
@@ -473,6 +508,10 @@ if (!empty($dbProv['skipped'])) {
     $baseMsg .= ' ' . ($dbProv['message'] ?? '');
 } else {
     $baseMsg .= ' Warning: ' . ($dbProv['message'] ?? 'Database setup issue.');
+}
+
+if ($newId > 0 && empty($userSeed['ok'])) {
+    $baseMsg .= ' ' . ($userSeed['message'] ?? 'Could not create the default admin user in the new database.');
 }
 
 if ($ledgerCopyDetail !== '') {

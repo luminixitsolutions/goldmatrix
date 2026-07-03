@@ -42,7 +42,6 @@ if ($action === 'mark_all' && $method === 'POST') {
 }
 
 if ($action === 'count' && $method === 'GET') {
-    auragold_notifications_seed_due_today($conn);
     $n = 0;
     $rq = @mysqli_query($conn, 'SELECT COUNT(*) AS c FROM tbl_auragold_notifications WHERE read_at IS NULL');
     if ($rq && ($rw = mysqli_fetch_assoc($rq))) {

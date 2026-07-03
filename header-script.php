@@ -1,64 +1,97 @@
 <?php
 require_once __DIR__ . '/includes/auragold_ui_font_settings.php';
+require_once __DIR__ . '/includes/auragold_assets.php';
+require_once __DIR__ . '/includes/auragold_page_asset_flags.php';
+
+if (!isset($AURAGOLD_USE_DATATABLES)) {
+    $AURAGOLD_USE_DATATABLES = auragold_page_wants_datatables();
+}
+if (!isset($AURAGOLD_USE_DATATABLE_BUTTONS)) {
+    $AURAGOLD_USE_DATATABLE_BUTTONS = $AURAGOLD_USE_DATATABLES;
+}
+if (!isset($AURAGOLD_USE_FINANCIAL_EXPORT_JS)) {
+    $AURAGOLD_USE_FINANCIAL_EXPORT_JS = auragold_page_wants_financial_export_js();
+}
+
+$__auragold_use_datatables = !empty($AURAGOLD_USE_DATATABLES);
+$__auragold_use_dt_buttons = !empty($AURAGOLD_USE_DATATABLE_BUTTONS);
+$__auragold_use_fin_export = !empty($AURAGOLD_USE_FINANCIAL_EXPORT_JS);
 ?>
-<link rel="icon" type="image/x-icon" href="assets/img/logo.png">
+<link rel="icon" type="image/x-icon" href="<?php echo htmlspecialchars(auragold_asset_url('assets/img/logo.png'), ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://code.jquery.com" crossorigin>
+<link rel="preconnect" href="https://cdn.datatables.net" crossorigin>
+<link rel="dns-prefetch" href="//cdn.jsdelivr.net">
+<link rel="dns-prefetch" href="//cdnjs.cloudflare.com">
 
     <!-- Google Fonts (Set Software → Font Setting, or defaults) -->
     <?php auragold_ui_font_print_google_fonts_link(); ?>
 
-    <!-- Icon fonts -->
-    <link rel="stylesheet" href="assets/fonts/fontawesome.css">
-    <link rel="stylesheet" href="assets/fonts/ionicons.css">
-    <link rel="stylesheet" href="assets/fonts/linearicons.css">
-    <link rel="stylesheet" href="assets/fonts/open-iconic.css">
-    <link rel="stylesheet" href="assets/fonts/pe-icon-7-stroke.css">
-    <link rel="stylesheet" href="assets/fonts/feather.css">
+    <!-- Icon fonts (core set; extra icon packs load only when needed) -->
+    <?php auragold_echo_stylesheet('assets/fonts/fontawesome.css'); ?>
+    <?php auragold_echo_stylesheet('assets/fonts/feather.css'); ?>
+    <?php auragold_echo_stylesheet('assets/fonts/ionicons.css'); ?>
 
     <!-- Core stylesheets -->
-    <link rel="stylesheet" href="assets/css/bootstrap-material.css">
-    <link rel="stylesheet" href="assets/css/shreerang-material.css">
-    <link rel="stylesheet" href="assets/css/uikit.css">
+    <?php auragold_echo_stylesheet('assets/css/bootstrap-material.css'); ?>
+    <?php auragold_echo_stylesheet('assets/css/shreerang-material.css'); ?>
+    <?php auragold_echo_stylesheet('assets/css/uikit.css'); ?>
 
     <!-- Libs -->
-    <link rel="stylesheet" href="assets/libs/perfect-scrollbar/perfect-scrollbar.css">
-    <link rel="stylesheet" href="assets/libs/flot/flot.css">
-    <link rel="stylesheet" href="assets/css/newcss.css">
+    <?php auragold_echo_stylesheet('assets/libs/perfect-scrollbar/perfect-scrollbar.css'); ?>
+    <?php auragold_echo_stylesheet('assets/css/newcss.css'); ?>
     <?php auragold_ui_font_print_overrides_style(); ?>
-    <link rel="stylesheet" href="assets/libs/bootstrap-sweetalert/bootstrap-sweetalert.css">
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="assets/css/advance-filter-global.css">
-    <link rel="stylesheet" href="assets/css/product-list-invoice-layout.css?v=5">
-    <link rel="stylesheet" href="assets/css/column-drag-icons.css">
-    <link rel="stylesheet" href="assets/css/fs-financial-toolbar.css">
-    <link rel="stylesheet" href="assets/css/auragold-mobile-chrome.css">
-    <?php if (!empty($AURAGOLD_REPORT_PAGE)): ?>
-    <link rel="stylesheet" href="assets/css/report-pages-mobile.css">
+    <?php auragold_echo_stylesheet('assets/libs/bootstrap-sweetalert/bootstrap-sweetalert.css'); ?>
+    <?php auragold_echo_stylesheet('style.css'); ?>
+    <?php auragold_echo_stylesheet('assets/css/advance-filter-global.css'); ?>
+    <?php if (auragold_page_wants_product_list_css()): ?>
+    <?php auragold_echo_stylesheet('assets/css/product-list-invoice-layout.css'); ?>
+    <?php auragold_echo_stylesheet('assets/css/column-drag-icons.css'); ?>
     <?php endif; ?>
+    <?php if ($__auragold_use_fin_export || !empty($AURAGOLD_FS_PAGE)): ?>
+    <?php auragold_echo_stylesheet('assets/css/fs-financial-toolbar.css'); ?>
+    <?php endif; ?>
+    <?php auragold_echo_stylesheet('assets/css/auragold-mobile-chrome.css'); ?>
+    <?php if (!empty($AURAGOLD_REPORT_PAGE)): ?>
+    <?php auragold_echo_stylesheet('assets/css/report-pages-mobile.css'); ?>
+    <?php endif; ?>
+    <?php if ($__auragold_use_datatables): ?>
     <!-- DataTables CSS -->
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <?php if ($__auragold_use_dt_buttons): ?>
     <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+    <?php endif; ?>
+    <?php endif; ?>
     
-    <!-- jQuery -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="assets/js/auragold-financial-export.js" defer></script>
+    <!-- jQuery (single load for all pages) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
+    <?php if ($__auragold_use_fin_export): ?>
+    <?php auragold_echo_script('assets/js/auragold-financial-export.js', true); ?>
+    <?php endif; ?>
     
+    <?php if ($__auragold_use_datatables): ?>
     <!-- DataTables JS -->
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js" defer></script>
+    <?php if ($__auragold_use_dt_buttons): ?>
     <!-- DataTables Buttons Extension -->
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js" defer></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js" defer></script>
+    <?php endif; ?>
+    <?php endif; ?>
 
-<script>
-$(document).ready(function () {
-
-    /* ========= Ledger Table is initialized in accountledger-report.php ========= */
+<script defer>
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof jQuery === 'undefined') {
+        return;
+    }
+    var $ = jQuery;
 
     /* ========= Initialize Transaction Table ONLY IF EXISTS ========= */
     if ($('#transactionTable').length && !$('#transactionTable').hasClass('no-datatable')) {
-        if (!$.fn.DataTable.isDataTable('#transactionTable')) {
+        if ($.fn.DataTable && !$.fn.DataTable.isDataTable('#transactionTable')) {
             $('#transactionTable').DataTable({
                 ordering: false,
                 paging: false,
@@ -70,12 +103,14 @@ $(document).ready(function () {
 
     /* ========= Fix Hidden Tab Issue ========= */
     $('a[data-toggle="tab"]').on('shown.bs.tab', function () {
+        if (!$.fn.dataTable) {
+            return;
+        }
         $.fn.dataTable
             .tables({ visible: true, api: true })
             .columns.adjust()
             .draw();
     });
-
 });
 </script>
 
@@ -214,7 +249,6 @@ $(document).ready(function () {
     opacity: 0.5;
     cursor: not-allowed;
 }
-/* Ensure table container doesn't hide DataTables controls */
 .table-container {
     overflow-x: auto;
     overflow-y: visible;
@@ -222,8 +256,6 @@ $(document).ready(function () {
 .table-container .dataTables_wrapper {
     overflow: visible;
 }
-
-/* Customer / ledger modal tabs — inactive links were inheriting white text on light background */
 ul#ledgerTabs.nav-tabs {
     border-bottom: 1px solid #e2e8f0;
     flex-wrap: wrap;

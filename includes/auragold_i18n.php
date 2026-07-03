@@ -79,6 +79,16 @@ if (!function_exists('auragold_get_allowed_locales')) {
         $GLOBALS['auragold_i18n_locale']   = 'en';
         $GLOBALS['auragold_i18n_en']       = auragold_load_english_i18n_array();
         $GLOBALS['auragold_i18n_manual']  = [];
+
+        $sessKey = 'auragold_i18n_boot_v1';
+        if (!empty($_SESSION[$sessKey]) && is_array($_SESSION[$sessKey])) {
+            $boot = $_SESSION[$sessKey];
+            $GLOBALS['auragold_i18n_locale']  = (string) ($boot['locale'] ?? 'en');
+            $GLOBALS['auragold_i18n_en']      = is_array($boot['en'] ?? null) ? $boot['en'] : $GLOBALS['auragold_i18n_en'];
+            $GLOBALS['auragold_i18n_manual']   = is_array($boot['manual'] ?? null) ? $boot['manual'] : [];
+            return;
+        }
+
         if (!$conn || !($conn instanceof mysqli)) {
             return;
         }
@@ -88,14 +98,23 @@ if (!function_exists('auragold_get_allowed_locales')) {
         if (is_array($row) && isset($row['app_locale']) && trim((string) $row['app_locale']) !== '') {
             $loc = auragold_sanitize_app_locale($row['app_locale']);
         }
+        $manual = [];
         $mFile = __DIR__ . '/locales/' . $loc . '.php';
         if ($loc !== 'en' && is_file($mFile)) {
             $o = @include $mFile;
             if (is_array($o)) {
-                $GLOBALS['auragold_i18n_manual'] = $o;
+                $manual = $o;
             }
         }
         $GLOBALS['auragold_i18n_locale'] = $loc;
+        $GLOBALS['auragold_i18n_manual'] = $manual;
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            $_SESSION[$sessKey] = [
+                'locale' => $loc,
+                'en'     => $GLOBALS['auragold_i18n_en'],
+                'manual' => $manual,
+            ];
+        }
     }
 
     function auragold_get_locale() {
@@ -186,6 +205,7 @@ if (!function_exists('auragold_get_allowed_locales')) {
         }
         if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
             $_SESSION['auragold_locale'] = $loc;
+            unset($_SESSION['auragold_i18n_boot_v1']);
         }
         $GLOBALS['auragold_i18n_locale']  = $loc;
         $GLOBALS['auragold_i18n_en']      = auragold_load_english_i18n_array();
