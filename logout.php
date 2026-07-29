@@ -8,6 +8,13 @@ $bid     = function_exists('auragold_resolve_logout_branch_entry_id')
     ? auragold_resolve_logout_branch_entry_id()
     : (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
 
+if (isset($conn) && $conn instanceof mysqli && function_exists('auragold_is_logged_in_session') && auragold_is_logged_in_session()) {
+    require_once __DIR__ . '/includes/activity_logger.php';
+    if (function_exists('auragold_activity_log_logout')) {
+        auragold_activity_log_logout($conn, $timeout ? 'timeout' : 'logout');
+    }
+}
+
 if ($timeout) {
     $msg = 'Session closed due to inactivity. Please sign in again.';
     if ($bid > 0) {

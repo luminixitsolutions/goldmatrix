@@ -1511,6 +1511,6 @@ window.JWQ_PREVIEW_QUEUE_NO = <?php echo json_encode($jwq_preview_queue_no, JSON
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script src="assets/js/auragold-col-reorder.js"></script>
-<script src="includes/jobwork-queue-page.js?v=42"></script>
+<script src="includes/jobwork-queue-page.js?v=44"></script>
 </body>
 </html>

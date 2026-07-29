@@ -1,10 +1,15 @@
 <?php
 session_start();
+ob_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
 require_once __DIR__ . '/../includes/auragold_extra_fields_item_values.php';
 
-header('Content-Type: application/json');
+// Drop any accidental notices from includes so the client always gets pure JSON.
+if (ob_get_length() !== false) {
+    ob_clean();
+}
+header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['status' => 'error', 'message' => 'Invalid request']);
@@ -59,6 +64,27 @@ $header_order_date = isset($_POST['header_order_date']) ? trim((string)$_POST['h
 $header_due_date = isset($_POST['header_due_date']) ? trim((string)$_POST['header_due_date']) : '';
 $header_customer_name = isset($_POST['header_customer_name']) ? trim((string)$_POST['header_customer_name']) : '';
 
+if (function_exists('auragold_parse_ui_date_to_ymd')) {
+    $header_order_date = auragold_parse_ui_date_to_ymd($header_order_date);
+    $header_due_date = auragold_parse_ui_date_to_ymd($header_due_date);
+} else {
+    // Fallback if date helper missing
+    if ($header_order_date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $header_order_date)) {
+        if (preg_match('/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/', $header_order_date, $hm)) {
+            $header_order_date = sprintf('%04d-%02d-%02d', (int) $hm[3], (int) $hm[2], (int) $hm[1]);
+        } else {
+            $header_order_date = '';
+        }
+    }
+    if ($header_due_date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $header_due_date)) {
+        if (preg_match('/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/', $header_due_date, $hm)) {
+            $header_due_date = sprintf('%04d-%02d-%02d', (int) $hm[3], (int) $hm[2], (int) $hm[1]);
+        } else {
+            $header_due_date = '';
+        }
+    }
+}
+
 $tbl_master = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_material_issues'");
 $tbl_items = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_material_issue_items'");
 if (!$tbl_master || mysqli_num_rows($tbl_master) === 0 || !$tbl_items || mysqli_num_rows($tbl_items) === 0) {
@@ -73,6 +99,14 @@ if (!$tbl_master || mysqli_num_rows($tbl_master) === 0 || !$tbl_items || mysqli_
 }
 mysqli_free_result($tbl_master);
 mysqli_free_result($tbl_items);
+
+// Metal-exchange / stock helpers expect this column; missing it throws and breaks JSON AJAX.
+if (is_file(dirname(__DIR__) . '/includes/auragold_material_issue_rows_for_sale_order.php')) {
+    require_once dirname(__DIR__) . '/includes/auragold_material_issue_rows_for_sale_order.php';
+}
+if (function_exists('auragold_ensure_stock_source_stock_id_column')) {
+    @auragold_ensure_stock_source_stock_id_column($conn);
+}
 
 $has_mi_branch   = auragold_ensure_table_branch_id_column($conn, 'tbl_material_issues');
 $hdr_mi_branch   = auragold_transaction_header_branch_id();
@@ -674,10 +708,18 @@ if ($jwo_id > 0) {
         }
     }
     $upd .= " WHERE id = $jwo_id";
-    mysqli_query($conn, $upd);
-    auragold_material_issue_reverse_outward_stock($conn, (int) $jwo_id);
-    mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=mi|hid=" . (int) $jwo_id . "|%'");
-    mysqli_query($conn, "DELETE FROM tbl_material_issue_items WHERE material_issue_id = $jwo_id");
+    try {
+        if (!mysqli_query($conn, $upd)) {
+            throw new RuntimeException(mysqli_error($conn) ?: 'Failed to update material issue');
+        }
+        auragold_material_issue_reverse_outward_stock($conn, (int) $jwo_id);
+        mysqli_query($conn, "DELETE FROM tbl_stock_journal WHERE comment LIKE 'auragold_doc|src=mi|hid=" . (int) $jwo_id . "|%'");
+        mysqli_query($conn, "DELETE FROM tbl_material_issue_items WHERE material_issue_id = $jwo_id");
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        exit;
+    }
+    try {
     foreach ($items as $item) {
         $product_id = (int)($item['product_id'] ?? 0);
         $characteristic_id = isset($item['characteristic_id']) && $item['characteristic_id'] !== '' ? (int)$item['characteristic_id'] : null;
@@ -875,6 +917,10 @@ if ($jwo_id > 0) {
     }
     echo json_encode(['status' => 'success', 'message' => 'Material issue updated', 'jwo_id' => $jwo_id, 'new_barcodes' => $metal_exchange_barcodes_out]);
     exit;
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        exit;
+    }
 }
 
 if (count($items) === 1) {

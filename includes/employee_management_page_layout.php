@@ -13,7 +13,7 @@ require_once __DIR__ . '/auragold_employee_management_menu.php';
 require_once __DIR__ . '/auragold_employee_management_schema.php';
 
 $employee_menu_item = null;
-foreach (auragold_employee_management_menu_items() as $_emItem) {
+foreach (auragold_employee_management_all_page_items() as $_emItem) {
     if (($_emItem['key'] ?? '') === $employee_page_key) {
         $employee_menu_item = $_emItem;
         break;

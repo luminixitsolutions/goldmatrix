@@ -12,7 +12,7 @@ if (!function_exists('auragold_ui_font_defaults')) {
             'body_weight'         => 400,
             'line_height'         => 1.5,
             'body_letter_spacing' => 'normal',
-            'topnav_size_px'      => 12,
+            'topnav_size_px'      => 11,
             'topnav_weight'      => 500,
             'topnav_active_weight' => 600,
         ];
@@ -126,7 +126,7 @@ if (!function_exists('auragold_ui_font_defaults')) {
         } else {
             $d['body_letter_spacing'] = 'normal';
         }
-        $d['topnav_size_px'] = max(10, min(20, (int) ($in['topnav_size_px'] ?? 12)));
+        $d['topnav_size_px'] = max(10, min(20, (int) ($in['topnav_size_px'] ?? 11)));
         $d['topnav_weight'] = in_array((int) ($in['topnav_weight'] ?? 500), [300, 400, 500, 600, 700], true)
             ? (int) $in['topnav_weight'] : 500;
         $d['topnav_active_weight'] = in_array((int) ($in['topnav_active_weight'] ?? 600), [300, 400, 500, 600, 700], true)

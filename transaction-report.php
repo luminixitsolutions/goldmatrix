@@ -1018,7 +1018,6 @@ if ($pv_list_exists && ($transaction_voucher_filter === '' || $transaction_vouch
                 'print_link' => 'payment-voucher-print.php?id=' . (int) ($r['id'] ?? 0),
                 'branch_name' => $pv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
                 'voucher_ex_col3' => $ex3,
-                'no_delete_from_report' => true,
             ];
         }
     }
@@ -1073,7 +1072,6 @@ if ($rv_list_exists && ($transaction_voucher_filter === '' || $transaction_vouch
                 'print_link' => 'receipt-voucher-print.php?id=' . (int) ($r['id'] ?? 0),
                 'branch_name' => $rv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
                 'voucher_ex_col3' => $ex3,
-                'no_delete_from_report' => true,
             ];
         }
     }

@@ -380,7 +380,7 @@ if (!empty($to_date)) {
 if (!empty($invoice_no)) {
     $where_clause .= " AND l.transaction_no LIKE '%$invoice_no%'";
 }
-if (!empty($ledger_names_sel)) {
+if (!empty($ledger_names_sel) && $active_tab !== 'balance') {
     $parts = [];
     foreach ($ledger_names_sel as $ln) {
         $parts[] = "'" . esc($ln) . "'";
@@ -654,6 +654,12 @@ if ($active_tab == 'balance') {
     // Pagination
     $total_records = count($all_ledger_data);
     $total_pages = $total_records > 0 ? ceil($total_records / $per_page) : 1;
+    if ($page < 1) {
+        $page = 1;
+    } elseif ($page > $total_pages) {
+        $page = $total_pages;
+    }
+    $offset = ($page - 1) * $per_page;
     $ledger_data = array_slice($all_ledger_data, $offset, $per_page);
     
 } else {
@@ -767,7 +773,13 @@ if ($active_tab == 'balance') {
     $total_record = getRecord("SELECT COUNT(*) as total FROM tbl_customer_ledger l WHERE $where_clause");
     $total_records = $total_record ? (int)$total_record['total'] : 0;
     $total_pages = $total_records > 0 ? ceil($total_records / $per_page) : 1;
-    
+    if ($page < 1) {
+        $page = 1;
+    } elseif ($page > $total_pages) {
+        $page = $total_pages;
+    }
+    $offset = ($page - 1) * $per_page;
+
     $ledger_data = getList($ledger_query . " LIMIT $per_page OFFSET $offset");
     if ($ledger_has_branch_id && !empty($al_branch_id_to_name)) {
         accountledger_branch_display_name($ledger_data, $al_branch_id_to_name, $al_main_branch_id);
@@ -1049,7 +1061,7 @@ function al_build_query(array $overrides = []) {
     if ($bill_to_bill_raw !== '') {
         $q['bill_to_bill'] = $bill_to_bill_raw;
     }
-    if (!empty($ledger_names_sel)) {
+    if (!empty($ledger_names_sel) && ($overrides['tab'] ?? $active_tab) !== 'balance') {
         $q['ledger_name'] = $ledger_names_sel;
     }
     if (!empty($group_ids)) {
@@ -1073,7 +1085,7 @@ function al_build_query(array $overrides = []) {
     if ($search_raw !== '') {
         $q['search'] = $search_raw;
     }
-    if ($ledger_account_raw !== '') {
+    if ($ledger_account_raw !== '' && ($overrides['tab'] ?? $active_tab) !== 'balance') {
         $q['ledger_account'] = $ledger_account_raw;
     }
     $q['per_page'] = $per_page;
@@ -1331,6 +1343,11 @@ html, body {
 #ledgerTable thead th:first-child {
     z-index: 3;
 }
+/* While dragging columns, sticky breaks pointer DnD — switch to relative. */
+#ledgerTable.alr-col-dragging thead th {
+    position: relative !important;
+    top: auto !important;
+}
 
 /* Vertical lines between columns (View | Date | Ledger | …) */
 #ledgerTable {
@@ -1348,6 +1365,16 @@ html, body {
     padding: 2px 5px;
 }
 
+#ledgerTable thead th.alr-th-reorder {
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#ledgerTable thead th.alr-th-reorder:active {
+    cursor: grabbing;
+}
+
 #ledgerTable thead th.alr-th-reorder .alr-th-drag {
     display: inline-flex;
     align-items: center;
@@ -1355,15 +1382,21 @@ html, body {
     vertical-align: middle;
     margin-left: 0.35rem;
     margin-right: 0.1rem;
+    padding: 2px 4px;
     cursor: grab;
     color: #c9a962;
     line-height: 1;
     flex-shrink: 0;
+    pointer-events: auto;
 }
 
-#ledgerTable thead th.alr-th-reorder .alr-th-drag .feather {
+#ledgerTable thead th.alr-th-reorder .alr-th-drag .feather,
+#ledgerTable thead th.alr-th-reorder .alr-th-drag i {
     width: 0.95rem;
     height: 0.95rem;
+    font-size: 0.95rem;
+    display: inline-block;
+    pointer-events: none;
 }
 
 #ledgerTable thead th.alr-th-reorder .alr-th-drag:active {
@@ -1376,6 +1409,39 @@ html, body {
 
 .alr-sortable-chosen {
     opacity: 0.9;
+}
+
+.alr-sortable-fallback {
+    opacity: 0.95 !important;
+    background: #11294b !important;
+    color: #fff !important;
+    z-index: 10050 !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.alr-col-drag-ghost {
+    position: fixed;
+    z-index: 10060;
+    pointer-events: none;
+    background: #11294b;
+    color: #fff;
+    border: 1px solid #c9a962;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#ledgerTable thead th.alr-drop-before {
+    box-shadow: inset 3px 0 0 #c9a962;
+}
+#ledgerTable thead th.alr-drop-after {
+    box-shadow: inset -3px 0 0 #c9a962;
 }
 
 .table {
@@ -1404,7 +1470,8 @@ html, body {
 #ledgerTable tbody tr:hover td.col-pista {
     background-color: #d4e9d2 !important;
 }
-#ledgerTable tbody tr.table-footer-total td.col-pista {
+#ledgerTable tbody tr.table-footer-total td.col-pista,
+#ledgerTable tfoot tr.table-footer-total td.col-pista {
     background-color: #d4e9d2 !important;
 }
 
@@ -1827,7 +1894,7 @@ html, body {
             if (!empty($invoice_no)) $filter_count++;
             if (!empty($tr_resolved_branch_ids)) $filter_count++;
             if (!empty($bill_to_bill)) $filter_count++;
-            if (!empty($ledger_names_sel)) $filter_count++;
+            if (!empty($ledger_names_sel) && $active_tab !== 'balance') $filter_count++;
             if (!empty($group_ids)) $filter_count++;
             if (!empty($ledger_types_sel)) $filter_count++;
             if (!empty($filter_voucher_keys)) $filter_count++;
@@ -1872,7 +1939,7 @@ html, body {
 <div class="tabs-container">
     <ul class="tabs-list">
         <li>
-            <a href="<?php echo htmlspecialchars(al_build_query(['tab' => 'balance', 'page' => 1])); ?>" 
+            <a href="<?php echo htmlspecialchars(al_build_query(['tab' => 'balance', 'page' => 1, 'ledger_name' => null, 'ledger_account' => null])); ?>" 
                class="tab-link <?php echo $active_tab == 'balance' ? 'active' : ''; ?>">
                 Balance Amounts
             </a>
@@ -1888,7 +1955,7 @@ html, body {
         <label>Ledger:</label>
         <select class="ledger-account-select" onchange="alLedgerQuickChange(this)">
             <?php foreach ($ledger_account_options as $opt_val => $opt_label): ?>
-            <option value="<?php echo htmlspecialchars($opt_val); ?>" <?php echo $ledger_name == $opt_val ? 'selected' : ''; ?>>
+            <option value="<?php echo htmlspecialchars($opt_val); ?>" <?php echo ($active_tab !== 'balance' && $ledger_name == $opt_val) || ($active_tab === 'balance' && $opt_val === '') ? 'selected' : ''; ?>>
                 <?php echo htmlspecialchars($opt_label); ?>
             </option>
             <?php endforeach; ?>
@@ -2040,17 +2107,17 @@ html, body {
                     <tr>
                         <td data-col="0">
                             <?php 
-                            $invoice_no_raw = $entry['invoice_no'] ?? '';
+                            $row_invoice_no = $entry['invoice_no'] ?? '';
                             $transaction_type_raw = $entry['transaction_type'] ?? '';
                             $transaction_id = isset($entry['transaction_id']) ? (int)$entry['transaction_id'] : 0;
-                            $invoice_no_attr = htmlspecialchars($invoice_no_raw, ENT_QUOTES, 'UTF-8');
+                            $invoice_no_attr = htmlspecialchars($row_invoice_no, ENT_QUOTES, 'UTF-8');
                             $transaction_type_attr = htmlspecialchars($transaction_type_raw, ENT_QUOTES, 'UTF-8');
                             ?>
                             <button class="btn-view-all view-transaction-btn" data-invoice-no="<?php echo $invoice_no_attr; ?>" data-transaction-type="<?php echo $transaction_type_attr; ?>" data-transaction-id="<?php echo $transaction_id; ?>">View</button>
                         </td>
                         <td data-col="1"><?php echo $entry['date'] ? date('d/m/Y', strtotime($entry['date'])) : ''; ?></td>
                         <td data-col="2"><?php echo htmlspecialchars($entry['ledger_name']); ?></td>
-                        <td data-col="3"><?php echo htmlspecialchars($invoice_no_raw); ?></td>
+                        <td data-col="3"><?php echo htmlspecialchars($row_invoice_no); ?></td>
                         <td data-col="4"><?php echo htmlspecialchars($entry['against_ledger_display'] ?? $entry['against_ledger'] ?? ''); ?></td>
                         <td data-col="5"><?php echo htmlspecialchars($entry['against_invoice_no'] ?? ''); ?></td>
                         <td data-col="6"><?php echo htmlspecialchars($entry['type_of_voucher'] ?? ''); ?></td>
@@ -2114,6 +2181,17 @@ html, body {
                         <?php endif; ?>
                     </tr>
                     <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="<?php echo ($has_gold_pure ? 20 : 17) + ($ledger_has_diamond ? 3 : 0); ?>" style="text-align: center; padding: 40px; color: #64748b;">
+                            No ledger entries found
+                        </td>
+                    </tr>
+                <?php endif; ?>
+            <?php endif; ?>
+        </tbody>
+        <?php if ($active_tab != 'balance' && !empty($ledger_data)): ?>
+        <tfoot>
                     <tr class="table-footer-total">
                         <td data-col="0" colspan="8"><strong>Total</strong></td>
                         <td data-col="7"><strong><?php echo number_format($total_debit_display_all ?? $total_debit_all, 2); ?></strong></td>
@@ -2144,22 +2222,15 @@ html, body {
                         <td data-col="21"><strong><?php echo accountledger_fmt_red_paren($show_metal_totals ? (float)$total_diamond_cl_wt_all : 0, 3); ?></strong></td>
                         <?php endif; ?>
                     </tr>
-                <?php else: ?>
-                    <tr>
-                        <td colspan="<?php echo ($has_gold_pure ? 20 : 17) + ($ledger_has_diamond ? 3 : 0); ?>" style="text-align: center; padding: 40px; color: #64748b;">
-                            No ledger entries found
-                        </td>
-                    </tr>
-                <?php endif; ?>
-            <?php endif; ?>
-        </tbody>
+        </tfoot>
+        <?php endif; ?>
     </table>
 </div>
 
 <?php if ($active_tab == 'balance'): ?>
 <!-- Total Row in Footer (Outside table-container) -->
 <div style="background: #fff; margin: 0 20px; border-radius: 0 0 8px 8px; border-top: 2px solid #e2e8f0;">
-<table id="transactionTable" class="table table-striped">
+<table id="transactionTable" class="table table-striped no-datatable">
         <tbody>
             <tr class="table-footer-total">
                 <td colspan="3" style="padding: 12px;"><strong>Total</strong></td>
@@ -2483,6 +2554,15 @@ window.alReportExportMeta = <?php echo json_encode([
 })();
 
 function alLedgerQuickChange(sel) {
+    var tab = '<?php echo htmlspecialchars($active_tab, ENT_QUOTES, 'UTF-8'); ?>';
+    if (tab === 'balance') {
+        if (sel && sel.value) {
+            var u = <?php echo json_encode(al_build_query(['tab' => 'all', 'page' => 1, 'ledger_name' => null, 'ledger_account' => null])); ?>;
+            u += '&ledger_account=' + encodeURIComponent(sel.value) + '&ledger_name=' + encodeURIComponent(sel.value);
+            location.href = u;
+        }
+        return;
+    }
     var u = <?php echo json_encode(al_build_query(['ledger_account' => null, 'ledger_name' => null, 'page' => 1])); ?>;
     if (sel && sel.value) {
         u += '&ledger_account=' + encodeURIComponent(sel.value) + '&ledger_name=' + encodeURIComponent(sel.value);
@@ -2881,7 +2961,7 @@ document.addEventListener('click', function(e) {
 </script>
 
 <?php include 'footer-script.php'; ?>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="assets/js/Sortable.min.js"></script>
 
 <script>
 // Initialize DataTables for ledgerTable - MUST be after footer-script.php
@@ -2930,8 +3010,19 @@ function normalizeLedgerColumnOrder(saved, currentKeys) {
             delete set[k];
         }
     });
-    currentKeys.forEach(function (k) {
-        if (set[k]) out.push(k);
+    // Insert newly added columns at their default position (not always at the end).
+    currentKeys.forEach(function (k, defaultIdx) {
+        if (!set[k]) return;
+        delete set[k];
+        var insertAt = out.length;
+        for (var i = defaultIdx - 1; i >= 0; i--) {
+            var pos = out.indexOf(currentKeys[i]);
+            if (pos >= 0) {
+                insertAt = pos + 1;
+                break;
+            }
+        }
+        out.splice(insertAt, 0, k);
     });
     return out;
 }
@@ -2962,24 +3053,43 @@ function syncLedgerFooterRow(tr, order) {
     if (tds.length < 2) return;
     var first = tds[0];
     if (!first.hasAttribute('colspan') || first.getAttribute('data-col') !== '0') return;
-    var anchorKey = '7';
-    var idx = order.indexOf(anchorKey);
-    if (idx < 0) idx = Math.min(9, order.length);
-    first.colSpan = idx;
     var map = {};
     tds.slice(1).forEach(function (td) {
         var k = td.getAttribute('data-col');
         if (k) map[k] = td;
     });
+    // Span "Total" across leading header cols that have no footer value cell.
+    // Pad empty <td>s for any later header cols missing from the footer (e.g. new
+    // columns appended by normalizeLedgerColumnOrder) so DataTables column counts match.
+    var idx = 0;
+    while (idx < order.length && !map[order[idx]]) {
+        idx++;
+    }
+    if (idx <= 0) idx = 1;
+    if (idx > order.length) idx = order.length;
+    first.colSpan = idx;
     while (tr.firstChild) tr.removeChild(tr.firstChild);
     tr.appendChild(first);
     for (var i = idx; i < order.length; i++) {
         var k = order[i];
-        if (map[k]) tr.appendChild(map[k]);
+        if (map[k]) {
+            tr.appendChild(map[k]);
+        } else {
+            var empty = document.createElement('td');
+            empty.setAttribute('data-col', k);
+            empty.style.padding = '12px';
+            tr.appendChild(empty);
+        }
     }
 }
 
 function syncLedgerTableBodyToHeaderOrder(table, order) {
+    var tf = table.querySelector('tfoot');
+    if (tf) {
+        tf.querySelectorAll('tr.table-footer-total').forEach(function (tr) {
+            syncLedgerFooterRow(tr, order);
+        });
+    }
     var tb = table.querySelector('tbody');
     if (!tb) return;
     tb.querySelectorAll('tr').forEach(function (tr) {
@@ -3025,43 +3135,147 @@ function prepareLedgerTableDom() {
 }
 
 function initLedgerColumnSortable() {
-    var tr = document.querySelector('#ledgerTable thead tr');
-    if (!tr || typeof Sortable === 'undefined') return;
+    var table = document.getElementById('ledgerTable');
+    var tr = table && table.querySelector('thead tr');
+    if (!tr) return;
+    enhanceLedgerHeadersForReorder();
+
+    // Prefer a custom pointer drag — Sortable + sticky <th> + DataTables is unreliable here.
     if (tr._alrSortable) {
-        tr._alrSortable.destroy();
+        try { tr._alrSortable.destroy(); } catch (e) {}
         tr._alrSortable = null;
     }
-    tr._alrSortable = Sortable.create(tr, {
-        animation: 150,
-        handle: '.alr-th-drag',
-        draggable: 'th.alr-th-reorder',
-        filter: '.alr-th-fixed',
-        preventOnFilter: false,
-        ghostClass: 'alr-sortable-ghost',
-        chosenClass: 'alr-sortable-chosen',
-        onEnd: function () {
-            finalizeLedgerColumnReorder();
+    if (tr._alrPointerDragBound) return;
+    tr._alrPointerDragBound = true;
+
+    var state = null;
+
+    function clearDropHints() {
+        tr.querySelectorAll('th.alr-drop-before, th.alr-drop-after').forEach(function (th) {
+            th.classList.remove('alr-drop-before', 'alr-drop-after');
+        });
+    }
+
+    function headerUnderPoint(clientX, clientY) {
+        var el = document.elementFromPoint(clientX, clientY);
+        if (!el) return null;
+        var th = el.closest ? el.closest('#ledgerTable thead th') : null;
+        if (!th || !tr.contains(th)) return null;
+        if (th.classList.contains('alr-th-fixed')) return null;
+        return th;
+    }
+
+    function onPointerMove(e) {
+        if (!state) return;
+        var dx = e.clientX - state.startX;
+        var dy = e.clientY - state.startY;
+        if (!state.dragging) {
+            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+            state.dragging = true;
+            table.classList.add('alr-col-dragging');
+            state.th.classList.add('alr-sortable-chosen');
+            state.th.setAttribute('data-alr-just-dragged', '1');
+            if (state.ghost) {
+                state.ghost.style.display = 'block';
+            }
         }
+        e.preventDefault();
+        if (state.ghost) {
+            state.ghost.style.left = (e.clientX + 12) + 'px';
+            state.ghost.style.top = (e.clientY - 10) + 'px';
+        }
+        clearDropHints();
+        var over = headerUnderPoint(e.clientX, e.clientY);
+        if (over && over !== state.th) {
+            var rect = over.getBoundingClientRect();
+            var before = e.clientX < rect.left + rect.width / 2;
+            over.classList.add(before ? 'alr-drop-before' : 'alr-drop-after');
+            state.dropTh = over;
+            state.dropBefore = before;
+        } else {
+            state.dropTh = null;
+        }
+    }
+
+    function onPointerUp(e) {
+        if (!state) return;
+        document.removeEventListener('pointermove', onPointerMove, true);
+        document.removeEventListener('pointerup', onPointerUp, true);
+        document.removeEventListener('pointercancel', onPointerUp, true);
+        clearDropHints();
+        table.classList.remove('alr-col-dragging');
+        state.th.classList.remove('alr-sortable-chosen');
+        if (state.ghost && state.ghost.parentNode) state.ghost.parentNode.removeChild(state.ghost);
+
+        var didDrag = state.dragging;
+        var fromTh = state.th;
+        var dropTh = state.dropTh;
+        var dropBefore = state.dropBefore;
+        state = null;
+
+        if (!didDrag || !dropTh || dropTh === fromTh) {
+            if (fromTh) {
+                setTimeout(function () { fromTh.removeAttribute('data-alr-just-dragged'); }, 300);
+            }
+            return;
+        }
+
+        if (dropBefore) {
+            tr.insertBefore(fromTh, dropTh);
+        } else if (dropTh.nextSibling) {
+            tr.insertBefore(fromTh, dropTh.nextSibling);
+        } else {
+            tr.appendChild(fromTh);
+        }
+        finalizeLedgerColumnReorder();
+        setTimeout(function () { fromTh.removeAttribute('data-alr-just-dragged'); }, 300);
+    }
+
+    tr.addEventListener('pointerdown', function (e) {
+        if (e.button != null && e.button !== 0) return;
+        var th = e.target.closest ? e.target.closest('th.alr-th-reorder') : null;
+        if (!th || !tr.contains(th)) return;
+        if (e.target.closest && e.target.closest('.sort-icon, button, a, input')) return;
+
+        var ghost = document.createElement('div');
+        ghost.className = 'alr-col-drag-ghost';
+        var labelClone = th.cloneNode(true);
+        labelClone.querySelectorAll('.alr-th-drag, .sort-icon').forEach(function (n) { n.remove(); });
+        ghost.textContent = (labelClone.textContent || '').replace(/\s+/g, ' ').trim();
+        ghost.style.display = 'none';
+        document.body.appendChild(ghost);
+
+        state = {
+            th: th,
+            startX: e.clientX,
+            startY: e.clientY,
+            dragging: false,
+            ghost: ghost,
+            dropTh: null,
+            dropBefore: true
+        };
+        document.addEventListener('pointermove', onPointerMove, true);
+        document.addEventListener('pointerup', onPointerUp, true);
+        document.addEventListener('pointercancel', onPointerUp, true);
     });
 }
 
 function finalizeLedgerColumnReorder() {
     var table = document.getElementById('ledgerTable');
     if (!table) return;
+    // Capture order BEFORE DataTables.destroy() — destroy restores the original HTML.
     var order = getLedgerHeaderOrder(table);
-    if (order[0] !== '0') {
-        applyLedgerColumnOrder(table, window.lastGoodLedgerOrder || order);
+    if (!order.length || order[0] !== '0') {
+        if (window.lastGoodLedgerOrder && window.lastGoodLedgerOrder.length) {
+            applyLedgerColumnOrder(table, window.lastGoodLedgerOrder);
+        }
         return;
     }
-    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#ledgerTable')) {
-        $('#ledgerTable').DataTable().destroy();
-        ledgerTable = null;
-    }
-    syncLedgerTableBodyToHeaderOrder(table, order);
+
     saveLedgerColumnOrder(order);
     window.lastGoodLedgerOrder = order.slice();
-    if (window.applyPistaColumnBackground) window.applyPistaColumnBackground();
-    initLedgerTable({ skipPrepare: true });
+    // initLedgerTable destroys DataTables (which resets HTML), then re-applies columnOrder.
+    initLedgerTable({ skipPrepare: true, columnOrder: order });
 }
 
 $(document).ready(function() {
@@ -3078,14 +3292,24 @@ function initLedgerTable(opts) {
         return;
     }
 
+    // Destroy first — DataTables.destroy() restores original HTML and would undo column order.
+    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#ledgerTable')) {
+        try {
+            $('#ledgerTable').DataTable().destroy();
+        } catch (eDestroyInit) {}
+        ledgerTable = null;
+    }
+
     if (!opts.skipPrepare) {
         prepareLedgerTableDom();
     } else {
+        // Re-apply saved/dragged order onto the restored markup.
+        var order = opts.columnOrder || window.lastGoodLedgerOrder || loadLedgerColumnOrder();
+        if (order && order.length) {
+            applyLedgerColumnOrder($table[0], order);
+        }
         enhanceLedgerHeadersForReorder();
-    }
-
-    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#ledgerTable')) {
-        $('#ledgerTable').DataTable().destroy();
+        if (window.applyPistaColumnBackground) window.applyPistaColumnBackground();
     }
 
     if (!$.fn.DataTable) {
@@ -3095,33 +3319,39 @@ function initLedgerTable(opts) {
         return;
     }
 
+    // DataTables cannot handle colspan cells in tbody: drop the single-cell
+    // "no data" placeholder row and let language.emptyTable render instead.
+    $table.find('tbody tr').each(function() {
+        if (this.cells.length === 1 && this.cells[0].colSpan > 1) {
+            $(this).remove();
+        }
+    });
+
     try {
         ledgerTable = $table.DataTable({
             ordering: false,
-            pageLength: 25,
-            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
-            lengthChange: true,
-            info: true,
+            // Server-side PHP pagination (.pagination-container) already handles
+            // page size / info / page links — keep DataTables paging off to avoid duplicates.
+            lengthChange: false,
+            info: false,
             searching: true,
-            paging: true,
+            paging: false,
             autoWidth: false,
-            dom: 'lrtip',
+            dom: 'rt',
             columnDefs: [
                 { orderable: false, targets: 0 }
             ],
             language: {
-                lengthMenu: "Show _MENU_ entries",
-                info: "Showing _START_ to _END_ of _TOTAL_ entries",
-                paginate: {
-                    first: "First",
-                    last: "Last",
-                    next: "Next",
-                    previous: "Previous"
-                }
+                emptyTable: "No ledger entries found"
             },
+
             initComplete: function() {
                 console.log('DataTables initialized successfully');
-                initLedgerColumnSortable();
+                enhanceLedgerHeadersForReorder();
+                // Defer so DataTables finishes any header DOM tweaks before Sortable binds.
+                setTimeout(function () {
+                    initLedgerColumnSortable();
+                }, 0);
             }
         });
 
@@ -3171,10 +3401,12 @@ function initTableSorting() {
     var $headers = $table.children('thead').find('> tr > th');
     var sortOrder = {};
     
-    // Add sorting styles to headers
+    // Add sorting styles to headers (do not override grab cursor on reorderable cols)
     $headers.each(function(index) {
         if (index > 0) { // Skip first column (View button)
-            $(this).css('cursor', 'pointer');
+            if (!$(this).hasClass('alr-th-reorder')) {
+                $(this).css('cursor', 'pointer');
+            }
             $(this).attr('data-sort-col', index);
             $(this).find('.sort-icon').remove();
             $(this).append(' <span class="sort-icon" style="font-size:10px;opacity:0.5;">↕</span>');
@@ -3183,6 +3415,8 @@ function initTableSorting() {
     
     $headers.off('click.alrSort').on('click.alrSort', function(e) {
         if ($(e.target).closest('.alr-th-drag').length) return;
+        // Ignore click that follows a column drag.
+        if ($(this).data('alr-just-dragged') || this.getAttribute('data-alr-just-dragged')) return;
         var colIndex = $(this).index();
         if (colIndex === 0) return;
 
@@ -3332,7 +3566,7 @@ function exportTableToExcel() {
             });
         }
     } else {
-        var $ft2 = $('#ledgerTable tbody tr.table-footer-total').first();
+        var $ft2 = $('#ledgerTable tr.table-footer-total').first();
         if ($ft2.length && $ft2.is(':visible')) {
             var fullF2 = alTrToFullRowArray($ft2, nTh);
             footer = visIdx.map(function(ti) {
@@ -3405,9 +3639,9 @@ function printTable() {
     });
     printContents += '</tr></thead>';
     
-    // Body
+    // Body (tfoot total row included at the end)
     printContents += '<tbody>';
-    $('#ledgerTable tbody tr:visible').each(function() {
+    $('#ledgerTable tbody tr:visible, #ledgerTable tfoot tr:visible').each(function() {
         printContents += '<tr>';
         $(this).find('td').each(function(i) {
             if (i > 0) {

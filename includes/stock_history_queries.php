@@ -248,12 +248,16 @@ $inward_query = "
             pi.invoice_no, 
             sr.return_no,
             $against_invoice_me_docs_coalesce
+            NULLIF(TRIM(jwo_di_inv.jobwork_no), ''),
+            NULLIF(TRIM(jwo_di_inv.jobwork_queue_no), ''),
             ''
         ) as against_invoice_no,
         COALESCE(NULLIF(TRIM(pi.invoice_no), ''), NULLIF(TRIM(sr.return_no), ''), '') as invoice_no,
         /* Purchase invoice first. Document metal exchange before generic SJ match. */
         CASE 
             WHEN $doc_metal_exchange_voucher_expr THEN $doc_me_voucher_label_case
+            WHEN s.stock_type = 'balance' AND COALESCE(NULLIF(TRIM(s.reference_type), ''), '') = 'jobwork_diamond_transfer' THEN 'Jobwork Transfer'
+            WHEN s.stock_type = 'balance' THEN 'Balance'
             WHEN s.stock_type = 'sale_return' THEN 'Sale Return'
             WHEN $inward_purchase_invoice_voucher_expr THEN 'Purchase Invoice'
             WHEN $inward_any_sj_expr THEN 'Stock Journal'
@@ -262,6 +266,8 @@ $inward_query = "
         END as type_of_voucher,
         CASE 
             WHEN $doc_metal_exchange_voucher_expr THEN $doc_me_voucher_label_case
+            WHEN s.stock_type = 'balance' AND COALESCE(NULLIF(TRIM(s.reference_type), ''), '') = 'jobwork_diamond_transfer' THEN 'Jobwork Transfer'
+            WHEN s.stock_type = 'balance' THEN 'Balance'
             WHEN s.stock_type = 'sale_return' THEN 'Sale Return'
             WHEN $inward_purchase_invoice_voucher_expr THEN 'Purchase Invoice'
             WHEN $inward_any_sj_expr THEN 'Stock Journal'
@@ -355,6 +361,11 @@ $inward_query = "
         AND s.stock_type = 'sale_return'
     )
     LEFT JOIN tbl_sale_returns sr ON sr_item.return_id = sr.id
+    LEFT JOIN tbl_jobwork_orders jwo_di_inv ON (
+        s.stock_type = 'balance'
+        AND s.reference_type = 'jobwork_diamond_transfer'
+        AND jwo_di_inv.id = s.reference_id
+    )
     WHERE $inward_where
     ORDER BY s.created_at DESC
 ";
@@ -590,10 +601,11 @@ $outward_query = "
         COALESCE(MAX(sub.sj_item_id), 0) as sj_attach_item_id,
         '' as rfid,
         '' as location,
-        COALESCE(MAX(sub.sj_invoice_no), MAX(sub.mi_invoice_no), MAX(sub.pi_invoice_no), '') as against_invoice_no,
+        COALESCE(MAX(sub.sj_invoice_no), MAX(sub.mi_invoice_no), MAX(sub.jwo_invoice_no), MAX(sub.pi_invoice_no), '') as against_invoice_no,
         COALESCE(MAX(sub.pi_invoice_no), '') as invoice_no,
         CASE
             WHEN MAX(sub.s_ref_type) = 'material_issue' THEN 'Material Issue'
+            WHEN MAX(sub.s_ref_type) = 'jobwork_diamond_issue' THEN 'Jobwork Transfer'
             WHEN COALESCE(MAX(sub.sj_invoice_no), '') = '' AND MAX(sub.sj_item_id) IS NULL THEN 'Outward'
             WHEN LOWER(TRIM(COALESCE(MAX(sub.sj_voucher_type), ''))) = 'product_opening' THEN 'Product Opening'
             WHEN TRIM(COALESCE(MAX(sub.sj_voucher_type), '')) IN ('Purchase Invoice', 'purchase_invoice') THEN 'Purchase Invoice'
@@ -603,6 +615,7 @@ $outward_query = "
         END as type_of_voucher,
         CASE
             WHEN MAX(sub.s_ref_type) = 'material_issue' THEN 'Material Issue'
+            WHEN MAX(sub.s_ref_type) = 'jobwork_diamond_issue' THEN 'Jobwork Transfer'
             WHEN COALESCE(MAX(sub.sj_invoice_no), '') = '' AND MAX(sub.sj_item_id) IS NULL THEN 'Outward'
             WHEN LOWER(TRIM(COALESCE(MAX(sub.sj_voucher_type), ''))) = 'product_opening' THEN 'Product Opening'
             WHEN TRIM(COALESCE(MAX(sub.sj_voucher_type), '')) IN ('Purchase Invoice', 'purchase_invoice') THEN 'Purchase Invoice'
@@ -661,6 +674,7 @@ $outward_query = "
             COALESCE(NULLIF(TRIM(s.reference_type), ''), '') as s_ref_type,
             s.reference_id as s_ref_id,
             mi_sh.material_issue_no as mi_invoice_no,
+            COALESCE(NULLIF(TRIM(jwo_sh.jobwork_no), ''), NULLIF(TRIM(jwo_sh.jobwork_queue_no), '')) as jwo_invoice_no,
             p.name as product_name,
             p.article as article,
             m.display_name as metal_name,
@@ -686,6 +700,11 @@ $outward_query = "
             s.stock_type = 'outward'
             AND s.reference_type = 'material_issue'
             AND mi_sh.id = s.reference_id
+        )
+        LEFT JOIN tbl_jobwork_orders jwo_sh ON (
+            s.stock_type = 'outward'
+            AND s.reference_type = 'jobwork_diamond_issue'
+            AND jwo_sh.id = s.reference_id
         )
         LEFT JOIN (
             SELECT s_inner.id as stock_id,

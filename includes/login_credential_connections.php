@@ -579,10 +579,81 @@ if (!function_exists('auragold_login_user_and_registry_url_strings_match')) {
     }
 }
 
+if (!function_exists('auragold_login_host_label_from_target_url')) {
+    /**
+     * First label of the host in a login “IP address / URL” field (e.g. ngp.goldmatrixsoft.com → ngp).
+     */
+    function auragold_login_host_label_from_target_url(string $raw): string {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return '';
+        }
+        if (!preg_match('#^[a-z][a-z0-9+.-]*://#i', $raw)) {
+            $raw = 'https://' . $raw;
+        }
+        $host = parse_url($raw, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            $host = auragold_normalize_branch_host_for_storage(trim((string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', trim($raw))));
+        }
+        $host = strtolower(trim((string) $host));
+        if ($host === '' || strpos($host, '.') === false) {
+            return $host;
+        }
+        return strtolower((string) explode('.', $host, 2)[0]);
+    }
+}
+
+if (!function_exists('auragold_login_branch_option_for_registry_id')) {
+    /**
+     * One branch dropdown row for a central registry tbl_branches id.
+     *
+     * @return array{id:int,label:string,db_name:string}
+     */
+    function auragold_login_branch_option_for_registry_id(int $branchId, ?array $row = null): array {
+        $branchId = (int) $branchId;
+        if (!$row && function_exists('auragold_registry_tbl_branches_row_by_id')) {
+            $row = auragold_registry_tbl_branches_row_by_id($branchId);
+        }
+        $dbn = function_exists('auragold_login_expected_db_name_for_branch_id')
+            ? trim((string) auragold_login_expected_db_name_for_branch_id($branchId))
+            : '';
+        if ($dbn === '' && $row) {
+            $dbn = trim((string) (auragold_branch_row_db_credentials($row)['db_name'] ?? ''));
+        }
+        if ($dbn === '' && defined('DB_NAME')) {
+            $dbn = (string) DB_NAME;
+        }
+        $nm = $row ? trim((string) ($row['name'] ?? '')) : '';
+        if ($nm === '') {
+            $nm = 'Branch #' . $branchId;
+        }
+        return [
+            'id'      => $branchId,
+            'label'   => $nm,
+            'db_name' => $dbn,
+        ];
+    }
+}
+
+if (!function_exists('auragold_login_url_scoped_branch_options')) {
+    /**
+     * Branch list for URL-scoped login: exactly the registry row tied to the server address field.
+     *
+     * @return list<array{id:int,label:string,db_name:string}>
+     */
+    function auragold_login_url_scoped_branch_options(int $registryBranchId, ?array $prefRow = null): array {
+        $registryBranchId = (int) $registryBranchId;
+        if ($registryBranchId <= 0) {
+            return [];
+        }
+        return [auragold_login_branch_option_for_registry_id($registryBranchId, $prefRow)];
+    }
+}
+
 if (!function_exists('auragold_registry_branch_id_for_login_target_url')) {
     /**
-     * Resolve optional “IP address / URL” field to a central registry tbl_branches id (ip_address / subdomain_url).
-     * Prefers a main row (main_branch_id = 0) when multiple match.
+     * Resolve optional “IP address / URL” field to a central registry tbl_branches id (ip_address / subdomain_url / code).
+     * Prefers an exact host match, then branch code = subdomain label (e.g. ngp.* → code NGP), then main rows.
      */
     function auragold_registry_branch_id_for_login_target_url(string $raw): int {
         $raw = trim($raw);
@@ -599,6 +670,31 @@ if (!function_exists('auragold_registry_branch_id_for_login_target_url')) {
         if ($uVars === []) {
             return 0;
         }
+        $userHost = '';
+        foreach ($uVars as $u) {
+            if (preg_match('#^https?://#i', $u)) {
+                $h = parse_url($u, PHP_URL_HOST);
+                if (is_string($h) && $h !== '') {
+                    $userHost = strtolower($h);
+                    break;
+                }
+            }
+        }
+        if ($userHost === '' && function_exists('auragold_login_host_label_from_target_url')) {
+            $labelOnly = auragold_login_host_label_from_target_url($raw);
+            if ($labelOnly !== '' && strpos($labelOnly, '.') !== false) {
+                $userHost = strtolower($labelOnly);
+            } elseif ($labelOnly !== '') {
+                $base = defined('AURAGOLD_BRANCH_SUBDOMAIN_BASE_HOST') ? trim((string) AURAGOLD_BRANCH_SUBDOMAIN_BASE_HOST) : '';
+                if ($base !== '') {
+                    $userHost = strtolower($labelOnly . '.' . $base);
+                }
+            }
+        }
+        $hostLabel = function_exists('auragold_login_host_label_from_target_url')
+            ? auragold_login_host_label_from_target_url($raw)
+            : '';
+
         $rows = function_exists('auragold_registry_list_tbl_branches_ordered')
             ? auragold_registry_list_tbl_branches_ordered()
             : (function_exists('getListMaster') ? getListMaster('SELECT * FROM tbl_branches ORDER BY IFNULL(main_branch_id, 0) ASC, id ASC') : []);
@@ -610,13 +706,23 @@ if (!function_exists('auragold_registry_branch_id_for_login_target_url')) {
             if (empty($row)) {
                 continue;
             }
-            $rVars = auragold_login_registry_row_url_string_variants_for_match($row);
-            if ($rVars === [] || !auragold_login_user_and_registry_url_strings_match($uVars, $rVars)) {
-                continue;
-            }
             if (function_exists('auragold_tbl_branch_row_is_active') && !auragold_tbl_branch_row_is_active($row)) {
                 continue;
             }
+            $rVars     = auragold_login_registry_row_url_string_variants_for_match($row);
+            $matchUrl  = ($rVars !== [] && auragold_login_user_and_registry_url_strings_match($uVars, $rVars));
+            $matchCode = false;
+            if (!$matchUrl && $hostLabel !== '') {
+                $code = trim((string) ($row['code'] ?? ''));
+                if ($code !== '' && strcasecmp($code, $hostLabel) === 0) {
+                    $matchCode = true;
+                }
+            }
+            if (!$matchUrl && !$matchCode) {
+                continue;
+            }
+            $row['_auragold_login_match_url']  = $matchUrl;
+            $row['_auragold_login_match_code'] = $matchCode;
             $candidates[] = $row;
         }
         if ($candidates === []) {
@@ -624,11 +730,44 @@ if (!function_exists('auragold_registry_branch_id_for_login_target_url')) {
         }
         usort(
             $candidates,
-            static function (array $a, array $b): int {
-                $ma = (int) ($a['main_branch_id'] ?? 0) === 0 ? 0 : 1;
-                $mb = (int) ($b['main_branch_id'] ?? 0) === 0 ? 0 : 1;
+            static function (array $a, array $b) use ($userHost): int {
+                $exactHost = static function (array $row) use ($userHost): bool {
+                    if ($userHost === '') {
+                        return false;
+                    }
+                    foreach (auragold_login_registry_row_url_string_variants_for_match($row) as $r) {
+                        if (preg_match('#^https?://#i', $r)) {
+                            $h = parse_url($r, PHP_URL_HOST);
+                            if (is_string($h) && $h !== '' && strcasecmp($h, $userHost) === 0) {
+                                return true;
+                            }
+                        } elseif (strcasecmp($r, $userHost) === 0) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                $score = static function (array $row) use ($exactHost): int {
+                    if ($exactHost($row)) {
+                        return 0;
+                    }
+                    if (!empty($row['_auragold_login_match_code'])) {
+                        return 1;
+                    }
+                    if (!empty($row['_auragold_login_match_url'])) {
+                        return 2;
+                    }
+                    return 3;
+                };
+                $sa = $score($a);
+                $sb = $score($b);
+                if ($sa !== $sb) {
+                    return $sa <=> $sb;
+                }
+                $ma = (int) ($a['main_branch_id'] ?? 0) === 0 ? 1 : 0;
+                $mb = (int) ($b['main_branch_id'] ?? 0) === 0 ? 1 : 0;
                 if ($ma !== $mb) {
-                    return $ma <=> $mb;
+                    return $mb <=> $ma;
                 }
                 return (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0);
             }
@@ -680,6 +819,16 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
         $prefer_branch_id = $url_scope_id > 0 ? $url_scope_id : $prefer_in;
         $url_gated         = $url_scope_id > 0;
 
+        if ($login_target_url !== '' && $url_scope_id <= 0) {
+            $localDev = defined('AURAGOLD_PROJECT') && (string) AURAGOLD_PROJECT === 'local';
+            if (!$localDev) {
+                return [
+                    'success' => false,
+                    'message' => 'This server address is not assigned to any branch. Set subdomain URL or IP in Branch settings.',
+                ];
+            }
+        }
+
         // 0) Portal / deep link: verify chosen branch first (tbl_users often only in that schema, e.g. auragold_main_branch)
         if ($prefer_branch_id > 0) {
             $prefRow = function_exists('auragold_registry_tbl_branches_row_by_id')
@@ -693,6 +842,15 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
                         mysqli_close($lnP);
                     }
                     if ($uPref) {
+                        if ($url_gated && function_exists('auragold_login_url_scoped_branch_options')) {
+                            $isSa = function_exists('auragold_user_row_is_superadmin') && auragold_user_row_is_superadmin($uPref);
+                            return [
+                                'success'       => true,
+                                'is_superadmin' => $isSa,
+                                'branches'      => auragold_login_url_scoped_branch_options($prefer_branch_id, $prefRow),
+                            ];
+                        }
+
                         $portalBranches = function_exists('auragold_login_branch_options_from_operational_tbl_branches')
                             ? auragold_login_branch_options_from_operational_tbl_branches($prefer_branch_id)
                             : [];
@@ -802,6 +960,10 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
             // Local: a production URL (e.g. gm.*) often resolves to tbl_branches row whose db_name
             // is not the developer’s registry copy — tbl_users may live in AURAGOLD_REGISTRY_DB only.
             // Fall through and try default DB + branch scan like an unscoped login.
+        }
+
+        if ($login_target_url !== '' && !(defined('AURAGOLD_PROJECT') && (string) AURAGOLD_PROJECT === 'local')) {
+            return ['success' => false, 'message' => 'Invalid username or password'];
         }
 
         // 1) Default application database (same as DB_NAME — “Main” / first bootstrap schema)

@@ -6,22 +6,16 @@ require_once __DIR__ . '/includes/session_login_type.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/branch_product_delete_permission.php';
 require_once __DIR__ . '/includes/branch_tbl_branches_ip_subdomain.php';
+require_once __DIR__ . '/includes/branch_panel_password.php';
 
 if (!empty($conn_master)) {
     auragold_ensure_branches_allow_product_delete_column($conn_master);
     auragold_ensure_branches_ip_subdomain_columns_on_registry($conn_master);
+    auragold_ensure_tbl_branches_panel_password($conn_master);
 }
 
 if (empty($_SESSION['Admin'])) {
     header('Location: index.php');
-    exit;
-}
-if (!auragold_session_is_admin_login_type()) {
-    header('Location: dashboard.php');
-    exit;
-}
-if (!auragold_session_may_see_set_software_branches_menu()) {
-    header('Location: dashboard.php');
     exit;
 }
 
@@ -31,6 +25,7 @@ $branch_switch_err = '';
 if (isset($_GET['login_error']) && is_string($_GET['login_error'])) {
     $branch_switch_err = trim($_GET['login_error']);
 }
+$switch_branch_prompt_id = isset($_GET['switch_branch_id']) ? (int) $_GET['switch_branch_id'] : 0;
 
 $list_scope_main = auragold_branches_page_list_scope_main_id();
 
@@ -76,11 +71,15 @@ foreach ($all_subs as $s) {
 $branch_add_countries = [];
 if (!empty($conn)) {
     require_once __DIR__ . '/includes/location-helpers.php';
+    require_once __DIR__ . '/includes/international-dial-codes.php';
     auragold_bootstrap_location_data($conn);
     $branch_add_countries = getList('SELECT id, name FROM tbl_countries WHERE status = 1 ORDER BY name ASC');
 }
 if (!is_array($branch_add_countries)) {
     $branch_add_countries = [];
+}
+if (!function_exists('auragold_render_dial_code_select')) {
+    require_once __DIR__ . '/includes/international-dial-codes.php';
 }
 
 function auragold_branches_page_row_host(array $row): string {
@@ -187,6 +186,64 @@ function auragold_branches_page_row_visit_url(string $host): string {
             text-decoration: none; display: inline-block;
         }
         .btn-branch-go:hover { filter: brightness(1.06); color: #fff; text-decoration: none; }
+        .btn-branch-set-pwd {
+            font-size: 11px; font-weight: 600; white-space: nowrap;
+            color: var(--branches-navy); background: #fff;
+            border: 1px solid #cbd5e1; border-radius: 8px; padding: 5px 8px; cursor: pointer;
+        }
+        .btn-branch-set-pwd:hover { background: #f8fafc; }
+        .branch-pwd-overlay {
+            position: fixed; inset: 0; z-index: 2100; display: none;
+            align-items: center; justify-content: center;
+            background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(2px);
+        }
+        .branch-pwd-overlay.is-open { display: flex; }
+        .branch-pwd-dialog {
+            background: #fff; border-radius: 12px; width: min(420px, 92vw);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.2); border: 1px solid #e2e8f0; overflow: hidden;
+        }
+        .branch-pwd-dialog__head {
+            padding: 14px 18px; border-bottom: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .branch-pwd-dialog__title { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+        .branch-pwd-dialog__close {
+            border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b;
+        }
+        .branch-pwd-dialog__body { padding: 16px 18px; }
+        .branch-pwd-dialog__foot {
+            padding: 12px 18px 16px; display: flex; gap: 8px; justify-content: flex-end;
+            border-top: 1px solid #e2e8f0;
+        }
+        .branch-pwd-label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+        .branch-pwd-input {
+            width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px;
+            padding: 8px 10px; font-size: 14px;
+        }
+        .branch-pwd-hint { margin: 8px 0 0; font-size: 12px; color: #64748b; line-height: 1.4; }
+        .branch-pwd-error { margin-top: 8px; font-size: 12px; color: #b91c1c; display: none; }
+        .branch-pwd-error.is-visible { display: block; }
+        .branch-pwd-btn {
+            font-size: 13px; font-weight: 600; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid transparent;
+        }
+        .branch-pwd-btn--ghost { background: #fff; border-color: #cbd5e1; color: #334155; }
+        .branch-pwd-btn--primary {
+            color: #fff; background: linear-gradient(135deg, #11294b 0%, #0d1f38 100%); border-color: #11294b;
+        }
+        .branch-pwd-btn--primary:disabled {
+            opacity: 0.75; cursor: not-allowed; filter: none;
+        }
+        .branch-pwd-btn-spinner {
+            display: inline-block;
+            width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: branch-pwd-btn-spin 0.65s linear infinite;
+        }
+        @keyframes branch-pwd-btn-spin {
+            to { transform: rotate(360deg); }
+        }
         .btn-branch-create-sub {
             font-size: 12px; font-weight: 600; white-space: nowrap;
             color: #fff; background: linear-gradient(135deg, #11294b 0%, #0d1f38 100%);
@@ -285,12 +342,13 @@ function auragold_branches_page_row_visit_url(string $host): string {
                                                     <th style="width:88px;">Delete</th>
                                                     <th style="width:150px;">Add sub-branch</th>
                                                     <th style="width:130px;">Go to branch</th>
+                                                    <th style="width:120px;">Set password</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <tr class="branch-row-main branch-row-switchable" data-switch-url="switch_branch.php?id=<?php echo (int) $main['id']; ?>" title="Click a row to work in that branch (same login)">
+                                                <tr class="branch-row-main branch-row-switchable" data-switch-url="switch_branch.php?id=<?php echo (int) $main['id']; ?>" data-branch-id="<?php echo (int) $main['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $main['name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click a row to work in that branch (same login)">
                                                     <td>
-                                                        <a href="switch_branch.php?id=<?php echo (int) $main['id']; ?>" class="branch-open-link"><?php echo htmlspecialchars($main['name']); ?></a>
+                                                        <a href="switch_branch.php?id=<?php echo (int) $main['id']; ?>" class="branch-open-link branch-switch-guarded" data-branch-id="<?php echo (int) $main['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $main['name'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($main['name']); ?></a>
                                                         <span class="badge-type">Main</span>
                                                     </td>
                                                     <td class="muted"><?php echo htmlspecialchars($main['code'] !== '' && $main['code'] !== null ? $main['code'] : '—'); ?></td>
@@ -309,7 +367,7 @@ function auragold_branches_page_row_visit_url(string $host): string {
                                                         <?php endif; ?>
                                                     </td>
                                                     <td>
-                                                        <a href="switch_branch.php?id=<?php echo (int) $main['id']; ?>" class="branch-switch-btn">Open</a>
+                                                        <a href="switch_branch.php?id=<?php echo (int) $main['id']; ?>" class="branch-switch-btn branch-switch-guarded" data-branch-id="<?php echo (int) $main['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $main['name'], ENT_QUOTES, 'UTF-8'); ?>">Open</a>
                                                     </td>
                                                     <td><span class="muted" title="Main branch: product delete permission applies to sub-branches">—</span></td>
                                                     <td><span class="muted" title="Main branch status cannot be changed here">—</span></td>
@@ -335,22 +393,31 @@ function auragold_branches_page_row_visit_url(string $host): string {
                                                             <span class="muted">—</span>
                                                         <?php endif; ?>
                                                     </td>
-                                                    <td><?php
-                                                        if ($mh !== ''):
-                                                            $mainVisitUrl = auragold_branches_page_row_visit_url($mh);
-                                                            ?>
-                                                            <a href="<?php echo htmlspecialchars($mainVisitUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn-branch-go" target="_blank" rel="noopener noreferrer">Go to branch</a>
+                                                    <td>
+                                                        <?php if ((int) $main['status'] === 1): ?>
+                                                            <a href="switch_branch.php?id=<?php echo (int) $main['id']; ?>" class="btn-branch-go branch-switch-guarded" data-branch-id="<?php echo (int) $main['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $main['name'], ENT_QUOTES, 'UTF-8'); ?>">Go to branch</a>
                                                         <?php else: ?>
                                                             <span class="muted">—</span>
-                                                        <?php endif; ?></td>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td>
+                                                        <?php if ($is_logged_in && auragold_session_is_admin_login_type() && auragold_branch_panel_may_manage_password($main)): ?>
+                                                            <button type="button" class="btn-branch-set-pwd branch-set-pwd-btn"
+                                                                data-branch-id="<?php echo (int) $main['id']; ?>"
+                                                                data-branch-name="<?php echo htmlspecialchars((string) $main['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                                title="Set password required to open this branch panel">Set password</button>
+                                                        <?php else: ?>
+                                                            <span class="muted">—</span>
+                                                        <?php endif; ?>
+                                                    </td>
                                                 </tr>
                                                 <?php foreach ($children as $sub): ?>
                                                     <tr<?php echo ((int) $sub['status'] === 1)
-                                                        ? ' class="branch-row-switchable" data-switch-url="switch_branch.php?id=' . (int) $sub['id'] . '" title="Click a row to work in that branch (same login)"'
+                                                        ? ' class="branch-row-switchable" data-switch-url="switch_branch.php?id=' . (int) $sub['id'] . '" data-branch-id="' . (int) $sub['id'] . '" data-branch-name="' . htmlspecialchars((string) $sub['name'], ENT_QUOTES, 'UTF-8') . '" title="Click a row to work in that branch (same login)"'
                                                         : ''; ?>>
                                                         <td>
                                                             <?php if ((int) $sub['status'] === 1): ?>
-                                                                <a href="switch_branch.php?id=<?php echo (int) $sub['id']; ?>" class="branch-open-link"><?php echo htmlspecialchars($sub['name']); ?></a>
+                                                                <a href="switch_branch.php?id=<?php echo (int) $sub['id']; ?>" class="branch-open-link branch-switch-guarded" data-branch-id="<?php echo (int) $sub['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $sub['name'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($sub['name']); ?></a>
                                                             <?php else: ?>
                                                                 <?php echo htmlspecialchars($sub['name']); ?>
                                                                 <span class="muted" style="font-size:11px;"> (inactive)</span>
@@ -397,7 +464,7 @@ function auragold_branches_page_row_visit_url(string $host): string {
                                                         </td>
                                                         <td>
                                                             <?php if ((int) $sub['status'] === 1): ?>
-                                                                <a href="switch_branch.php?id=<?php echo (int) $sub['id']; ?>" class="branch-switch-btn">Open</a>
+                                                                <a href="switch_branch.php?id=<?php echo (int) $sub['id']; ?>" class="branch-switch-btn branch-switch-guarded" data-branch-id="<?php echo (int) $sub['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $sub['name'], ENT_QUOTES, 'UTF-8'); ?>">Open</a>
                                                             <?php else: ?>
                                                                 <span class="muted" title="Activate this branch first">—</span>
                                                             <?php endif; ?>
@@ -433,14 +500,23 @@ function auragold_branches_page_row_visit_url(string $host): string {
                                                             <?php endif; ?>
                                                         </td>
                                                         <td><span class="muted">—</span></td>
-                                                        <td><?php
-                                                            if ($sh !== ''):
-                                                                $subVisitUrl = auragold_branches_page_row_visit_url($sh);
-                                                                ?>
-                                                                <a href="<?php echo htmlspecialchars($subVisitUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn-branch-go" target="_blank" rel="noopener noreferrer">Go to branch</a>
+                                                        <td>
+                                                            <?php if ((int) $sub['status'] === 1): ?>
+                                                                <a href="switch_branch.php?id=<?php echo (int) $sub['id']; ?>" class="btn-branch-go branch-switch-guarded" data-branch-id="<?php echo (int) $sub['id']; ?>" data-branch-name="<?php echo htmlspecialchars((string) $sub['name'], ENT_QUOTES, 'UTF-8'); ?>">Go to branch</a>
                                                             <?php else: ?>
                                                                 <span class="muted">—</span>
-                                                            <?php endif; ?></td>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                        <td>
+                                                            <?php if ($is_logged_in && auragold_session_is_admin_login_type() && auragold_branch_panel_may_manage_password($sub)): ?>
+                                                                <button type="button" class="btn-branch-set-pwd branch-set-pwd-btn"
+                                                                    data-branch-id="<?php echo (int) $sub['id']; ?>"
+                                                                    data-branch-name="<?php echo htmlspecialchars((string) $sub['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                                    title="Set password required to open this branch panel">Set password</button>
+                                                            <?php else: ?>
+                                                                <span class="muted">—</span>
+                                                            <?php endif; ?>
+                                                        </td>
                                                     </tr>
                                                 <?php endforeach; ?>
                                             </tbody>
@@ -496,13 +572,19 @@ function auragold_branches_page_row_visit_url(string $host): string {
                     </div>
                     <div class="branch-add-row branch-add-row--2col">
                         <div>
+                            <label class="branch-add-label" for="branchAddPhoneCountryCode">Country code <span style="color:#b91c1c">*</span></label>
+                            <select id="branchAddPhoneCountryCode" name="profile_phone_country_code" class="branch-add-input branch-add-select" required aria-required="true">
+                                <?php auragold_render_dial_code_select('971'); ?>
+                            </select>
+                        </div>
+                        <div>
                             <label class="branch-add-label" for="branchAddC1">Contact 1</label>
                             <input type="text" id="branchAddC1" name="contact1" class="branch-add-input" maxlength="50">
                         </div>
-                        <div>
-                            <label class="branch-add-label" for="branchAddC2">Contact 2</label>
-                            <input type="text" id="branchAddC2" name="contact2" class="branch-add-input" maxlength="50">
-                        </div>
+                    </div>
+                    <div class="branch-add-row">
+                        <label class="branch-add-label" for="branchAddC2">Contact 2</label>
+                        <input type="text" id="branchAddC2" name="contact2" class="branch-add-input" maxlength="50">
                     </div>
                     <div class="branch-add-row">
                         <label class="branch-add-label" for="branchAddMail">Mail ID</label>
@@ -524,8 +606,8 @@ function auragold_branches_page_row_visit_url(string $host): string {
                     </div>
                     <div class="branch-add-row branch-add-row--2col">
                         <div>
-                            <label class="branch-add-label" for="branchAddCountry">Country</label>
-                            <select id="branchAddCountry" name="country_id" class="branch-add-input branch-add-select">
+                            <label class="branch-add-label" for="branchAddCountry">Country <span style="color:#b91c1c">*</span></label>
+                            <select id="branchAddCountry" name="country_id" class="branch-add-input branch-add-select" required aria-required="true">
                                 <option value="">— Select —</option>
                                 <?php foreach ($branch_add_countries as $bc): ?>
                                     <option value="<?php echo (int) $bc['id']; ?>"><?php echo htmlspecialchars((string) $bc['name']); ?></option>
@@ -533,15 +615,23 @@ function auragold_branches_page_row_visit_url(string $host): string {
                             </select>
                         </div>
                         <div>
-                            <label class="branch-add-label" for="branchAddState">State</label>
-                            <select id="branchAddState" name="state_id" class="branch-add-input branch-add-select" disabled>
+                            <label class="branch-add-label" for="branchAddState">State <span style="color:#b91c1c">*</span></label>
+                            <select id="branchAddState" name="state_id" class="branch-add-input branch-add-select" required aria-required="true" disabled>
                                 <option value="">— Select country first —</option>
                             </select>
                         </div>
                     </div>
-                    <div class="branch-add-row">
-                        <label class="branch-add-label" for="branchAddZip">Zip code</label>
-                        <input type="text" id="branchAddZip" name="zip_code" class="branch-add-input" maxlength="20">
+                    <div class="branch-add-row branch-add-row--2col">
+                        <div>
+                            <label class="branch-add-label" for="branchAddCity">City <span style="color:#b91c1c">*</span></label>
+                            <select id="branchAddCity" name="city_id" class="branch-add-input branch-add-select" required aria-required="true" disabled>
+                                <option value="">— Select state first —</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="branch-add-label" for="branchAddZip">Zip code</label>
+                            <input type="text" id="branchAddZip" name="zip_code" class="branch-add-input" maxlength="20">
+                        </div>
                     </div>
                     <div class="branch-add-row">
                         <label class="branch-add-label" for="branchAddHost">IP address <span style="color:#b91c1c">*</span></label>
@@ -608,6 +698,44 @@ function auragold_branches_page_row_visit_url(string $host): string {
     <?php endif; ?>
 
     <?php if ($is_logged_in): ?>
+    <div id="branchGoPwdOverlay" class="branch-pwd-overlay" role="dialog" aria-modal="true" aria-labelledby="branchGoPwdTitle">
+        <div class="branch-pwd-dialog">
+            <div class="branch-pwd-dialog__head">
+                <h2 id="branchGoPwdTitle" class="branch-pwd-dialog__title">Enter branch password</h2>
+                <button type="button" class="branch-pwd-dialog__close" id="branchGoPwdClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="branch-pwd-dialog__body">
+                <p id="branchGoPwdBranchLabel" style="margin:0 0 12px;font-size:14px;color:#475569;"></p>
+                <label class="branch-pwd-label" for="branchGoPwdInput">Password</label>
+                <input type="password" id="branchGoPwdInput" class="branch-pwd-input" autocomplete="current-password">
+                <div id="branchGoPwdError" class="branch-pwd-error" role="alert"></div>
+            </div>
+            <div class="branch-pwd-dialog__foot">
+                <button type="button" class="branch-pwd-btn branch-pwd-btn--ghost" id="branchGoPwdCancel">Cancel</button>
+                <button type="button" class="branch-pwd-btn branch-pwd-btn--primary" id="branchGoPwdSubmit">Continue</button>
+            </div>
+        </div>
+    </div>
+    <div id="branchSetPwdOverlay" class="branch-pwd-overlay" role="dialog" aria-modal="true" aria-labelledby="branchSetPwdTitle">
+        <div class="branch-pwd-dialog">
+            <div class="branch-pwd-dialog__head">
+                <h2 id="branchSetPwdTitle" class="branch-pwd-dialog__title">Set branch password</h2>
+                <button type="button" class="branch-pwd-dialog__close" id="branchSetPwdClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="branch-pwd-dialog__body">
+                <p id="branchSetPwdBranchLabel" style="margin:0 0 12px;font-size:14px;color:#475569;"></p>
+                <label class="branch-pwd-label" for="branchSetPwdInput">New password</label>
+                <input type="password" id="branchSetPwdInput" class="branch-pwd-input" autocomplete="off" autocapitalize="off" spellcheck="false">
+                <p class="branch-pwd-hint">This password is required when opening the branch panel.</p>
+                <div id="branchSetPwdError" class="branch-pwd-error" role="alert"></div>
+            </div>
+            <div class="branch-pwd-dialog__foot">
+                <button type="button" class="branch-pwd-btn branch-pwd-btn--ghost" id="branchSetPwdReset">Reset to default</button>
+                <button type="button" class="branch-pwd-btn branch-pwd-btn--ghost" id="branchSetPwdCancel">Cancel</button>
+                <button type="button" class="branch-pwd-btn branch-pwd-btn--primary" id="branchSetPwdSubmit">Save</button>
+            </div>
+        </div>
+    </div>
     <div id="branchDeleteLoadingOverlay" class="branch-delete-loading-overlay" aria-hidden="true" hidden>
         <div class="branch-delete-loading-box" role="status">
             <span class="branch-delete-loading-spinner" aria-hidden="true"></span>
@@ -721,12 +849,238 @@ function auragold_branches_page_row_visit_url(string $host): string {
                 if (e.target.closest('a, button, input, label, select, textarea, .branch-ip-copy')) {
                     return;
                 }
+                var id = tr.getAttribute('data-branch-id');
+                var nm = tr.getAttribute('data-branch-name') || '';
+                if (id && typeof window.branchOpenGoPasswordModal === 'function') {
+                    window.branchOpenGoPasswordModal(id, nm);
+                    return;
+                }
                 var u = tr.getAttribute('data-switch-url');
                 if (u) {
                     window.location.href = u;
                 }
             });
         });
+
+        (function initBranchPanelPassword() {
+            var goOverlay = document.getElementById('branchGoPwdOverlay');
+            var goInput = document.getElementById('branchGoPwdInput');
+            var goError = document.getElementById('branchGoPwdError');
+            var goLabel = document.getElementById('branchGoPwdBranchLabel');
+            var goSubmit = document.getElementById('branchGoPwdSubmit');
+            var goCancel = document.getElementById('branchGoPwdCancel');
+            var goClose = document.getElementById('branchGoPwdClose');
+            var goSubmitDefaultHtml = goSubmit ? goSubmit.innerHTML : 'Continue';
+            var goBranchId = 0;
+
+            var setOverlay = document.getElementById('branchSetPwdOverlay');
+            var setInput = document.getElementById('branchSetPwdInput');
+            var setError = document.getElementById('branchSetPwdError');
+            var setLabel = document.getElementById('branchSetPwdBranchLabel');
+            var setSubmit = document.getElementById('branchSetPwdSubmit');
+            var setBranchId = 0;
+            var defaultPwd = <?php echo json_encode(AURAGOLD_BRANCH_PANEL_DEFAULT_PASSWORD, JSON_UNESCAPED_UNICODE); ?>;
+
+            function showErr(el, msg) {
+                if (!el) return;
+                if (!msg) {
+                    el.textContent = '';
+                    el.classList.remove('is-visible');
+                    return;
+                }
+                el.textContent = msg;
+                el.classList.add('is-visible');
+            }
+
+            function setGoSubmitLoading(isLoading) {
+                if (!goSubmit) return;
+                if (isLoading) {
+                    goSubmit.disabled = true;
+                    goSubmit.innerHTML = '<span class="branch-pwd-btn-spinner" aria-hidden="true"></span> Please wait…';
+                } else {
+                    goSubmit.disabled = false;
+                    goSubmit.innerHTML = goSubmitDefaultHtml;
+                }
+                if (goCancel) goCancel.disabled = !!isLoading;
+                if (goClose) goClose.disabled = !!isLoading;
+                if (goInput) goInput.disabled = !!isLoading;
+            }
+
+            function openGoModal(id, name) {
+                if (!goOverlay) return;
+                goBranchId = parseInt(id, 10) || 0;
+                if (goLabel) {
+                    goLabel.textContent = name ? ('Branch: ' + name) : 'Enter the password for this branch.';
+                }
+                if (goInput) {
+                    goInput.value = '';
+                    goInput.disabled = false;
+                }
+                setGoSubmitLoading(false);
+                showErr(goError, '');
+                goOverlay.classList.add('is-open');
+                setTimeout(function () {
+                    if (goInput) goInput.focus();
+                }, 50);
+            }
+
+            function closeGoModal() {
+                if (goOverlay) goOverlay.classList.remove('is-open');
+                goBranchId = 0;
+                setGoSubmitLoading(false);
+            }
+
+            window.branchOpenGoPasswordModal = openGoModal;
+
+            function submitGoPassword() {
+                if (!goBranchId || !goInput) return;
+                var pw = String(goInput.value || '');
+                if (!pw.trim()) {
+                    showErr(goError, 'Enter the branch password');
+                    return;
+                }
+                setGoSubmitLoading(true);
+                showErr(goError, '');
+                var body = 'id=' + encodeURIComponent(String(goBranchId)) + '&password=' + encodeURIComponent(pw);
+                fetch('ajax/verify-branch-panel-password.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body,
+                    credentials: 'same-origin'
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.status === 'ok' && d.redirect) {
+                            window.location.href = d.redirect;
+                            return;
+                        }
+                        setGoSubmitLoading(false);
+                        showErr(goError, (d && d.message) ? d.message : 'Incorrect password');
+                    })
+                    .catch(function () {
+                        setGoSubmitLoading(false);
+                        showErr(goError, 'Network error');
+                    });
+            }
+
+            document.querySelectorAll('.branch-switch-guarded').forEach(function (el) {
+                el.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var id = el.getAttribute('data-branch-id');
+                    var nm = el.getAttribute('data-branch-name') || '';
+                    openGoModal(id, nm);
+                });
+            });
+
+            ['branchGoPwdClose', 'branchGoPwdCancel'].forEach(function (cid) {
+                var b = document.getElementById(cid);
+                if (b) b.addEventListener('click', closeGoModal);
+            });
+            if (goSubmit) goSubmit.addEventListener('click', submitGoPassword);
+            if (goInput) {
+                goInput.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitGoPassword();
+                    }
+                });
+            }
+            if (goOverlay) {
+                goOverlay.addEventListener('click', function (e) {
+                    if (e.target === goOverlay) closeGoModal();
+                });
+            }
+
+            function openSetModal(id, name) {
+                if (!setOverlay) return;
+                setBranchId = parseInt(id, 10) || 0;
+                if (setLabel) {
+                    setLabel.textContent = name ? ('Branch: ' + name) : 'Set panel password for this branch.';
+                }
+                if (setInput) {
+                    setInput.value = '';
+                }
+                showErr(setError, '');
+                setOverlay.classList.add('is-open');
+                setTimeout(function () {
+                    if (setInput) setInput.focus();
+                }, 50);
+            }
+
+            function closeSetModal() {
+                if (setOverlay) setOverlay.classList.remove('is-open');
+                setBranchId = 0;
+            }
+
+            document.querySelectorAll('.branch-set-pwd-btn').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openSetModal(btn.getAttribute('data-branch-id'), btn.getAttribute('data-branch-name') || '');
+                });
+            });
+
+            function saveSetPassword(pwd) {
+                if (!setBranchId) return;
+                pwd = String(pwd || '').trim();
+                if (pwd === '') {
+                    showErr(setError, 'Enter a password');
+                    return;
+                }
+                if (setSubmit) setSubmit.disabled = true;
+                showErr(setError, '');
+                var body = 'id=' + encodeURIComponent(String(setBranchId)) + '&password=' + encodeURIComponent(pwd);
+                fetch('ajax/set-branch-panel-password.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body,
+                    credentials: 'same-origin'
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (setSubmit) setSubmit.disabled = false;
+                        if (d && d.status === 'ok') {
+                            closeSetModal();
+                            try { window.alert(d.message || 'Password saved'); } catch (e1) {}
+                            return;
+                        }
+                        showErr(setError, (d && d.message) ? d.message : 'Could not save password');
+                    })
+                    .catch(function () {
+                        if (setSubmit) setSubmit.disabled = false;
+                        showErr(setError, 'Network error');
+                    });
+            }
+
+            var setReset = document.getElementById('branchSetPwdReset');
+            if (setReset) {
+                setReset.addEventListener('click', function () {
+                    saveSetPassword(defaultPwd);
+                });
+            }
+            if (setSubmit) {
+                setSubmit.addEventListener('click', function () {
+                    saveSetPassword(setInput ? setInput.value : '');
+                });
+            }
+            ['branchSetPwdClose', 'branchSetPwdCancel'].forEach(function (cid) {
+                var b = document.getElementById(cid);
+                if (b) b.addEventListener('click', closeSetModal);
+            });
+            if (setOverlay) {
+                setOverlay.addEventListener('click', function (e) {
+                    if (e.target === setOverlay) closeSetModal();
+                });
+            }
+
+            var promptId = <?php echo (int) $switch_branch_prompt_id; ?>;
+            if (promptId > 0) {
+                var promptRow = document.querySelector('[data-branch-id="' + promptId + '"]');
+                var promptName = promptRow ? (promptRow.getAttribute('data-branch-name') || '') : '';
+                openGoModal(promptId, promptName);
+            }
+        })();
         document.querySelectorAll('.branch-allow-delete-toggle').forEach(function (input) {
             input.addEventListener('change', function () {
                 var self = this;

@@ -122,9 +122,11 @@ if (!$jwo_before) {
 
 $from_dept_for_loss = $from_dept_post > 0 ? $from_dept_post : (int)($jwo_before['department_id'] ?? 0);
 $from_user_for_loss = $from_user_post > 0 ? $from_user_post : ((isset($jwo_before['department_user_id']) && $jwo_before['department_user_id'] !== null && $jwo_before['department_user_id'] !== '') ? (int)$jwo_before['department_user_id'] : 0);
+/** Reduce Weight save: same-dept save that must NOT be treated as a repeat arrival / transfer. */
+$reduce_only = !empty($_POST['reduce_only']);
 /** Second+ save to the same department (e.g. Casting again) must log another history row + new JWQ no. */
 $repeat_arrival_same_dept = false;
-if ($to_dept > 0 && $from_dept_for_loss > 0 && $to_dept === $from_dept_for_loss && $to_user === $from_user_for_loss) {
+if (!$reduce_only && $to_dept > 0 && $from_dept_for_loss > 0 && $to_dept === $from_dept_for_loss && $to_user === $from_user_for_loss) {
     $ptc_same = function_exists('getRecord')
         ? getRecord(
             'SELECT COUNT(*) AS c FROM tbl_jobwork_queue_activity WHERE jobwork_order_id = ' . (int) $jobwork_order_id

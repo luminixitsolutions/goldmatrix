@@ -6,8 +6,7 @@
 require_once __DIR__ . '/includes/session_login_type.php';
 $current_page = basename($_SERVER['PHP_SELF']);
 // Branches: admin + not sub-branch (unless superadmin / superbranch). Masters &c. unchanged.
-$show_branches_menu = !empty($_SESSION['Admin']) && auragold_session_is_admin_login_type()
-    && auragold_session_may_see_set_software_branches_menu();
+$show_branches_menu = !empty($_SESSION['Admin']);
 $region_sub_pages = ['master-country.php', 'master-state.php', 'master-city.php'];
 $region_nav_open = in_array($current_page, $region_sub_pages, true);
 $ewaybill_sub_pages = ['ewaybill-api-settings.php', 'ewaybill-authentication.php'];

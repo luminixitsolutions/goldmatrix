@@ -738,7 +738,9 @@ if (empty($jwq_diamond_scope_metal_ids)) {
     }
     function jwqDiamondCellText(tr, col) {
         var td = tr.querySelector('[data-col="' + col + '"]');
-        return td ? String(td.textContent || '').trim() : '';
+        if (!td) return '';
+        var input = td.querySelector('input, select, textarea');
+        return input ? String(input.value || '').trim() : String(td.textContent || '').trim();
     }
     function jwqDiamondCellNum(tr, col) {
         var s = jwqDiamondCellText(tr, col);
@@ -784,16 +786,23 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         var q = jwqDiamondCellNum(tr, 'quantity');
         return q > 0 ? q : 0;
     }
-    function jwqSyncDiamondRowIssueFromInputs(tr) {
+    function jwqSyncDiamondRowIssueFromInputs(tr, formatInputs, sourceField) {
         if (!tr) {
             return;
         }
+        formatInputs = formatInputs !== false;
+        sourceField = sourceField || 'weight';
         var balWt = jwqDiamondRowBalanceWt(tr);
         var balQty = jwqDiamondRowBalanceQty(tr);
         var wtInp = tr.querySelector('.jwq-dia-issue-wt');
+        var caratInp = tr.querySelector('.jwq-dia-issue-carat');
         var qtyInp = tr.querySelector('.jwq-dia-issue-qty');
         var wt = wtInp ? jwqParseDecimalInput(wtInp.value) : NaN;
+        var carat = caratInp ? jwqParseDecimalInput(caratInp.value) : NaN;
         var qty = qtyInp ? jwqParseDecimalInput(qtyInp.value) : NaN;
+        if (sourceField === 'carat') {
+            wt = isFinite(carat) && carat >= 0 ? carat / 5 : 0;
+        }
         if (!isFinite(wt) || wt < 0) {
             wt = 0;
         }
@@ -806,16 +815,28 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         if (qty > balQty + 0.0001) {
             qty = balQty;
         }
+        carat = wt * 5;
         if (wtInp) {
-            wtInp.value = wt > 0.0000001 ? num(wt, 3) : '';
+            if (formatInputs || sourceField === 'carat') {
+                wtInp.value = wt > 0.0000001 ? num(wt, 3) : '';
+            }
+        }
+        if (caratInp) {
+            if (formatInputs || sourceField === 'weight') {
+                caratInp.value = carat > 0.0000001 ? num(carat, 3) : '';
+            }
         }
         if (qtyInp) {
-            qtyInp.value = qty > 0.0000001 ? num(qty, 3) : '';
+            if (formatInputs || sourceField !== 'quantity') {
+                qtyInp.value = qty > 0.0000001 ? num(qty, 3) : '';
+            }
         }
         tr.setAttribute('data-weight', String(wt));
+        tr.setAttribute('data-carat', String(carat));
         tr.setAttribute('data-qty', String(qty));
         if (tr._rowData) {
             tr._rowData.gross_weight = wt;
+            tr._rowData.carat = carat;
             tr._rowData.quantity = qty > 0 ? qty : 0;
         }
     }
@@ -826,7 +847,7 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         }
         tb._jwqIssueInputBound = true;
         tb.addEventListener('input', function (e) {
-            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-carat, .jwq-dia-issue-qty');
             if (!inp || !tb.contains(inp)) {
                 return;
             }
@@ -838,20 +859,26 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             if (clean !== inp.value) {
                 inp.value = clean;
             }
-            jwqSyncDiamondRowIssueFromInputs(tr);
+            var sourceField = inp.classList.contains('jwq-dia-issue-carat')
+                ? 'carat'
+                : (inp.classList.contains('jwq-dia-issue-qty') ? 'quantity' : 'weight');
+            jwqSyncDiamondRowIssueFromInputs(tr, false, sourceField);
         });
         tb.addEventListener('change', function (e) {
-            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-carat, .jwq-dia-issue-qty');
             if (!inp || !tb.contains(inp)) {
                 return;
             }
             var tr = inp.closest('tr');
             if (tr) {
-                jwqSyncDiamondRowIssueFromInputs(tr);
+                var sourceField = inp.classList.contains('jwq-dia-issue-carat')
+                    ? 'carat'
+                    : (inp.classList.contains('jwq-dia-issue-qty') ? 'quantity' : 'weight');
+                jwqSyncDiamondRowIssueFromInputs(tr, true, sourceField);
             }
         });
         tb.addEventListener('keydown', function (e) {
-            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-qty');
+            var inp = e.target.closest('.jwq-dia-issue-wt, .jwq-dia-issue-carat, .jwq-dia-issue-qty');
             if (!inp || !tb.contains(inp)) {
                 return;
             }
@@ -1164,14 +1191,17 @@ if (empty($jwq_diamond_scope_metal_ids)) {
         var qtyAttr = String(issueQty);
         var prodNameAttr = esc(String(r.product_name || ''));
         var wtCell;
+        var caratCell;
         var qtyCell;
         if (editable) {
             wtCell = '<td data-col="weight"' + editAttr + '>' + esc(num(r.gross_weight, 3)) + '</td>';
+            caratCell = '<td data-col="diamond_carat"' + editAttr + '>' + esc(r.carat || '0') + '</td>';
             qtyCell = '<td data-col="quantity"' + editAttr + '>' + esc(num(r.quantity, 3)) + '</td>';
         } else {
             var wtTitle = 'Stock balance ' + num(balWt, 3) + ' g — enter issue weight';
             var qtyTitle = 'Stock balance ' + num(balQty, 3) + ' — enter issue qty';
             wtCell = '<td data-col="weight"><input type="text" class="form-control form-control-sm jwq-dia-issue-wt" inputmode="decimal" autocomplete="off" value="' + esc(num(issueWt, 3)) + '" title="' + esc(wtTitle) + '" style="min-width:76px;"></td>';
+            caratCell = '<td data-col="diamond_carat"><input type="text" class="form-control form-control-sm jwq-dia-issue-carat" inputmode="decimal" autocomplete="off" value="' + esc(num(issueWt * 5, 3)) + '" title="1 gram = 5 carat" style="min-width:76px;"></td>';
             qtyCell = '<td data-col="quantity"><input type="text" class="form-control form-control-sm jwq-dia-issue-qty" inputmode="decimal" autocomplete="off" value="' + esc(num(issueQty, 3)) + '" title="' + esc(qtyTitle) + '" style="min-width:64px;"></td>';
         }
         var trOpen = '<tr class="jwq-diamond-stock-modal-row"'
@@ -1190,7 +1220,7 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             + '<td data-col="calculation_type">' + calcCell + '</td>'
             + '<td data-col="product"' + editAttr + cls + '>' + esc(r.product_name || '') + '</td>'
             + wtCell
-            + '<td data-col="diamond_carat"' + editAttr + '>' + esc(r.carat || '0') + '</td>'
+            + caratCell
             + qtyCell
             + '<td data-col="rate"' + editAttr + '>' + esc(num(r.rate, 2)) + '</td>'
             + '<td data-col="certificate_no"' + editAttr + '>' + esc(r.certificate_no || '') + '</td>'
@@ -1734,6 +1764,12 @@ if (empty($jwq_diamond_scope_metal_ids)) {
             var tru = e.target.closest('tr');
             var dum = document.getElementById('jwqDiamondUsedModal');
             if (!dum || !tru || !dum.contains(tru)) {
+                return;
+            }
+            if (tru.getAttribute('data-jwq-editing') === '1') {
+                return;
+            }
+            if (typeof window.jwqIsReduceWeightMode === 'function' && window.jwqIsReduceWeightMode()) {
                 return;
             }
             var sidNum = parseInt(tru.getAttribute('data-jwq-used-stock-id') || '0', 10) || 0;

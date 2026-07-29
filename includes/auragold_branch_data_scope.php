@@ -1505,7 +1505,7 @@ if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
      *
      * @return array{ok:bool,skipped?:bool,tables?:array<string,int>,message?:string}
      */
-    function auragold_seed_subbranch_masters_from_main($conn, int $mainBranchId, int $subBranchId): array {
+    function auragold_seed_subbranch_masters_from_main($conn, int $mainBranchId, int $subBranchId, array $opts = []): array {
         $out = ['ok' => true, 'tables' => []];
         if (!$conn instanceof mysqli || $mainBranchId <= 0 || $subBranchId <= 0 || $mainBranchId === $subBranchId) {
             return $out;
@@ -1515,7 +1515,10 @@ if (!function_exists('auragold_seed_subbranch_masters_from_main')) {
         if ($chk && (int) ($chk['c'] ?? 0) > 0) {
             return array_merge($out, ['skipped' => true]);
         }
-        $simple = ['tbl_location', 'tbl_unit', 'tbl_tax_master'];
+        $simple = ['tbl_location', 'tbl_unit'];
+        if (empty($opts['skip_tax_master'])) {
+            $simple[] = 'tbl_tax_master';
+        }
         foreach ($simple as $t) {
             if (!auragold_tbl_has_column($conn, $t, 'branch_id')) {
                 continue;

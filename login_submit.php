@@ -29,6 +29,22 @@ if ($target_url === '' || strlen($target_url) > 500) {
     header('Location: index.php?login_error=' . rawurlencode('IP address / server URL is required.'));
     exit;
 }
+
+$url_scope_id = 0;
+if (function_exists('auragold_registry_branch_id_for_login_target_url')) {
+    $url_scope_id = auragold_registry_branch_id_for_login_target_url($target_url);
+}
+if ($url_scope_id <= 0) {
+    $localDev = defined('AURAGOLD_PROJECT') && (string) AURAGOLD_PROJECT === 'local';
+    if (!$localDev) {
+        header('Location: index.php?login_error=' . rawurlencode('This server address is not assigned to any branch. Set subdomain URL or IP in Branch settings.'));
+        exit;
+    }
+} elseif (!auragold_super_portal_login_target_ok($target_url) && $login_branch_id !== $url_scope_id) {
+    header('Location: index.php?login_error=' . rawurlencode('Selected branch does not match the server address.'));
+    exit;
+}
+
 if ($username === '' || $password === '') {
     header('Location: index.php?login_error=' . rawurlencode('Username & Password are required'));
     exit;
@@ -108,6 +124,19 @@ if (!empty($result['success'])) {
         }
         if (function_exists('auragold_session_refresh_live_cookie')) {
             auragold_session_refresh_live_cookie();
+        }
+
+        if (isset($conn) && $conn instanceof mysqli) {
+            require_once __DIR__ . '/includes/activity_logger.php';
+            if (function_exists('auragold_activity_log_login')) {
+                $alConn = function_exists('auragold_activity_operational_conn')
+                    ? auragold_activity_operational_conn($conn)
+                    : $conn;
+                auragold_activity_log_login($alConn);
+                if ($alConn instanceof mysqli && $alConn !== $conn) {
+                    @mysqli_close($alConn);
+                }
+            }
         }
 
         header('Location: dashboard.php');

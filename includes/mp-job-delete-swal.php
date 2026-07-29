@@ -119,6 +119,29 @@ document.addEventListener('DOMContentLoaded', function () {
                         }
                         return;
                     }
+                    if (data.removed_from_queue) {
+                        /* Job left the manufacturing floor entirely (was still in its first department). */
+                        if (card) {
+                            var cardWrap = card.closest('.mp-job-card-grid-item') || card;
+                            if (cardWrap.parentNode) {
+                                cardWrap.parentNode.removeChild(cardWrap);
+                            }
+                        }
+                        if (typeof filterByDepartmentAndUser === 'function') {
+                            filterByDepartmentAndUser();
+                        }
+                        if (typeof swal === 'function') {
+                            swal({
+                                title: 'Removed',
+                                text: data.message || 'Job removed from the manufacturing floor.',
+                                type: 'success',
+                                timer: 2200,
+                                showConfirmButton: true,
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                        return;
+                    }
                     if (card) {
                         if (data.previous_department_id) {
                             card.setAttribute('data-dept-id', String(data.previous_department_id));
@@ -172,7 +195,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
         }
 
-        var confirmText = 'This will remove the job from the current department and move it back to the previous department. The current department transfer record will be deleted.';
+        var confirmText = 'This will remove the job from the current department and move it back to the previous department. If there is no previous department, the job will be removed from the manufacturing floor. Issued diamonds are returned to stock.';
         if (typeof swal === 'function') {
             swal({
                 title: 'Are you sure?',

@@ -77,6 +77,26 @@ function auragold_permission_invalidate_session_cache(?int $userId = null): void
 }
 
 /**
+ * Cheap change signature for a user's grant rows ("count:maxid").
+ * Saves delete + re-insert rows, so MAX(id) changes on every save.
+ */
+function auragold_permission_grants_signature($conn, $userId)
+{
+    $userId = (int) $userId;
+    if ($userId <= 0 || !$conn || !($conn instanceof mysqli)) {
+        return '0:0';
+    }
+    $res = mysqli_query(
+        $conn,
+        'SELECT COUNT(*) AS c, IFNULL(MAX(id), 0) AS m FROM tbl_user_permission_grants WHERE user_id = ' . $userId
+    );
+    if ($res && ($r = mysqli_fetch_assoc($res))) {
+        return (int) ($r['c'] ?? 0) . ':' . (int) ($r['m'] ?? 0);
+    }
+    return '0:0';
+}
+
+/**
  * Load permission state once per request (and cache in session between requests).
  *
  * @return array{legacy_allow_all:bool,map:array<string,int>,user_id:int,branch_id:int}
@@ -118,29 +138,31 @@ function auragold_permission_runtime_state()
     }
     $eff = (int) auragold_effective_branch_id();
 
-    $sessKey = 'auragold_perm_runtime_v1';
-    if (!empty($_SESSION[$sessKey]) && is_array($_SESSION[$sessKey])) {
-        $cached = $_SESSION[$sessKey];
-        if ((int) ($cached['user_id'] ?? 0) === $uid && (int) ($cached['branch_id'] ?? 0) === $eff) {
-            $GLOBALS['auragold_perm_runtime_state'] = $cached;
-            return $cached;
-        }
-    }
-
     if (!function_exists('auragold_ensure_user_permissions_table')) {
         require_once __DIR__ . '/permissions_schema.php';
     }
     auragold_ensure_user_permissions_table($conn);
 
-    $cres = mysqli_query($conn, 'SELECT COUNT(*) AS c FROM tbl_user_permission_grants WHERE user_id = ' . $uid);
-    $cnt  = 0;
-    if ($cres && ($cr = mysqli_fetch_assoc($cres))) {
-        $cnt = (int) ($cr['c'] ?? 0);
+    // Signature check makes admin permission saves take effect on the user's
+    // next page load without re-login (session cache alone went stale).
+    $sig = auragold_permission_grants_signature($conn, $uid);
+
+    $sessKey = 'auragold_perm_runtime_v1';
+    if (!empty($_SESSION[$sessKey]) && is_array($_SESSION[$sessKey])) {
+        $cached = $_SESSION[$sessKey];
+        if ((int) ($cached['user_id'] ?? 0) === $uid
+            && (int) ($cached['branch_id'] ?? 0) === $eff
+            && (string) ($cached['sig'] ?? '') === $sig) {
+            $GLOBALS['auragold_perm_runtime_state'] = $cached;
+            return $cached;
+        }
     }
-    if ($cnt === 0) {
+
+    if ($sig === '0:0') {
         $state = $default;
         $state['user_id']   = $uid;
         $state['branch_id'] = $eff;
+        $state['sig']       = $sig;
         $_SESSION[$sessKey] = $state;
         $GLOBALS['auragold_perm_runtime_state'] = $state;
         return $state;
@@ -152,6 +174,7 @@ function auragold_permission_runtime_state()
         'map'              => is_array($map) ? $map : [],
         'user_id'          => $uid,
         'branch_id'        => $eff,
+        'sig'              => $sig,
     ];
     $_SESSION[$sessKey] = $state;
     $GLOBALS['auragold_perm_runtime_state'] = $state;

@@ -309,7 +309,7 @@ function pa_format_total(string $key, float $v): string {
 $row_count = count($pa_rows);
 $default_range = '01-04-2025 - 31-03-2026';
 
-$DASHBOARD_PAGE_TITLE = 'Purchase Analysis';
+$DASHBOARD_PAGE_TITLE = 'Purchase Reports';
 $DASHBOARD_EXTRA_CSS = <<<'HTML'
 <style>
     .pa-wrap {
@@ -478,7 +478,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
 ?>
 <div class="pa-wrap">
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
-        <h1 class="pa-page-title mb-0">Purchase Analysis</h1>
+        <h1 class="pa-page-title mb-0">Purchase Reports</h1>
         <div class="pa-toolbar d-flex flex-wrap align-items-center gap-2">
             <div class="input-group input-group-sm" style="width: auto;">
                 <span class="input-group-text bg-white border-end-0"><i class="feather icon-calendar" style="color:#a67c1a;"></i></span>

@@ -81,14 +81,12 @@ if ($rv_sp_selected !== '') {
 }
 
 $rv_voucher_date_val = date('Y-m-d');
-$rv_due_date_val = date('Y-m-d');
+$rv_due_date_val = '';
 if (!empty($edit_voucher) && is_array($edit_voucher)) {
     if (!empty($edit_voucher['voucher_date'])) {
         $rv_voucher_date_val = substr($edit_voucher['voucher_date'], 0, 10);
     }
-    if (!empty($edit_voucher['due_date'])) {
-        $rv_due_date_val = substr($edit_voucher['due_date'], 0, 10);
-    }
+    $rv_due_date_val = auragold_due_date_value($edit_voucher['due_date'] ?? null);
 }
 $rv_fixing_type = (!empty($edit_voucher) && is_array($edit_voucher))
     ? trim((string)($edit_voucher['fixing_type'] ?? 'Standard'))
@@ -3102,7 +3100,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             currency: $('#currency').val(),
             currency_rate: $('#currencyRate').val(),
             voucher_date: $('#voucherDate').val(),
-            due_date: $('#dueDate').val(),
+            due_date: (typeof window.auragoldGetDueDateValue === 'function' ? window.auragoldGetDueDateValue() : $('#dueDate').val()),
             layaways_id: $('#layaways').val(),
             fixing_type: $('#fixingType').val(),
             previous_balance: prevBalSave.previous_balance,
@@ -3240,7 +3238,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
         $('#againstOf').val('<?php echo htmlspecialchars($edit_voucher['against_of'] ?? ''); ?>');
         $('#currency').val('<?php echo htmlspecialchars($edit_voucher['currency'] ?? 'USD'); ?>');
         $('#voucherDate').val('<?php echo $edit_voucher['voucher_date'] ?? date('Y-m-d'); ?>');
-        $('#dueDate').val('<?php echo $edit_voucher['due_date'] ?? date('Y-m-d'); ?>');
+        $('#dueDate').val(<?php echo json_encode(auragold_due_date_value($edit_voucher['due_date'] ?? null)); ?>);
         $('#fixingType').val('<?php echo htmlspecialchars($edit_voucher['fixing_type'] ?? 'Standard'); ?>');
         // Load previous balance and history for edit mode
         if ($('#customerId').val() || $('#customerName').val()) {

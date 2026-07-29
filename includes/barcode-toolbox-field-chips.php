@@ -14,13 +14,15 @@ if (!isset($barcode_toolbox_divider)) {
                     <div class="toolbox-field-item toolbox-field-image" data-field="ProductImage">ProductImage</div>
                     <div class="toolbox-field-item toolbox-field-image" data-field="AttachImage">AttachImage</div>
                     <div class="toolbox-field-item toolbox-field-image" data-field="ImageUrl">ImageUrl</div>
+                    <div class="toolbox-field-item toolbox-field-image toolbox-field-strip" data-field="StripLine" title="Horizontal strip line">StripLine</div>
+                    <div class="toolbox-field-item toolbox-field-image toolbox-field-white-strip" data-field="WhiteStrip" title="Blank white rectangular strip">White Strip</div>
                     <div class="toolbox-fields-divider"><?php echo htmlspecialchars($barcode_toolbox_divider, ENT_QUOTES, 'UTF-8'); ?></div>
                     <!-- Same order as common-modal.php table settings (lines 128–415) -->
                     <div class="toolbox-field-item" data-field="Select">Select</div>
                     <div class="toolbox-field-item" data-field="Id">Id</div>
                     <div class="toolbox-field-item" data-field="RFIDCode">RFIDCode</div>
                     <div class="toolbox-field-item" data-field="VoucherType">Voucher Type</div>
-                    <div class="toolbox-field-item" data-field="Barcode">Barcode</div>
+                    <div class="toolbox-field-item" data-field="Barcode" data-search="barcode barcode no barcodeno barcode number">Barcode</div>
                     <div class="toolbox-field-item" data-field="DesignNo">Design No</div>
                     <div class="toolbox-field-item" data-field="HUIDNo">HUID No</div>
                     <div class="toolbox-field-item" data-field="Category">Category</div>

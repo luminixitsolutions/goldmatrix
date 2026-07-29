@@ -54,6 +54,24 @@ function auragold_ensure_user_management_columns($conn)
         'user_branch_ids',
         "`user_branch_ids` VARCHAR(500) NULL DEFAULT NULL AFTER `two_factor_enabled`"
     );
+    auragold_um_ensure_column(
+        $conn,
+        'tbl_users',
+        'monthly_salary',
+        "`monthly_salary` DECIMAL(14,2) NOT NULL DEFAULT 0.00 AFTER `user_branch_ids`"
+    );
+    auragold_um_ensure_column(
+        $conn,
+        'tbl_users',
+        'department_id',
+        "`department_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `monthly_salary`"
+    );
+    auragold_um_ensure_column(
+        $conn,
+        'tbl_users',
+        'designation_id',
+        "`designation_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `department_id`"
+    );
 }
 
 /**
@@ -502,4 +520,60 @@ function auragold_sales_person_user_display_names($conn_master)
         $out[] = $disp;
     }
     return array_values(array_unique($out));
+}
+
+/**
+ * Candidate labels for matching the logged-in user to a Sales Person <select> option.
+ * Order: full name, username, first name, session name.
+ *
+ * @return list<string>
+ */
+function auragold_logged_in_sales_person_match_candidates()
+{
+    $out = [];
+    $admin = (isset($_SESSION['Admin']) && is_array($_SESSION['Admin'])) ? $_SESSION['Admin'] : [];
+    $fn = trim((string) ($admin['Fname'] ?? $admin['fname'] ?? ''));
+    $ln = trim((string) ($admin['Lname'] ?? $admin['lname'] ?? ''));
+    $full = trim($fn . ' ' . $ln);
+    $user = trim((string) ($admin['Username'] ?? $admin['username'] ?? ''));
+    $sessName = trim((string) ($_SESSION['name'] ?? ''));
+
+    foreach ([$full, $user, $fn, $sessName] as $c) {
+        $c = trim((string) $c);
+        if ($c === '') {
+            continue;
+        }
+        $dupe = false;
+        foreach ($out as $ex) {
+            if (strcasecmp($ex, $c) === 0) {
+                $dupe = true;
+                break;
+            }
+        }
+        if (!$dupe) {
+            $out[] = $c;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Pick logged-in user display name if it appears in $sales_person_users; otherwise ''.
+ *
+ * @param list<string> $sales_person_users
+ */
+function auragold_default_sales_person_from_login(array $sales_person_users): string
+{
+    $cands = auragold_logged_in_sales_person_match_candidates();
+    if ($cands === [] || $sales_person_users === []) {
+        return '';
+    }
+    foreach ($cands as $cand) {
+        foreach ($sales_person_users as $sp) {
+            if (strcasecmp(trim((string) $sp), $cand) === 0) {
+                return trim((string) $sp);
+            }
+        }
+    }
+    return '';
 }

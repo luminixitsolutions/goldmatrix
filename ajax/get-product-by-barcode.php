@@ -4,6 +4,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 require_once '../config.php';
+require_once __DIR__ . '/../includes/auragold-gst.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -142,6 +143,193 @@ function auragold_gpb_tbl_pc_branch_sql_fragment($conn, int $branch_id): string 
     }
 
     return ' AND COALESCE(pc.branch_id, 0) = ' . $bid;
+}
+
+/**
+ * Resolve branch for tbl_product_tax scope (same as get-product-details.php).
+ */
+function auragold_gpb_resolve_tax_branch_id(): int {
+    global $working_branch_id;
+    if (!empty($working_branch_id) && (int) $working_branch_id > 0) {
+        return (int) $working_branch_id;
+    }
+    if (!empty($_SESSION['working_branch_id'])) {
+        return (int) $_SESSION['working_branch_id'];
+    }
+    if (!empty($_SESSION['branch_id'])) {
+        return (int) $_SESSION['branch_id'];
+    }
+    return 0;
+}
+
+/**
+ * Attach GST fields (same as ajax/get-product-details.php) for sale-invoice Tax % / Tax columns.
+ *
+ * @param array<string,mixed> $product
+ * @return array<string,mixed>
+ */
+function auragold_gpb_attach_gst_fields_to_product($conn, array $product, int $product_id, ?int $branch_id = null): array {
+    if ($product_id <= 0) {
+        return $product;
+    }
+    $tax_scope_id = ($branch_id !== null && $branch_id > 0) ? $branch_id : auragold_gpb_resolve_tax_branch_id();
+    if ($tax_scope_id <= 0 && !empty($conn) && function_exists('getRecordMaster')) {
+        $mbr_tax = @getRecordMaster('SELECT id FROM tbl_branches WHERE IFNULL(main_branch_id,0)=0 AND status = 1 ORDER BY id ASC LIMIT 1');
+        if ($mbr_tax && !empty($mbr_tax['id'])) {
+            $tax_scope_id = (int) $mbr_tax['id'];
+        }
+    }
+
+    $vat_value = null;
+    try {
+        $vat_scope = function_exists('auragold_tbl_product_tax_branch_scope_sql')
+            ? auragold_tbl_product_tax_branch_scope_sql($conn, $product_id, $tax_scope_id)
+            : '';
+        $vat_tax = getRecord("
+            SELECT pt.tax_value FROM tbl_product_tax pt
+            WHERE pt.product_id = $product_id AND pt.tax_type = 'VAT' AND (pt.status = 1 OR pt.status IS NULL)
+            $vat_scope
+            ORDER BY pt.id DESC LIMIT 1
+        ");
+        $vat_value = $vat_tax && isset($vat_tax['tax_value']) ? (float) $vat_tax['tax_value'] : null;
+    } catch (Throwable $e) {
+        $vat_value = null;
+    }
+
+    $product_tax_rows = [];
+    try {
+        $pt_scope = function_exists('auragold_tbl_product_tax_branch_scope_sql')
+            ? auragold_tbl_product_tax_branch_scope_sql($conn, $product_id, $tax_scope_id)
+            : '';
+        $product_tax_rows = getList("
+            SELECT pt.tax_type, pt.tax_value
+            FROM tbl_product_tax pt
+            WHERE pt.product_id = $product_id AND (pt.status = 1 OR pt.status IS NULL)
+            $pt_scope
+        ");
+        if (!is_array($product_tax_rows)) {
+            $product_tax_rows = [];
+        }
+    } catch (Throwable $e) {
+        $product_tax_rows = [];
+    }
+
+    $gst_local_percent = 0.0;
+    $gst_interstate_percent = 0.0;
+    $gst_tax_breakdown = ['local_state' => [], 'out_of_state' => []];
+
+    try {
+        if (function_exists('auragold_product_gst_tax_breakdown')) {
+            $gst_tax_breakdown = auragold_product_gst_tax_breakdown($conn, $product_id, $tax_scope_id);
+        }
+        if (function_exists('auragold_product_gst_percent_by_supply_scope')) {
+            $scopes = auragold_product_gst_percent_by_supply_scope($conn, $product_id, $tax_scope_id);
+            $gst_local_percent = (float) ($scopes['local'] ?? 0);
+            $gst_interstate_percent = (float) ($scopes['interstate'] ?? 0);
+        }
+    } catch (Throwable $e) {
+        $gst_local_percent = 0.0;
+        $gst_interstate_percent = 0.0;
+        $gst_tax_breakdown = ['local_state' => [], 'out_of_state' => []];
+    }
+
+    if (
+        ($gst_local_percent < 0.00001 && $gst_interstate_percent < 0.00001)
+        && empty($gst_tax_breakdown['local_state'])
+        && empty($gst_tax_breakdown['out_of_state'])
+        && is_array($product_tax_rows)
+    ) {
+        try {
+            foreach ($product_tax_rows as $t) {
+                $taxTypeRaw = trim((string) ($t['tax_type'] ?? ''));
+                if (strtoupper($taxTypeRaw) === 'VAT') {
+                    continue;
+                }
+                $percent = (float) ($t['tax_value'] ?? 0);
+                $scope = '';
+                $tn = function_exists('auragold_normalize_state_label') ? auragold_normalize_state_label($taxTypeRaw) : strtolower($taxTypeRaw);
+                if ($tn === 'igst') {
+                    $scope = 'out_of_state';
+                } elseif ($tn === 'cgst' || $tn === 'sgst') {
+                    $scope = 'local_state';
+                }
+                if ($scope !== 'local_state' && $scope !== 'out_of_state') {
+                    continue;
+                }
+                $lineItem = [
+                    'name' => $taxTypeRaw,
+                    'default_value' => $percent,
+                    'gst_supply_scope' => $scope,
+                ];
+                if ($scope === 'local_state') {
+                    $gst_local_percent += $percent;
+                    $gst_tax_breakdown['local_state'][] = $lineItem;
+                } else {
+                    $gst_interstate_percent += $percent;
+                    $gst_tax_breakdown['out_of_state'][] = $lineItem;
+                }
+            }
+        } catch (Throwable $e2) {
+            // keep zeros
+        }
+    }
+
+    $taxes_for_api = [];
+    try {
+        foreach ($gst_tax_breakdown['local_state'] ?? [] as $x) {
+            $taxes_for_api[] = [
+                'tax_type' => (string) ($x['name'] ?? ''),
+                'tax_value' => (float) ($x['default_value'] ?? 0),
+                'gst_supply_scope' => 'local_state',
+            ];
+        }
+        foreach ($gst_tax_breakdown['out_of_state'] ?? [] as $x) {
+            $taxes_for_api[] = [
+                'tax_type' => (string) ($x['name'] ?? ''),
+                'tax_value' => (float) ($x['default_value'] ?? 0),
+                'gst_supply_scope' => 'out_of_state',
+            ];
+        }
+    } catch (Throwable $e) {
+        $taxes_for_api = [];
+    }
+
+    if (count($taxes_for_api) === 0 && is_array($product_tax_rows)) {
+        foreach ($product_tax_rows as $t) {
+            $taxTypeRaw = trim((string) ($t['tax_type'] ?? ''));
+            if ($taxTypeRaw === '' || strtoupper($taxTypeRaw) === 'VAT') {
+                continue;
+            }
+            $taxes_for_api[] = [
+                'tax_type' => $taxTypeRaw,
+                'tax_value' => (float) ($t['tax_value'] ?? 0),
+            ];
+        }
+    }
+
+    $gst_invoice_slab_percent = ($gst_local_percent > 0.0 || $gst_interstate_percent > 0.0)
+        ? max($gst_local_percent, $gst_interstate_percent)
+        : 0.0;
+
+    $total_tax_percent = null;
+    if ($vat_value !== null) {
+        $gst_has_any = ($gst_local_percent > 0.00001 || $gst_interstate_percent > 0.00001);
+        $bd_ls = isset($gst_tax_breakdown['local_state']) && is_array($gst_tax_breakdown['local_state']) ? count($gst_tax_breakdown['local_state']) : 0;
+        $bd_os = isset($gst_tax_breakdown['out_of_state']) && is_array($gst_tax_breakdown['out_of_state']) ? count($gst_tax_breakdown['out_of_state']) : 0;
+        if (!$gst_has_any && $bd_ls === 0 && $bd_os === 0) {
+            $total_tax_percent = $vat_value;
+        }
+    }
+
+    $product['vat_value'] = $vat_value;
+    $product['total_tax_percent'] = $total_tax_percent;
+    $product['gst_local_percent'] = $gst_local_percent;
+    $product['gst_interstate_percent'] = $gst_interstate_percent;
+    $product['gst_invoice_slab_percent'] = $gst_invoice_slab_percent > 0 ? $gst_invoice_slab_percent : null;
+    $product['gst_tax_breakdown'] = $gst_tax_breakdown;
+    $product['taxes'] = $taxes_for_api;
+
+    return $product;
 }
 
 /**
@@ -568,10 +756,6 @@ function auragold_assemble_product_from_stock_check(array $stock_check, string $
         return null;
     }
     $product_id = (int) $stock_product['product_id'];
-    $vat_tax = getRecord("SELECT tax_value FROM tbl_product_tax WHERE product_id = $product_id AND tax_type = 'VAT' AND (status = 1 OR status IS NULL) ORDER BY id DESC LIMIT 1");
-    $vat_value = $vat_tax && isset($vat_tax['tax_value']) ? (float) $vat_tax['tax_value'] : null;
-    $sum_tax = getRecord("SELECT COALESCE(SUM(tax_value), 0) as total FROM tbl_product_tax WHERE product_id = $product_id AND (status = 1 OR status IS NULL)");
-    $total_tax_percent = $sum_tax && isset($sum_tax['total']) ? (float) $sum_tax['total'] : null;
 
     $st_current_qty = isset($stock_check['current_qty']) ? (float) $stock_check['current_qty'] : 0;
     $st_current_weight = isset($stock_check['current_weight']) ? (float) $stock_check['current_weight'] : 0;
@@ -607,9 +791,9 @@ function auragold_assemble_product_from_stock_check(array $stock_check, string $
         'diamond_category' => $stock_product['diamond_category'],
         'carat' => $stock_product['carat'],
         'discount' => $stock_product['discount'],
-        'vat_value' => $vat_value,
-        'total_tax_percent' => $total_tax_percent,
     ];
+    global $conn, $working_branch_id;
+    $product = auragold_gpb_attach_gst_fields_to_product($conn, $product, $product_id, $working_branch_id > 0 ? $working_branch_id : null);
     if (!empty($stock_check['metal_id'])) {
         $smid = (int) $stock_check['metal_id'];
         if ($smid > 0) {
@@ -880,10 +1064,6 @@ $result = getRecord($query);
 
 if ($result) {
     $product_id = (int)$result['product_id'];
-    $vat_tax = getRecord("SELECT tax_value FROM tbl_product_tax WHERE product_id = $product_id AND tax_type = 'VAT' AND (status = 1 OR status IS NULL) ORDER BY id DESC LIMIT 1");
-    $vat_value = $vat_tax && isset($vat_tax['tax_value']) ? (float)$vat_tax['tax_value'] : null;
-    $sum_tax = getRecord("SELECT COALESCE(SUM(tax_value), 0) as total FROM tbl_product_tax WHERE product_id = $product_id AND (status = 1 OR status IS NULL)");
-    $total_tax_percent = $sum_tax && isset($sum_tax['total']) ? (float)$sum_tax['total'] : null;
     $product = [
         'id' => $result['product_id'],
         'name' => $result['product_name'],
@@ -908,9 +1088,8 @@ if ($result) {
         'diamond_category' => $result['diamond_category'],
         'carat' => $result['carat'],
         'discount' => $result['discount'],
-        'vat_value' => $vat_value,
-        'total_tax_percent' => $total_tax_percent
     ];
+    $product = auragold_gpb_attach_gst_fields_to_product($conn, $product, $product_id, $working_branch_id > 0 ? $working_branch_id : null);
     $product = attach_latest_stock_journal_to_product($product, $barcode_esc, $conn);
     auragold_json_out(['success' => true, 'product' => $product]);
 } else {
@@ -945,10 +1124,6 @@ if ($result) {
         ");
         if ($stock_product) {
             $product_id = (int)$stock_product['product_id'];
-            $vat_tax = getRecord("SELECT tax_value FROM tbl_product_tax WHERE product_id = $product_id AND tax_type = 'VAT' AND (status = 1 OR status IS NULL) ORDER BY id DESC LIMIT 1");
-            $vat_value = $vat_tax && isset($vat_tax['tax_value']) ? (float)$vat_tax['tax_value'] : null;
-            $sum_tax = getRecord("SELECT COALESCE(SUM(tax_value), 0) as total FROM tbl_product_tax WHERE product_id = $product_id AND (status = 1 OR status IS NULL)");
-            $total_tax_percent = $sum_tax && isset($sum_tax['total']) ? (float)$sum_tax['total'] : null;
             $product = [
                 'id' => $stock_product['product_id'],
                 'name' => $stock_product['product_name'],
@@ -973,10 +1148,9 @@ if ($result) {
                 'diamond_category' => $stock_product['diamond_category'],
                 'carat' => $stock_product['carat'],
                 'discount' => $stock_product['discount'],
-                'vat_value' => $vat_value,
-                'total_tax_percent' => $total_tax_percent,
                 'stock_journal' => $sj_only,
             ];
+            $product = auragold_gpb_attach_gst_fields_to_product($conn, $product, $product_id, $working_branch_id > 0 ? $working_branch_id : null);
             $product = attach_latest_stock_journal_to_product($product, $barcode_esc, $conn);
             auragold_json_out(['success' => true, 'product' => $product, 'source' => 'stock_journal']);
             exit;

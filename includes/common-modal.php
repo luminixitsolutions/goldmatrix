@@ -55,6 +55,15 @@ if (!empty($common_modal_include_product_selection_only)) {
         </div>
     </div>
 </div>
+<style>
+/* Stack above #productSelectionModal (10600) so Add Image opens in front when camera is used from product selection */
+#addImageModal.modal {
+    z-index: 10700 !important;
+}
+body.modal-open:has(#addImageModal.show) .modal-backdrop {
+    z-index: 10650 !important;
+}
+</style>
 
 <?php
 // Add Product modal: same Tax / Metal / Unit / Location / branch defaults as product-opening.php

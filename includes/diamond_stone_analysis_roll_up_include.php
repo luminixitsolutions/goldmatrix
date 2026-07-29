@@ -24,7 +24,7 @@ if (empty($scope_metals) && !empty($scope_metal_ids)) {
     $scope_metals = getList("SELECT id, display_name AS name FROM tbl_metal WHERE status = 1 AND id IN (" . implode(',', $scope_metal_ids) . ") ORDER BY display_name ASC");
 }
 
-$where_clause = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'stock_journal', 'outward')";
+$where_clause = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'stock_journal', 'balance', 'inward', 'outward')";
 if ($search_term != '') {
     $where_clause .= " AND (p.name LIKE '%$search_term%' OR p.article LIKE '%$search_term%' OR p.alternate_name LIKE '%$search_term%')";
 }
@@ -65,7 +65,7 @@ $stock_inner_select = "
         MAX(pc.carat) as carat,
         SUM(
             CASE 
-                WHEN s.stock_type IN ('opening','purchase')
+                WHEN s.stock_type IN ('opening','purchase','balance','inward')
                 THEN COALESCE(s.current_qty, s.opening_qty, 0)
                 ELSE 0
             END
@@ -119,20 +119,20 @@ $stock_inner_select = "
             INNER JOIN tbl_product_characteristics pc4 ON pc4.id = sii.product_characteristic_id AND pc4.product_id = s.product_id AND pc4.branch_id = s.branch_id AND pc4.metal_id = s.metal_id AND pc4.status = 1
             WHERE sii.product_id = s.product_id AND sii.status = 1 AND si.status != 'cancelled'
         ), 0) as sale_invoice_qty,
-        SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as inward_gross_sum,
-        SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as inward_pure_sum,
+        SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as inward_gross_sum,
+        SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as inward_pure_sum,
         SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) * (CASE WHEN COALESCE(s.opening_purity, 0) <= 1 THEN COALESCE(s.opening_purity, 0) ELSE COALESCE(s.opening_purity, 0) / 100 END) ELSE 0 END) as outward_pure_sum,
         SUM(
             CASE 
-                WHEN s.stock_type IN ('opening','purchase','stock_journal')
+                WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward')
                 THEN COALESCE(s.current_qty, s.opening_qty, 0)
                 ELSE 0
             END
         ) as available_qty,
-        (SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END)) as stock_net_weight,
+        (SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) - SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END)) as stock_net_weight,
         SUM(CASE WHEN s.stock_type = 'outward' THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) as outward_weight_sum,
         SUM(s.opening_weight) as opening_weight,
-        CASE WHEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) > 0 THEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) * COALESCE(s.opening_purity, 0) ELSE 0 END) / SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) ELSE MAX(s.opening_purity) END as opening_purity,
+        CASE WHEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) > 0 THEN SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) * COALESCE(s.opening_purity, 0) ELSE 0 END) / SUM(CASE WHEN s.stock_type IN ('opening','purchase','stock_journal','balance','inward') THEN COALESCE(s.opening_weight, s.current_weight, 0) ELSE 0 END) ELSE MAX(s.opening_purity) END as opening_purity,
         SUM(s.value) as value,
         MAX(s.final_weight) as final_weight,
         MAX(s.rate) as rate

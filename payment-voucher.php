@@ -100,14 +100,12 @@ if ($pv_sp_selected !== '') {
 }
 
 $pv_voucher_date_val = date('Y-m-d');
-$pv_due_date_val = date('Y-m-d');
+$pv_due_date_val = '';
 if (!empty($edit_voucher) && is_array($edit_voucher)) {
     if (!empty($edit_voucher['voucher_date'])) {
         $pv_voucher_date_val = substr($edit_voucher['voucher_date'], 0, 10);
     }
-    if (!empty($edit_voucher['due_date'])) {
-        $pv_due_date_val = substr($edit_voucher['due_date'], 0, 10);
-    }
+    $pv_due_date_val = auragold_due_date_value($edit_voucher['due_date'] ?? null);
 }
 $pv_fixing_type = (!empty($edit_voucher) && is_array($edit_voucher))
     ? trim((string)($edit_voucher['fixing_type'] ?? 'Standard'))
@@ -3280,7 +3278,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             currency: $('#currency').val(),
             currency_rate: $('#currencyRate').val(),
             voucher_date: $('#voucherDate').val(),
-            due_date: $('#dueDate').val(),
+            due_date: (typeof window.auragoldGetDueDateValue === 'function' ? window.auragoldGetDueDateValue() : $('#dueDate').val()),
             layaways_id: $('#layaways').val(),
             fixing_type: $('#fixingType').val(),
             previous_balance: prevBalSave.previous_balance,
@@ -3427,7 +3425,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             'against_of' => $edit_voucher['against_of'] ?? '',
             'currency' => $edit_voucher['currency'] ?? 'USD',
             'voucher_date' => $edit_voucher['voucher_date'] ?? date('Y-m-d'),
-            'due_date' => $edit_voucher['due_date'] ?? date('Y-m-d'),
+            'due_date' => auragold_due_date_value($edit_voucher['due_date'] ?? null),
             'fixing_type' => $edit_voucher['fixing_type'] ?? 'Standard',
             'previous_balance' => $edit_voucher['previous_balance'] ?? 0,
             'previous_gold' => $edit_voucher['previous_gold'] ?? 0,
@@ -3451,7 +3449,7 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
         $('#againstOf').val(editData.against_of || '');
         $('#currency').val(editData.currency || 'USD');
         $('#voucherDate').val(editData.voucher_date || '');
-        $('#dueDate').val(editData.due_date || '');
+        $('#dueDate').val(typeof window.auragoldNormalizeDueDate === 'function' ? window.auragoldNormalizeDueDate(editData.due_date) : (editData.due_date || ''));
         $('#fixingType').val(editData.fixing_type || 'Standard');
         if ($('#customerId').val() || $('#customerName').val()) {
             loadCustomerBalance();

@@ -140,6 +140,142 @@ if (!function_exists('mp_jwq_get_last_db_error')) {
     }
 }
 
+if (!function_exists('mp_jwq_stock_has_ref_cols')) {
+    function mp_jwq_stock_has_ref_cols(mysqli $conn): bool
+    {
+        static $ok = null;
+        if ($ok !== null) {
+            return $ok;
+        }
+        $have = 0;
+        $q = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_stock WHERE Field IN ('reference_id','reference_type','source_stock_id')");
+        if ($q) {
+            $have = mysqli_num_rows($q);
+            mysqli_free_result($q);
+        }
+        $ok = ($have >= 3);
+
+        return $ok;
+    }
+}
+
+if (!function_exists('mp_jwq_insert_transfer_stock_rows')) {
+    /**
+     * Diamond moved into a job (From Dept -> To Dept): insert the outward row for the source stock
+     * plus a matching inward "balance" row so the receiving side shows as inward stock and the
+     * overall stock balance stays correct. Rows are tagged via reference columns for reliable reversal.
+     */
+    function mp_jwq_insert_transfer_stock_rows(mysqli $conn, int $jobwork_order_id, array $st, int $src_id, float $take, float $sold_q, bool &$tx_ok, string &$tx_err): void
+    {
+        if (!$tx_ok || $take <= 0.0000001) {
+            return;
+        }
+        $pid = (int) ($st['product_id'] ?? 0);
+        $pcid = isset($st['product_characteristic_id']) ? (int) $st['product_characteristic_id'] : 0;
+        $branch_id = (int) ($st['branch_id'] ?? 0);
+        $metal_id = (int) ($st['metal_id'] ?? 0);
+        $purity = (float) ($st['opening_purity'] ?? 0);
+        $rate_sql = (float) ($st['rate'] ?? 0);
+        $row_val = round($rate_sql * $take, 2);
+        $barcode_sql = 'NULL';
+        $bc_src = trim((string) ($st['barcode'] ?? ''));
+        if ($bc_src !== '') {
+            $barcode_sql = "'" . mysqli_real_escape_string($conn, $bc_src) . "'";
+        }
+        $pcid_sql = $pcid > 0 ? (string) $pcid : 'NULL';
+        $has_ref = mp_jwq_stock_has_ref_cols($conn);
+        $w = round($take, 4);
+        $q = round($sold_q, 4);
+        foreach ([['outward', 'jobwork_diamond_issue'], ['balance', 'jobwork_diamond_transfer']] as $pair) {
+            $type = $pair[0];
+            $ref = $pair[1];
+            $cols = 'product_id, product_characteristic_id, barcode, branch_id, metal_id, opening_weight, opening_purity, opening_qty, final_weight, rate, value, current_weight, current_qty, stock_type, transaction_date, created_at';
+            $vals = $pid . ', ' . $pcid_sql . ', ' . $barcode_sql . ', ' . $branch_id . ', ' . $metal_id . ', '
+                . $w . ', ' . round($purity, 4) . ', ' . $q . ', ' . $w . ', '
+                . $rate_sql . ', ' . $row_val . ', ' . $w . ', ' . $q . ", '" . $type . "', CURDATE(), NOW()";
+            if ($has_ref) {
+                $cols .= ', reference_id, reference_type, source_stock_id';
+                $vals .= ', ' . (int) $jobwork_order_id . ", '" . $ref . "', " . $src_id;
+            }
+            if (!@mysqli_query($conn, 'INSERT INTO tbl_stock (' . $cols . ') VALUES (' . $vals . ')')) {
+                $tx_ok = false;
+                mp_jwq_set_last_db_error($conn);
+                $tx_err = 'Could not insert ' . $type . ' stock for diamond transfer. DB: ' . mp_jwq_get_last_db_error();
+
+                return;
+            }
+        }
+    }
+}
+
+if (!function_exists('mp_jwq_trim_transfer_stock_rows')) {
+    /**
+     * Reverse of mp_jwq_insert_transfer_stock_rows: shave the returned weight off the tagged
+     * outward + inward "balance" rows (untagged legacy rows are matched by barcode).
+     */
+    function mp_jwq_trim_transfer_stock_rows(mysqli $conn, int $src_stock_id, string $barcode, float $wt, float $qty = 0.0): void
+    {
+        $wt = round(max(0.0, $wt), 4);
+        if ($wt <= 0.0000001 || !function_exists('getList')) {
+            return;
+        }
+        $has_ref = mp_jwq_stock_has_ref_cols($conn);
+        $bc_esc = mysqli_real_escape_string($conn, trim($barcode));
+        foreach ([['outward', 'jobwork_diamond_issue'], ['balance', 'jobwork_diamond_transfer']] as $pair) {
+            $type = $pair[0];
+            $ref = $pair[1];
+            $rows = null;
+            if ($has_ref && $src_stock_id > 0) {
+                $rows = getList(
+                    'SELECT id, current_weight, current_qty, rate FROM tbl_stock WHERE status = 1'
+                    . " AND LOWER(TRIM(COALESCE(stock_type,''))) = '" . $type . "'"
+                    . " AND reference_type = '" . $ref . "'"
+                    . ' AND source_stock_id = ' . $src_stock_id
+                    . ' AND COALESCE(current_weight,0) > 0.0000001'
+                    . ' ORDER BY id DESC'
+                );
+            }
+            if ((!is_array($rows) || $rows === []) && $bc_esc !== '') {
+                $rows = getList(
+                    'SELECT id, current_weight, current_qty, rate FROM tbl_stock WHERE status = 1'
+                    . " AND LOWER(TRIM(COALESCE(stock_type,''))) = '" . $type . "'"
+                    . " AND barcode = '" . $bc_esc . "'"
+                    . ' AND COALESCE(current_weight,0) > 0.0000001'
+                    . ' ORDER BY id DESC'
+                );
+            }
+            if (!is_array($rows)) {
+                continue;
+            }
+            $left_w = $wt;
+            $left_q = round(max(0.0, $qty), 4);
+            foreach ($rows as $row) {
+                if ($left_w <= 0.0000001) {
+                    break;
+                }
+                $rid = (int) ($row['id'] ?? 0);
+                $cw = (float) ($row['current_weight'] ?? 0);
+                if ($rid < 1 || $cw <= 0.0000001) {
+                    continue;
+                }
+                $cq = (float) ($row['current_qty'] ?? 0);
+                $rate = (float) ($row['rate'] ?? 0);
+                $take_w = min($left_w, $cw);
+                $take_q = $left_q > 0.0000001 ? min($left_q, $cq) : ($cw > 0.0000001 ? $cq * ($take_w / $cw) : 0.0);
+                $new_cw = round($cw - $take_w, 4);
+                $new_cq = round(max(0.0, $cq - $take_q), 4);
+                if ($new_cw <= 0.0000001) {
+                    @mysqli_query($conn, 'UPDATE tbl_stock SET status = 0, current_weight = 0, current_qty = 0, final_weight = 0, value = 0 WHERE id = ' . $rid . ' LIMIT 1');
+                } else {
+                    @mysqli_query($conn, 'UPDATE tbl_stock SET current_weight = ' . $new_cw . ', final_weight = ' . $new_cw . ', current_qty = ' . $new_cq . ', value = ' . round($rate * $new_cw, 2) . ' WHERE id = ' . $rid . ' LIMIT 1');
+                }
+                $left_w = round($left_w - $take_w, 4);
+                $left_q = round(max(0.0, $left_q - $take_q), 4);
+            }
+        }
+    }
+}
+
 if (!function_exists('mp_jwq_apply_diamond_stock_consumption')) {
     /**
      * @param array<int, array<string, mixed>>|null $rows
@@ -324,28 +460,8 @@ if (!function_exists('mp_jwq_apply_diamond_stock_consumption')) {
                     return;
                 }
                 if ($take > 0.0000001) {
-                    $pid = (int) ($st['product_id'] ?? 0);
-                    $pcid = isset($st['product_characteristic_id']) ? (int) $st['product_characteristic_id'] : 0;
-                    $branch_id = (int) ($st['branch_id'] ?? 0);
-                    $metal_id = (int) ($st['metal_id'] ?? 0);
-                    $purity = (float) ($st['opening_purity'] ?? 0);
-                    $rate_sql = (float) ($st['rate'] ?? 0);
-                    $out_val = round($rate_sql * $take, 2);
-                    $barcode_sql = 'NULL';
-                    $bc_src = trim((string) ($st['barcode'] ?? ''));
-                    if ($bc_src !== '') {
-                        $barcode_sql = "'" . mysqli_real_escape_string($conn, $bc_src) . "'";
-                    }
-                    $pcid_sql = $pcid > 0 ? (string) $pcid : 'NULL';
-                    $out_sql = "INSERT INTO tbl_stock (product_id, product_characteristic_id, barcode, branch_id, metal_id, opening_weight, opening_purity, opening_qty, final_weight, rate, value, current_weight, current_qty, stock_type, transaction_date, created_at) VALUES ("
-                        . $pid . ', ' . $pcid_sql . ', ' . $barcode_sql . ', ' . $branch_id . ', ' . $metal_id . ', '
-                        . round($take, 4) . ', ' . round($purity, 4) . ', ' . round($sold_q, 4) . ', ' . round($take, 4) . ', '
-                        . $rate_sql . ', ' . $out_val . ', ' . round($take, 4) . ', ' . round($sold_q, 4) . ", 'outward', CURDATE(), NOW())";
-                    if (!@mysqli_query($conn, $out_sql)) {
-                        $tx_ok = false;
-                        mp_jwq_set_last_db_error($conn);
-                        $tx_err = 'Could not insert outward stock for diamond consumption. DB: ' . mp_jwq_get_last_db_error();
-
+                    mp_jwq_insert_transfer_stock_rows($conn, $jobwork_order_id, $st, $src_id, $take, $sold_q, $tx_ok, $tx_err);
+                    if (!$tx_ok) {
                         return;
                     }
                 }
@@ -378,28 +494,8 @@ if (!function_exists('mp_jwq_apply_diamond_stock_consumption')) {
                 return;
             }
 
-            $pid = (int) ($st['product_id'] ?? 0);
-            $pcid = isset($st['product_characteristic_id']) ? (int) $st['product_characteristic_id'] : 0;
-            $branch_id = (int) ($st['branch_id'] ?? 0);
-            $metal_id = (int) ($st['metal_id'] ?? 0);
-            $purity = (float) ($st['opening_purity'] ?? 0);
-            $rate_sql = (float) ($st['rate'] ?? 0);
-            $out_val = round($rate_sql * $take, 2);
-            $barcode_sql = 'NULL';
-            $bc_src = trim((string)($st['barcode'] ?? ''));
-            if ($bc_src !== '') {
-                $barcode_sql = "'" . mysqli_real_escape_string($conn, $bc_src) . "'";
-            }
-            $pcid_sql = $pcid > 0 ? (string) $pcid : 'NULL';
-            $out_sql = "INSERT INTO tbl_stock (product_id, product_characteristic_id, barcode, branch_id, metal_id, opening_weight, opening_purity, opening_qty, final_weight, rate, value, current_weight, current_qty, stock_type, transaction_date, created_at) VALUES ("
-                . $pid . ', ' . $pcid_sql . ', ' . $barcode_sql . ', ' . $branch_id . ', ' . $metal_id . ', '
-                . round($take, 4) . ', ' . round($purity, 4) . ', ' . round($sold_q, 4) . ', ' . round($take, 4) . ', '
-                . $rate_sql . ', ' . $out_val . ', ' . round($take, 4) . ', ' . round($sold_q, 4) . ", 'outward', CURDATE(), NOW())";
-            if (!@mysqli_query($conn, $out_sql)) {
-                $tx_ok = false;
-                mp_jwq_set_last_db_error($conn);
-                $tx_err = 'Could not insert outward stock for diamond consumption. DB: ' . mp_jwq_get_last_db_error();
-
+            mp_jwq_insert_transfer_stock_rows($conn, $jobwork_order_id, $st, $src_id, $take, $sold_q, $tx_ok, $tx_err);
+            if (!$tx_ok) {
                 return;
             }
 
@@ -501,24 +597,7 @@ if (!function_exists('mp_jwq_release_used_modal_diamond_rows')) {
 
                 return;
             }
-            $bc_raw = trim((string) ($row['barcode'] ?? ''));
-            if ($bc_raw !== '') {
-                $bc_esc = mysqli_real_escape_string($conn, $bc_raw);
-                $out = getRecord(
-                    'SELECT id FROM tbl_stock WHERE status = 1'
-                    . " AND LOWER(TRIM(COALESCE(stock_type,''))) = 'outward'"
-                    . " AND barcode = '" . $bc_esc . "'"
-                    . ' AND ABS(COALESCE(current_weight,0) - ' . $add_wt . ') < 0.0001'
-                    . ' ORDER BY id DESC LIMIT 1'
-                );
-                if ($out && !empty($out['id'])) {
-                    $oid = (int) $out['id'];
-                    @mysqli_query(
-                        $conn,
-                        'UPDATE tbl_stock SET status = 0, current_weight = 0, current_qty = 0, final_weight = 0, value = 0 WHERE id = ' . $oid . ' LIMIT 1'
-                    );
-                }
-            }
+            mp_jwq_trim_transfer_stock_rows($conn, $stock_id, trim((string) ($row['barcode'] ?? '')), $add_wt, $add_q);
         }
     }
 }
@@ -558,24 +637,7 @@ if (!function_exists('mp_jwq_restore_stock_after_issue_removal')) {
 
             return;
         }
-        $bc_trim = trim($bc_raw);
-        if ($bc_trim !== '') {
-            $bc_esc = mysqli_real_escape_string($conn, $bc_trim);
-            $out = getRecord(
-                'SELECT id FROM tbl_stock WHERE status = 1'
-                . " AND LOWER(TRIM(COALESCE(stock_type,''))) = 'outward'"
-                . " AND barcode = '" . $bc_esc . "'"
-                . ' AND ABS(COALESCE(current_weight,0) - ' . $add_wt . ') < 0.0001'
-                . ' ORDER BY id DESC LIMIT 1'
-            );
-            if ($out && !empty($out['id'])) {
-                $oid = (int) $out['id'];
-                @mysqli_query(
-                    $conn,
-                    'UPDATE tbl_stock SET status = 0, current_weight = 0, current_qty = 0, final_weight = 0, value = 0 WHERE id = ' . $oid . ' LIMIT 1'
-                );
-            }
-        }
+        mp_jwq_trim_transfer_stock_rows($conn, $stock_id, trim($bc_raw), $add_wt, $add_q);
     }
 }
 
@@ -761,15 +823,31 @@ if (!function_exists('mp_jwq_recalculate_line_diamond_weights')) {
         if ($col === '') {
             return [];
         }
-        $sql = "UPDATE tbl_jobwork_order_items ji
-                SET ji.`$col` = (
-                    SELECT COALESCE(SUM(ds.weight),0)
+        $dsum_join = "LEFT JOIN (
+                    SELECT ds.jobwork_order_item_id AS item_id, COALESCE(SUM(ds.weight),0) AS dw
                     FROM `$tbl` ds
-                    WHERE ds.jobwork_order_id = ji.jobwork_order_id
-                      AND ds.jobwork_order_item_id = ji.id
+                    WHERE ds.jobwork_order_id = $jwo
                       AND ds.stock_id > 0
                       AND TRIM(IFNULL(ds.barcode,'')) <> ''
-                )
+                    GROUP BY ds.jobwork_order_item_id
+                ) dsum ON dsum.item_id = ji.id";
+        /* Keep final_weight (display/carrying total) in step with diamond changes: shift it by the
+           diamond delta so a removed/reduced diamond doesn't leave a stale, higher Total Wt.
+           Run before the diamond column is overwritten (multi-table SET order is not guaranteed). */
+        if (!empty($ji_cols['final_weight'])) {
+            @mysqli_query(
+                $conn,
+                "UPDATE tbl_jobwork_order_items ji
+                $dsum_join
+                SET ji.final_weight = GREATEST(0, ROUND(ji.final_weight - COALESCE(ji.`$col`, 0) + COALESCE(dsum.dw, 0), 3))
+                WHERE ji.jobwork_order_id = $jwo
+                  AND COALESCE(ji.final_weight, 0) > 0.0001
+                  AND ABS(COALESCE(dsum.dw, 0) - COALESCE(ji.`$col`, 0)) > 0.0001"
+            );
+        }
+        $sql = "UPDATE tbl_jobwork_order_items ji
+                $dsum_join
+                SET ji.`$col` = COALESCE(dsum.dw, 0)
                 WHERE ji.jobwork_order_id = " . $jwo;
         @mysqli_query($conn, $sql);
         $rows = function_exists('getList')

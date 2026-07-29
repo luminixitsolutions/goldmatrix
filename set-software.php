@@ -1624,6 +1624,303 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     border-left: 3px solid #11294b;
     padding-left: 10px;
 }
+.toolbox-field-strip {
+    border-left-color: #0f766e;
+}
+.toolbox-field-white-strip {
+    border-left-color: #94a3b8;
+    background: linear-gradient(90deg, #fff 0%, #f8fafc 100%);
+}
+/* White Strip — blank rectangle. Must override .canvas-dropped-item { background: transparent !important } */
+.canvas-dropped-item.canvas-white-strip,
+.barcode-label-canvas .canvas-white-strip,
+.canvas-white-strip {
+    position: absolute !important;
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    border: none !important;
+    border-radius: 0;
+    white-space: normal !important;
+    overflow: visible !important;
+    min-width: 10px !important;
+    min-height: 5px !important;
+    cursor: move !important;
+    pointer-events: auto !important;
+    user-select: none;
+    z-index: 5;
+    color: transparent !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    gap: 0 !important;
+}
+/* Designer-only helper outline (not printed) */
+body.page-set-software .barcode-designer-mode .canvas-white-strip,
+body.page-set-software .canvas-white-strip {
+    outline: 1px dashed #64748b !important;
+    outline-offset: 0;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15) !important;
+}
+body.page-set-software .canvas-white-strip.selected {
+    outline: 2px solid #7c3aed !important;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.35) !important;
+    z-index: 25 !important;
+}
+.canvas-white-strip .canvas-item-text {
+    display: none !important;
+}
+.canvas-white-strip .canvas-item-remove {
+    display: inline-flex !important;
+    position: absolute;
+    right: -8px;
+    top: -8px;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    background: #fff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 3px;
+    padding: 1px;
+    z-index: 30;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.canvas-white-strip .white-strip-resize-handle {
+    display: none;
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #7c3aed;
+    border: 1px solid #fff;
+    border-radius: 1px;
+    z-index: 30;
+    box-sizing: border-box;
+    pointer-events: auto;
+}
+.canvas-white-strip.selected .white-strip-resize-handle {
+    display: block;
+}
+.canvas-white-strip .ws-handle-nw { left: -4px; top: -4px; cursor: nwse-resize; }
+.canvas-white-strip .ws-handle-n  { left: 50%; top: -4px; margin-left: -4px; cursor: ns-resize; }
+.canvas-white-strip .ws-handle-ne { right: -4px; top: -4px; cursor: nesw-resize; }
+.canvas-white-strip .ws-handle-e  { right: -4px; top: 50%; margin-top: -4px; cursor: ew-resize; }
+.canvas-white-strip .ws-handle-se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.canvas-white-strip .ws-handle-s  { left: 50%; bottom: -4px; margin-left: -4px; cursor: ns-resize; }
+.canvas-white-strip .ws-handle-sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+.canvas-white-strip .ws-handle-w  { left: -4px; top: 50%; margin-top: -4px; cursor: ew-resize; }
+.barcode-label-canvas {
+    position: relative;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-label-canvas {
+    position: relative !important;
+}
+.prop-row-white-strip {
+    display: none;
+}
+.prop-row-white-strip.is-visible {
+    display: block;
+}
+.prop-row-white-strip.prop-row-cols.is-visible {
+    display: grid;
+}
+.prop-white-strip-layer-btns {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.prop-white-strip-layer-btns button {
+    flex: 1;
+    min-width: 100px;
+    padding: 6px 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+    color: #334155;
+    font-size: 11px;
+    cursor: pointer;
+}
+.prop-white-strip-layer-btns button:hover {
+    border-color: #7c3aed;
+    color: #7c3aed;
+}
+.barcode-ws-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #11294b;
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    z-index: 99999;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+.barcode-ws-toast.is-visible {
+    opacity: 1;
+}
+@media print {
+    .canvas-white-strip {
+        box-shadow: none !important;
+        outline: none !important;
+    }
+    .white-strip-resize-handle,
+    .canvas-white-strip .canvas-item-remove {
+        display: none !important;
+    }
+}
+/* Fixed half white strips — 82×38 only (thin bands matching red-mark positions) */
+.barcode-82x38-fixed-strips {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 55;
+    overflow: visible;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-82x38-fixed-strips {
+    display: block !important;
+}
+.barcode-82x38-fixed-half-strip {
+    position: absolute !important;
+    display: block !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px dashed #64748b !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15);
+    pointer-events: auto !important;
+    z-index: 55 !important;
+    line-height: normal !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.barcode-82x38-fixed-half-strip.drag-over {
+    border-color: #0d9488 !important;
+    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.35);
+}
+.barcode-82x38-fixed-half-strip .canvas-dropped-item {
+    pointer-events: auto !important;
+    z-index: 2;
+    max-width: 100%;
+    white-space: nowrap;
+    align-items: flex-start !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+}
+.barcode-82x38-fixed-half-strip .canvas-dropped-item .canvas-item-text {
+    line-height: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block;
+}
+/*
+ * Half strips (white bg) — 82×38 only:
+ *  1) top-left: left edge → box2, flush with top
+ *  2) bottom-right: right of box1 → right edge (top 30.6mm)
+ */
+.barcode-82x38-fixed-half-strip--top-left {
+    left: 0 !important;
+    top: 5mm !important;
+    width: 62mm !important;
+    height: 4.5mm !important;
+}
+.barcode-82x38-fixed-half-strip--bottom-right {
+    left: 20mm !important;
+    top: 30.6mm !important;
+    width: 62mm !important;
+    height: 4.5mm !important;
+}
+@media print {
+    .barcode-82x38-fixed-half-strip {
+        border: none !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+        background-color: #ffffff !important;
+    }
+}
+/* Layer for strip lines on the outer 82×38 sticker (not inside the green boxes) */
+.barcode-82x38-strip-layer {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 60;
+    overflow: visible;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-82x38-strip-layer {
+    display: block;
+    pointer-events: none;
+}
+.barcode-canvas.barcode-82x38-dual-layout .barcode-82x38-strip-layer .canvas-strip-line {
+    pointer-events: auto;
+}
+.barcode-canvas.barcode-82x38-dual-layout #barcodeLabelsContainer {
+    z-index: 5;
+    pointer-events: none !important;
+}
+/* Draggable horizontal strip line on the label canvas / outer sticker */
+.canvas-dropped-item.canvas-strip-line {
+    display: block;
+    padding: 0;
+    height: 12px;
+    min-height: 12px;
+    line-height: 0;
+    white-space: normal;
+    background: transparent !important;
+    border: none !important;
+    z-index: 45;
+    box-sizing: border-box;
+}
+.canvas-dropped-item.canvas-strip-line .canvas-strip-line-bar {
+    display: block;
+    width: 100%;
+    height: 0;
+    margin-top: 5px;
+    border-top: 2px solid #0f172a;
+    pointer-events: none;
+}
+.canvas-dropped-item.canvas-strip-line.selected .canvas-strip-line-bar,
+.canvas-dropped-item.canvas-strip-line:hover .canvas-strip-line-bar {
+    border-top-color: #0f766e;
+    box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.35);
+}
+.canvas-dropped-item.canvas-strip-line .canvas-item-text {
+    display: none !important;
+}
+.canvas-dropped-item.canvas-strip-line .canvas-item-remove {
+    display: inline-flex !important;
+    position: absolute;
+    right: -2px;
+    top: -2px;
+    background: #fff;
+    border-radius: 3px;
+    padding: 1px;
+    z-index: 2;
+}
 
 .toolbox-search-wrap {
     padding: 8px 16px 6px;
@@ -1645,6 +1942,24 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
 }
 .toolbox-field-item.toolbox-search-hidden {
     display: none !important;
+}
+/* Matched chips must stay visible even if another rule set display:none */
+.toolbox-fields.is-toolbox-searching .toolbox-field-item:not(.toolbox-search-hidden) {
+    display: inline-flex !important;
+}
+.toolbox-search-empty {
+    display: none;
+    width: 100%;
+    flex-basis: 100%;
+    padding: 10px 4px 6px;
+    font-size: 12px;
+    color: #94a3b8;
+}
+.toolbox-fields.is-toolbox-searching.has-no-search-matches .toolbox-search-empty {
+    display: block;
+}
+.toolbox-fields.is-toolbox-searching.has-no-search-matches .toolbox-fields-divider {
+    display: none;
 }
 
 .toolbox-fields-divider {
@@ -2025,11 +2340,17 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             </div>
 
             <div class="barcode-canvas-wrap">
-                <div class="<?php echo htmlspecialchars($bs_canvas_class, ENT_QUOTES, 'UTF-8'); ?>" id="barcodeCanvas">
+                <div class="<?php echo htmlspecialchars($bs_canvas_class, ENT_QUOTES, 'UTF-8'); ?> barcode-designer-mode" id="barcodeCanvas">
                     <div class="barcode-canvas-drops" id="barcodeCanvasDrops"></div>
                     <div class="barcode-82x38-preview-wrapper" id="barcode82x38PreviewWrapper"<?php echo $bs_is_82x38_preset ? '' : ' aria-hidden="true"'; ?>>
                     <div class="<?php echo htmlspecialchars($bs_shell_class, ENT_QUOTES, 'UTF-8'); ?>" id="barcodeDualStickerShell" aria-label="<?php echo $bs_is_82x38_preset ? '82mm x 38mm dual box sticker' : '120mm x 50mm dual barcode sticker'; ?>">
                     <div class="barcode-82x38-sticker-guide" id="barcode82x38StickerGuide" aria-hidden="true" title="Horizontal separation line"></div>
+                    <?php if ($bs_is_82x38_preset) { ?>
+                    <div class="barcode-82x38-fixed-strips" id="barcode82x38FixedStrips" aria-hidden="false" title="Fixed half white strips — drop columns here">
+                        <div class="barcode-82x38-fixed-half-strip barcode-82x38-fixed-half-strip--top-left" data-fixed-half-strip="top-left" title="Half white strip (top-left) — drop columns here"></div>
+                        <div class="barcode-82x38-fixed-half-strip barcode-82x38-fixed-half-strip--bottom-right" data-fixed-half-strip="bottom-right" title="Half white strip (bottom) — drop columns here"></div>
+                    </div>
+                    <?php } ?>
                     <div class="barcode-labels-container" id="barcodeLabelsContainer">
                         <div class="barcode-preview-block<?php echo htmlspecialchars($bs_box_extra_class, ENT_QUOTES, 'UTF-8'); ?>" id="box1" data-legacy-id="barcodeLabel1">
                             <div class="barcode-default-wrap barcode-82x38-box-inner">
@@ -2086,6 +2407,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                             </div>
                         </div>
                     </div>
+                    <div class="barcode-82x38-strip-layer" id="barcode82x38StripLayer" aria-label="Sticker strip lines"></div>
                     </div>
                     </div>
                 </div>
@@ -2144,6 +2466,68 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                     <div class="prop-row">
                         <label>Number Of Decimal</label>
                         <input type="number" value="0" min="0" id="propDecimals">
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-white-strip" id="propRowWhiteStripSize">
+                        <div class="prop-field">
+                            <label>Width (px)</label>
+                            <input type="number" value="250" min="10" max="2000" id="propWhiteStripWidth" title="White Strip width">
+                        </div>
+                        <div class="prop-field">
+                            <label>Height (px)</label>
+                            <input type="number" value="40" min="5" max="2000" id="propWhiteStripHeight" title="White Strip height">
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-white-strip" id="propRowWhiteStripColors">
+                        <div class="prop-field">
+                            <label>Background Color</label>
+                            <input type="color" value="#ffffff" id="propWhiteStripBg" title="Background">
+                        </div>
+                        <div class="prop-field">
+                            <label>Print Border Enabled</label>
+                            <select id="propWhiteStripBorderEnabled">
+                                <option value="0">No</option>
+                                <option value="1">Yes</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-white-strip" id="propRowWhiteStripBorder">
+                        <div class="prop-field">
+                            <label>Print Border Color</label>
+                            <input type="color" value="#000000" id="propWhiteStripBorderColor" title="Print border color">
+                        </div>
+                        <div class="prop-field">
+                            <label>Print Border Width (px)</label>
+                            <input type="number" value="0" min="0" max="20" step="0.5" id="propWhiteStripBorderWidth">
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-white-strip" id="propRowWhiteStripFx">
+                        <div class="prop-field">
+                            <label>Border Radius (px)</label>
+                            <input type="number" value="0" min="0" max="100" id="propWhiteStripBorderRadius">
+                        </div>
+                        <div class="prop-field">
+                            <label>Opacity</label>
+                            <input type="number" value="1" min="0" max="1" step="0.05" id="propWhiteStripOpacity">
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-cols prop-row-white-strip" id="propRowWhiteStripRot">
+                        <div class="prop-field">
+                            <label>Rotation (deg)</label>
+                            <input type="number" value="0" min="-180" max="180" step="1" id="propWhiteStripRotation">
+                        </div>
+                        <div class="prop-field">
+                            <label>Z-Index</label>
+                            <input type="number" value="5" min="0" max="999" id="propWhiteStripZIndex">
+                        </div>
+                    </div>
+                    <div class="prop-row prop-row-white-strip" id="propRowWhiteStripLayer">
+                        <label>Layer Order</label>
+                        <div class="prop-white-strip-layer-btns">
+                            <button type="button" id="btnWhiteStripBringForward" title="Bring forward">Bring Forward</button>
+                            <button type="button" id="btnWhiteStripSendBackward" title="Send backward">Send Backward</button>
+                            <button type="button" id="btnWhiteStripBringFront" title="Bring to front">Bring to Front</button>
+                            <button type="button" id="btnWhiteStripSendBack" title="Send to back">Send to Back</button>
+                        </div>
                     </div>
                     <div class="prop-row prop-row-cols">
                         <div class="prop-field">
@@ -2834,25 +3218,81 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         navigateToBarcodeSettingsPage(metal, labelUi);
     }
 
+    function normalizeToolboxSearchText(s) {
+        return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    function getActiveToolboxFieldsPanel() {
+        var activeCat = document.querySelector('.toolbox-tab.active');
+        var cat = (activeCat && activeCat.getAttribute('data-category')) || 'gold';
+        /* Re-query by id so a stale Node reference cannot filter a detached panel. */
+        var idMap = {
+            gold: 'toolboxFieldsGold',
+            silver: 'toolboxFieldsSilver',
+            platinum: 'toolboxFieldsPlatinum',
+            diamond: 'toolboxFieldsDiamond',
+            imitation: 'toolboxFieldsImitation',
+            other: 'toolboxFieldsOther'
+        };
+        var el = document.getElementById(idMap[cat] || idMap.gold);
+        if (el) fieldsByCategory[cat] = el;
+        return el || fieldsByCategory[cat] || fieldsByCategory.gold;
+    }
+
     function filterToolboxBySearch() {
         var searchInput = document.getElementById('toolboxColumnSearch');
-        var q = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : '';
-        var activeCat = document.querySelector('.toolbox-tab.active');
-        var cat = activeCat ? activeCat.getAttribute('data-category') : 'gold';
-        var panel = fieldsByCategory[cat];
+        var qRaw = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : '';
+        var qNorm = normalizeToolboxSearchText(qRaw);
+        var panel = getActiveToolboxFieldsPanel();
         if (!panel) return;
-        panel.querySelectorAll('.toolbox-field-item').forEach(function(item) {
-            var field = (item.getAttribute('data-field') || '').toLowerCase();
-            var labelEl = item.querySelector('.toolbox-field-label');
-            var label = (labelEl ? labelEl.textContent : item.textContent || '').trim().toLowerCase();
-            if (q === '') {
+
+        if (!panel.querySelector('.toolbox-search-empty')) {
+            var emptyHint = document.createElement('div');
+            emptyHint.className = 'toolbox-search-empty';
+            emptyHint.textContent = 'No columns match your search.';
+            panel.appendChild(emptyHint);
+        }
+
+        var items = panel.querySelectorAll('.toolbox-field-item');
+        /* Pass 1: clear previous hide state so a failed/partial filter cannot leave chips stuck hidden. */
+        items.forEach(function(item) {
+            item.classList.remove('toolbox-search-hidden');
+        });
+
+        if (!qRaw) {
+            panel.classList.remove('is-toolbox-searching', 'has-no-search-matches');
+            return;
+        }
+
+        panel.classList.add('is-toolbox-searching');
+        var matchCount = 0;
+        items.forEach(function(item) {
+            try {
+                var field = (item.getAttribute('data-field') || '').toLowerCase();
+                var labelEl = item.querySelector('.toolbox-field-label');
+                var label = (labelEl ? labelEl.textContent : '').trim().toLowerCase();
+                if (!label) {
+                    /* Prefer data-field over full textContent (avoids trash SVG title noise). */
+                    label = field || (item.textContent || '').trim().toLowerCase();
+                }
+                var extra = (item.getAttribute('data-search') || '').toLowerCase();
+                var haystack = (field + ' ' + label + ' ' + extra).trim();
+                var hayNorm = normalizeToolboxSearchText(haystack);
+                var match = haystack.indexOf(qRaw) >= 0 || (qNorm && hayNorm.indexOf(qNorm) >= 0);
+                if (match) {
+                    matchCount += 1;
+                    item.classList.remove('toolbox-search-hidden');
+                } else {
+                    item.classList.add('toolbox-search-hidden');
+                }
+            } catch (err) {
+                /* Keep chip visible if one item errors during filter. */
                 item.classList.remove('toolbox-search-hidden');
-            } else {
-                var match = field.indexOf(q) >= 0 || label.indexOf(q) >= 0;
-                if (match) item.classList.remove('toolbox-search-hidden');
-                else item.classList.add('toolbox-search-hidden');
+                matchCount += 1;
             }
         });
+        panel.classList.toggle('has-no-search-matches', matchCount === 0);
+        try { panel.scrollTop = 0; } catch (eScroll) {}
     }
     document.querySelectorAll('.toolbox-tab').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -3028,9 +3468,22 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             stripes.style.display = 'block';
             stripes.style.visibility = 'visible';
         }
+        /* 82×38 uses direct-child SVG barcodes; other layouts draw into .barcode-stripes and keep placeholder SVGs hidden. */
+        var showDirectSvg = printWrap.classList.contains('barcode-inner-draggable')
+            || printWrap.classList.contains('barcode-82x38-barcode')
+            || (typeof is82x38TwoBoxPreset === 'function' && is82x38TwoBoxPreset());
         printWrap.querySelectorAll(':scope > svg.barcode-svg, :scope > svg.barcode-svg-box1, :scope > svg.barcode-svg-box2').forEach(function(s) {
-            s.style.setProperty('display', 'none', 'important');
-            s.style.setProperty('visibility', 'hidden', 'important');
+            if (showDirectSvg) {
+                s.style.setProperty('display', 'block', 'important');
+                s.style.setProperty('visibility', 'visible', 'important');
+                s.style.setProperty('width', '100%', 'important');
+                s.style.setProperty('height', '100%', 'important');
+                s.style.removeProperty('max-width');
+                s.style.removeProperty('max-height');
+            } else {
+                s.style.setProperty('display', 'none', 'important');
+                s.style.setProperty('visibility', 'hidden', 'important');
+            }
         });
         var qr = printWrap.querySelector('.qr-code-preview');
         if (qr) {
@@ -3211,6 +3664,11 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     function syncPropertiesPanelFromDroppedItem(el) {
         if (!el || !el.classList || !el.classList.contains('canvas-dropped-item')) return;
         document.querySelectorAll('.canvas-dropped-item').forEach(function(i) { i.classList.remove('selected'); });
+        /* Clear barcode graphic selection so arrow keys move this column, not the bars. */
+        document.querySelectorAll('.barcode-print-wrap, .barcode-inner-draggable').forEach(function(w) {
+            w.classList.remove('barcode-selected');
+        });
+        if (typeof syncBarcodeResizeHandleVisibility === 'function') syncBarcodeResizeHandleVisibility();
         el.classList.add('selected');
         var pp = document.getElementById('propPrefix');
         var ps = document.getElementById('propSuffix');
@@ -3226,6 +3684,11 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             document.querySelectorAll('.toolbox-field-item').forEach(function(t) {
                 t.classList.toggle('selected', t.getAttribute('data-field') === fn);
             });
+        }
+        if (el.classList.contains('canvas-white-strip')) {
+            syncWhiteStripPropsFromEl(el);
+        } else {
+            setWhiteStripPropsVisibility(false);
         }
     }
 
@@ -3270,10 +3733,12 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                     var fieldName = this.getAttribute('data-field');
                     var lp1 = document.getElementById('labelPreview1');
                     var lp2 = document.getElementById('labelPreview2');
-                    [lp1, lp2].forEach(function(cont) {
+                    var stripHost = get82x38StripHost();
+                    [lp1, lp2, stripHost].forEach(function(cont) {
                         if (!cont) return;
-                        var el = cont.querySelector('.canvas-dropped-item[data-field="' + fieldName + '"]');
-                        if (el) el.remove();
+                        cont.querySelectorAll('.canvas-dropped-item[data-field="' + fieldName + '"]').forEach(function(el) {
+                            el.remove();
+                        });
                     });
                     if (typeof syncToolboxHighlight === 'function') syncToolboxHighlight();
                     return;
@@ -3286,6 +3751,20 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 if (propPrefix) propPrefix.value = '';
                 if (propSuffix) propSuffix.value = '';
                 clearPaddingInputs();
+                setWhiteStripPropsVisibility(false);
+                /* Click StripLine → place on 82×38 outer sticker (where red marks are) */
+                var clickField = this.getAttribute('data-field') || '';
+                if (isStripLineField(clickField) && typeof is82x38TwoBoxPreset === 'function' && is82x38TwoBoxPreset()) {
+                    addStripLineTo82x38Sticker({});
+                }
+                if (isWhiteStripField(clickField)) {
+                    var activeBox = document.querySelector('#box2.barcode-selected, .barcode-preview-block.barcode-selected');
+                    var boxNumClick = (activeBox && activeBox.id === 'box2') ? 2 : 1;
+                    var wsHost = getWhiteStripPrintCanvas(boxNumClick);
+                    if (wsHost) {
+                        addWhiteStripToTarget(wsHost, 0, 0, { center: true, box: boxNumClick });
+                    }
+                }
             });
         });
     }
@@ -3518,11 +3997,12 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 svg.style.setProperty('width', '0', 'important');
                 svg.style.setProperty('height', '0', 'important');
             } else {
-                svg.style.width = '100%';
-                svg.style.height = '100%';
+                svg.style.setProperty('display', 'block', 'important');
+                svg.style.setProperty('visibility', 'visible', 'important');
+                svg.style.setProperty('width', '100%', 'important');
+                svg.style.setProperty('height', '100%', 'important');
                 svg.style.maxWidth = '100%';
                 svg.style.maxHeight = '100%';
-                svg.style.display = 'block';
                 svg.style.margin = '0';
                 svg.style.padding = '0';
                 svg.removeAttribute('height');
@@ -3758,6 +4238,15 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 width_mm: bl.box2_barcode_width_mm,
                 height_mm: bl.box2_barcode_height_mm
             };
+            if (typeof collect82x38StickerStripLines === 'function') {
+                parsed.sticker_strip_lines = collect82x38StickerStripLines();
+            }
+            if (typeof collect82x38StickerWhiteStrips === 'function') {
+                parsed.sticker_white_strips = collect82x38StickerWhiteStrips();
+            }
+            if (typeof collect82x38HalfStripFields === 'function') {
+                parsed.sticker_half_strip_fields = collect82x38HalfStripFields();
+            }
             if (typeof currentCodeType !== 'undefined' && currentCodeType === 'qr') {
                 var qw = parseInt(document.getElementById('propQrWidth') && document.getElementById('propQrWidth').value, 10);
                 var qh = parseInt(document.getElementById('propQrHeight') && document.getElementById('propQrHeight').value, 10);
@@ -3940,7 +4429,103 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         apply82x38BoxLayoutMm(block1, bl.box1_left_mm, bl.box1_top_mm, bl.box_width_mm, bl.box_height_mm);
         apply82x38BoxLayoutMm(block2, bl.box2_left_mm, bl.box2_top_mm, bl.box_width_mm, bl.box_height_mm);
         ensure82x38BoxHorizontalLines();
+        ensure82x38FixedHalfWhiteStrips();
         remove82x38OuterCmRuler();
+    }
+    /** Always show fixed half white strips on 82×38 (top-left + bottom-right). */
+    function get82x38HalfStripGeometry(slot) {
+        if (slot === 'bottom-right') {
+            return { left: 20, top: 30.6, width: 62, height: 4.5 };
+        }
+        return { left: 0, top: 5, width: 62, height: 4.5 };
+    }
+    function is82x38HalfStripContainer(el) {
+        return !!(el && el.classList && el.classList.contains('barcode-82x38-fixed-half-strip'));
+    }
+    function get82x38HalfStripAtPoint(clientX, clientY) {
+        if (!is82x38TwoBoxPreset()) return null;
+        var strips = document.querySelectorAll('.barcode-82x38-fixed-half-strip');
+        for (var i = 0; i < strips.length; i++) {
+            var r = strips[i].getBoundingClientRect();
+            if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+                return strips[i];
+            }
+        }
+        return null;
+    }
+    function bind82x38HalfStripDrop(stripEl) {
+        if (!stripEl || stripEl.getAttribute('data-drop-bound') === '1') return;
+        stripEl.setAttribute('data-drop-bound', '1');
+        stripEl.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = (e.dataTransfer.types.indexOf('application/x-canvas-item') >= 0) ? 'move' : 'copy';
+            stripEl.classList.add('drag-over');
+        });
+        stripEl.addEventListener('dragleave', function(e) {
+            if (!stripEl.contains(e.relatedTarget)) stripEl.classList.remove('drag-over');
+        });
+        stripEl.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            stripEl.classList.remove('drag-over');
+            handleDrop(e, stripEl.getBoundingClientRect(), stripEl);
+        });
+    }
+    function ensure82x38FixedHalfWhiteStrips() {
+        if (!is82x38TwoBoxPreset()) {
+            var existingOff = document.getElementById('barcode82x38FixedStrips');
+            if (existingOff) existingOff.style.display = 'none';
+            return;
+        }
+        var shell = document.getElementById('barcodeDualStickerShell');
+        if (!shell) return;
+        var host = document.getElementById('barcode82x38FixedStrips');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'barcode82x38FixedStrips';
+            host.className = 'barcode-82x38-fixed-strips';
+            host.setAttribute('aria-hidden', 'true');
+            host.title = 'Fixed half white strips';
+            var labels = document.getElementById('barcodeLabelsContainer');
+            if (labels && labels.parentNode === shell) {
+                shell.insertBefore(host, labels);
+            } else {
+                shell.insertBefore(host, shell.firstChild);
+            }
+        }
+        host.style.display = 'block';
+        host.setAttribute('aria-hidden', 'false');
+        /* Keep only the two fixed half strips; remove leftovers. */
+        host.querySelectorAll('.barcode-82x38-fixed-half-strip').forEach(function(el) {
+            var key = el.getAttribute('data-fixed-half-strip');
+            if (key !== 'top-left' && key !== 'bottom-right') el.remove();
+        });
+        function ensureOne(cls, key, title, leftMm, topMm, widthMm, heightMm) {
+            var el = host.querySelector('[data-fixed-half-strip="' + key + '"]');
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'barcode-82x38-fixed-half-strip ' + cls;
+                el.setAttribute('data-fixed-half-strip', key);
+                el.title = title;
+                host.appendChild(el);
+            } else {
+                el.className = 'barcode-82x38-fixed-half-strip ' + cls;
+            }
+            el.style.setProperty('left', leftMm + 'mm', 'important');
+            el.style.setProperty('top', topMm + 'mm', 'important');
+            el.style.setProperty('width', widthMm + 'mm', 'important');
+            el.style.setProperty('height', heightMm + 'mm', 'important');
+            el.style.setProperty('background', '#ffffff', 'important');
+            el.style.setProperty('background-color', '#ffffff', 'important');
+            el.style.setProperty('display', 'block', 'important');
+            el.style.setProperty('border', '1px dashed #64748b', 'important');
+            el.style.setProperty('pointer-events', 'auto', 'important');
+            bind82x38HalfStripDrop(el);
+        }
+        /* Single top strip + single bottom strip (no mid duplicates). */
+        ensureOne('barcode-82x38-fixed-half-strip--top-left', 'top-left', 'Half white strip (top-left) — drop columns here', 0, 5, 62, 4.5);
+        ensureOne('barcode-82x38-fixed-half-strip--bottom-right', 'bottom-right', 'Half white strip (bottom) — drop columns here', 20, 30.6, 62, 4.5);
     }
     function remove82x38OuterCmRuler() {
         document.querySelectorAll('.barcode-82x38-outer-scale').forEach(function(el) { el.remove(); });
@@ -4892,41 +5477,258 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                         var isLabel2 = function(c) { return c === labelCanvas2 || c === labelPreview2; };
                         if ((isLabel1(oldContainer) || isLabel2(oldContainer)) && (isLabel1(container) || isLabel2(container))) {
                             var fn = moving.getAttribute('data-field');
-                            var defLeft = 25, defTop = 40;
-                            createDroppedItem(fn, defLeft + 10, defTop + 10, oldContainer, {
-                                prefix: moving.getAttribute('data-prefix'),
-                                suffix: moving.getAttribute('data-suffix'),
-                                font: moving.getAttribute('data-font'),
-                                font_size: moving.getAttribute('data-font-size')
-                            });
+                            if (!isStripLineField(fn) && !isWhiteStripField(fn) && !moving.classList.contains('canvas-white-strip')) {
+                                var defLeft = 25, defTop = 40;
+                                createDroppedItem(fn, defLeft + 10, defTop + 10, oldContainer, {
+                                    prefix: moving.getAttribute('data-prefix'),
+                                    suffix: moving.getAttribute('data-suffix'),
+                                    font: moving.getAttribute('data-font'),
+                                    font_size: moving.getAttribute('data-font-size')
+                                });
+                            }
                         }
                     }
                 }
-                moving.style.left = (left - 10) + 'px';
-                moving.style.top = (top - 10) + 'px';
+                if (isStripLineField(moving.getAttribute('data-field')) || moving.classList.contains('canvas-strip-line')) {
+                    if (moving.getAttribute('data-strip-scope') === 'sticker' || moving.classList.contains('canvas-strip-line-sticker') || is82x38TwoBoxPreset()) {
+                        var shellMove = document.getElementById('barcodeDualStickerShell');
+                        var hostMove = get82x38StripHost();
+                        if (hostMove && moving.parentElement !== hostMove) {
+                            hostMove.appendChild(moving);
+                        }
+                        var scMove = get82x38StickerMmScale();
+                        var topMmMove = 6;
+                        if (shellMove) {
+                            var sr = shellMove.getBoundingClientRect();
+                            topMmMove = clampMmGlobal((e.clientY - sr.top) * scMove.pxToMmY, 38);
+                        }
+                        moving.style.left = '0px';
+                        moving.style.top = Math.round(topMmMove * scMove.mmToPxY) + 'px';
+                        moving.style.width = Math.round(82 * scMove.mmToPxX) + 'px';
+                        moving.classList.add('canvas-strip-line-sticker');
+                        moving.setAttribute('data-strip-scope', 'sticker');
+                    } else {
+                        var moveContW = (container && container.clientWidth > 0) ? container.clientWidth : 120;
+                        moving.style.left = '2px';
+                        moving.style.top = Math.max(0, top - 5) + 'px';
+                        if (!moving.style.width) moving.style.width = Math.max(24, moveContW - 4) + 'px';
+                    }
+                } else if (moving.classList.contains('canvas-white-strip') || isWhiteStripField(moving.getAttribute('data-field'))) {
+                    var wsTarget = resolveWhiteStripDropTarget(e.clientX, e.clientY, container) || container;
+                    if (wsTarget && moving.parentElement !== wsTarget
+                        && (wsTarget.id === 'labelCanvas1' || wsTarget.id === 'labelCanvas2' || wsTarget.id === 'labelPreview1' || wsTarget.id === 'labelPreview2')) {
+                        wsTarget.appendChild(moving);
+                        container = wsTarget;
+                    }
+                    var tr = container.getBoundingClientRect();
+                    var nl = Math.round(e.clientX - tr.left - moving.offsetWidth / 2);
+                    var nt = Math.round(e.clientY - tr.top - moving.offsetHeight / 2);
+                    moving.style.left = Math.max(0, nl) + 'px';
+                    moving.style.top = Math.max(0, nt) + 'px';
+                    moving.setAttribute('data-box', String(getWhiteStripBoxNumFromContainer(container)));
+                    clampWhiteStripInParent(moving);
+                    syncWhiteStripPropsFromEl(moving);
+                } else if (is82x38HalfStripContainer(container) || (moving.getAttribute('data-strip-slot') && get82x38HalfStripAtPoint(e.clientX, e.clientY))) {
+                    var hsMove = is82x38HalfStripContainer(container) ? container : get82x38HalfStripAtPoint(e.clientX, e.clientY);
+                    if (hsMove && moving.parentElement !== hsMove) {
+                        hsMove.appendChild(moving);
+                        container = hsMove;
+                    }
+                    if (hsMove) {
+                        var hsr = hsMove.getBoundingClientRect();
+                        moving.style.left = Math.max(0, Math.round(e.clientX - hsr.left - 6)) + 'px';
+                        moving.style.top = Math.max(0, Math.round(e.clientY - hsr.top - 6)) + 'px';
+                        moving.setAttribute('data-strip-slot', hsMove.getAttribute('data-fixed-half-strip') || 'top-left');
+                        clampDroppedItemInHalfStrip(moving, hsMove);
+                    }
+                } else {
+                    moving.style.left = (left - 10) + 'px';
+                    moving.style.top = (top - 10) + 'px';
+                }
             }
             return;
         }
 
         var fieldName = e.dataTransfer.getData('text/plain');
         if (fieldName) {
+            /* 82×38 half strips: drop columns (CompanyName, Qty, Wt, …) onto the white strip bands */
+            var halfStripTarget = is82x38HalfStripContainer(container) ? container : get82x38HalfStripAtPoint(e.clientX, e.clientY);
+            if (halfStripTarget && !isStripLineField(fieldName) && !isWhiteStripField(fieldName) && is82x38TwoBoxPreset()) {
+                var hsRect = halfStripTarget.getBoundingClientRect();
+                var hsLeft = e.clientX - hsRect.left;
+                var hsTop = e.clientY - hsRect.top;
+                halfStripTarget.querySelectorAll('.canvas-dropped-item[data-field="' + fieldName + '"]').forEach(function(el, i) {
+                    if (i > 0) el.remove();
+                });
+                var existingHs = halfStripTarget.querySelector('.canvas-dropped-item[data-field="' + fieldName + '"]');
+                if (existingHs) {
+                    existingHs.style.left = Math.max(0, hsLeft - 6) + 'px';
+                    existingHs.style.top = '0px';
+                    clampDroppedItemInHalfStrip(existingHs, halfStripTarget);
+                    syncPropertiesPanelFromDroppedItem(existingHs);
+                } else {
+                    var newHs = createDroppedItem(fieldName, hsLeft, 0, halfStripTarget, {
+                        font_size: (document.getElementById('propFontSize') && document.getElementById('propFontSize').value) || '8'
+                    });
+                    if (newHs) {
+                        newHs.setAttribute('data-strip-slot', halfStripTarget.getAttribute('data-fixed-half-strip') || 'top-left');
+                        newHs.style.top = '0px';
+                        clampDroppedItemInHalfStrip(newHs, halfStripTarget);
+                        syncPropertiesPanelFromDroppedItem(newHs);
+                    }
+                }
+                syncToolboxHighlight();
+                clearBarcodeDragDecorations();
+                clearBarcodeSelection();
+                return;
+            }
+            /* 82×38: StripLine goes on the outer sticker (red-mark zones), not inside the green boxes */
+            if (isStripLineField(fieldName) && is82x38TwoBoxPreset()) {
+                var shell = document.getElementById('barcodeDualStickerShell');
+                var host = get82x38StripHost();
+                var scDrop = get82x38StickerMmScale();
+                var topMmDrop = 6;
+                if (shell) {
+                    var shellRect = shell.getBoundingClientRect();
+                    topMmDrop = clampMmGlobal((e.clientY - shellRect.top) * scDrop.pxToMmY, 38);
+                } else if (rect && rect.top != null) {
+                    topMmDrop = clampMmGlobal((e.clientY - rect.top) * scDrop.pxToMmY, 38);
+                }
+                addStripLineTo82x38Sticker({ top_mm: topMmDrop, left_mm: 0, width_mm: 82 });
+                syncToolboxHighlight();
+                clearBarcodeDragDecorations();
+                clearBarcodeSelection();
+                return;
+            }
+            /* White Strip: create inside the barcode print box under the pointer */
+            if (isWhiteStripField(fieldName)) {
+                var wsContainer = resolveWhiteStripDropTarget(e.clientX, e.clientY, container) || getWhiteStripPrintCanvas(1);
+                var wsRect = wsContainer.getBoundingClientRect();
+                var dropL = e.clientX - wsRect.left;
+                var dropT = e.clientY - wsRect.top;
+                var newWs = addWhiteStripToTarget(wsContainer, dropL, dropT, {
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    box: getWhiteStripBoxNumFromContainer(wsContainer)
+                });
+                if (newWs) syncPropertiesPanelFromDroppedItem(newWs);
+                syncToolboxHighlight();
+                clearBarcodeDragDecorations();
+                clearBarcodeSelection();
+                return;
+            }
             container.querySelectorAll('.canvas-dropped-item[data-field="' + fieldName + '"]').forEach(function(el, i) {
                 if (i > 0) el.remove();
             });
             var existingDrop = container.querySelector('.canvas-dropped-item[data-field="' + fieldName + '"]');
             if (existingDrop) {
-                existingDrop.style.left = (left - 10) + 'px';
-                existingDrop.style.top = (top - 10) + 'px';
+                if (isStripLineField(fieldName) || existingDrop.classList.contains('canvas-strip-line')) {
+                    var existContW = (container && container.clientWidth > 0) ? container.clientWidth : 120;
+                    existingDrop.style.left = '2px';
+                    existingDrop.style.top = Math.max(0, top - 5) + 'px';
+                    existingDrop.style.width = Math.max(24, existContW - 4) + 'px';
+                } else {
+                    existingDrop.style.left = (left - 10) + 'px';
+                    existingDrop.style.top = (top - 10) + 'px';
+                }
                 syncPropertiesPanelFromDroppedItem(existingDrop);
             } else {
                 var newEl = createDroppedItem(fieldName, left, top, container);
                 syncPropertiesPanelFromDroppedItem(newEl);
-                addFieldToOtherBlock(fieldName, container, newEl.getAttribute('data-prefix'), newEl.getAttribute('data-suffix'), newEl.getAttribute('data-font'), newEl.getAttribute('data-font-size'), newEl.getAttribute('data-pad-top'), newEl.getAttribute('data-pad-right'), newEl.getAttribute('data-pad-bottom'), newEl.getAttribute('data-pad-left'));
+                if (!(isStripLineField(fieldName) && is82x38TwoBoxPreset()) && !is82x38HalfStripContainer(container)) {
+                    addFieldToOtherBlock(fieldName, container, newEl.getAttribute('data-prefix'), newEl.getAttribute('data-suffix'), newEl.getAttribute('data-font'), newEl.getAttribute('data-font-size'), newEl.getAttribute('data-pad-top'), newEl.getAttribute('data-pad-right'), newEl.getAttribute('data-pad-bottom'), newEl.getAttribute('data-pad-left'));
+                }
             }
             syncToolboxHighlight();
         }
         clearBarcodeDragDecorations();
         clearBarcodeSelection();
+    }
+
+    function clampDroppedItemInHalfStrip(el, stripEl) {
+        if (!el || !stripEl) return;
+        var pw = stripEl.clientWidth || 0;
+        var ph = stripEl.clientHeight || 0;
+        if (pw <= 0 || ph <= 0) return;
+        var left = parseInt(el.style.left, 10); if (isNaN(left)) left = 0;
+        var top = parseInt(el.style.top, 10); if (isNaN(top)) top = 0;
+        var w = el.offsetWidth || 40;
+        var h = el.offsetHeight || 12;
+        left = Math.max(0, Math.min(left, Math.max(0, pw - Math.min(w, pw))));
+        top = Math.max(0, Math.min(top, Math.max(0, ph - Math.min(h, ph))));
+        el.style.left = Math.round(left) + 'px';
+        el.style.top = Math.round(top) + 'px';
+    }
+    function collect82x38HalfStripFields() {
+        var out = [];
+        if (!is82x38TwoBoxPreset()) return out;
+        document.querySelectorAll('.barcode-82x38-fixed-half-strip').forEach(function(strip) {
+            var slot = strip.getAttribute('data-fixed-half-strip') || 'top-left';
+            var geo = get82x38HalfStripGeometry(slot);
+            var sw = strip.clientWidth > 0 ? strip.clientWidth : Math.max(1, geo.width * MM_TO_PX);
+            var sh = strip.clientHeight > 0 ? strip.clientHeight : Math.max(1, geo.height * MM_TO_PX);
+            var pxToMmX = geo.width / sw;
+            var pxToMmY = geo.height / sh;
+            strip.querySelectorAll('.canvas-dropped-item').forEach(function(item) {
+                if (isStripLineField(item.getAttribute('data-field')) || item.classList.contains('canvas-strip-line')) return;
+                if (isWhiteStripField(item.getAttribute('data-field')) || item.classList.contains('canvas-white-strip')) return;
+                var left = parseInt(item.style.left, 10); if (isNaN(left)) left = 0;
+                var top = parseInt(item.style.top, 10); if (isNaN(top)) top = 0;
+                out.push({
+                    type: 'text',
+                    strip: slot,
+                    field: item.getAttribute('data-field') || '',
+                    left: Math.round(left * pxToMmX * 100) / 100,
+                    top: Math.round(top * pxToMmY * 100) / 100,
+                    prefix: item.getAttribute('data-prefix') || '',
+                    suffix: item.getAttribute('data-suffix') || '',
+                    font: item.getAttribute('data-font') || 'Arial',
+                    font_size: parseInt(item.getAttribute('data-font-size'), 10) || 8
+                });
+            });
+        });
+        return out;
+    }
+    function restore82x38HalfStripFields(parsed) {
+        if (!is82x38TwoBoxPreset()) return;
+        ensure82x38FixedHalfWhiteStrips();
+        document.querySelectorAll('.barcode-82x38-fixed-half-strip .canvas-dropped-item').forEach(function(el) {
+            el.remove();
+        });
+        var fields = [];
+        if (parsed && Array.isArray(parsed.sticker_half_strip_fields)) {
+            fields = parsed.sticker_half_strip_fields;
+        } else if (parsed && Array.isArray(parsed.half_strip_fields)) {
+            fields = parsed.half_strip_fields;
+        }
+        fields.forEach(function(it) {
+            if (!it || !it.field) return;
+            if (isStripLineField(it.field) || isWhiteStripField(it.field)) return;
+            var slot = it.strip || it.slot || 'top-left';
+            if (slot === 'mid-lower') slot = 'bottom-right';
+            var strip = document.querySelector('.barcode-82x38-fixed-half-strip[data-fixed-half-strip="' + slot + '"]');
+            if (!strip) return;
+            var geo = get82x38HalfStripGeometry(slot);
+            var sw = strip.clientWidth > 0 ? strip.clientWidth : Math.max(1, geo.width * MM_TO_PX);
+            var sh = strip.clientHeight > 0 ? strip.clientHeight : Math.max(1, geo.height * MM_TO_PX);
+            var mmToPxX = sw / geo.width;
+            var mmToPxY = sh / geo.height;
+            var leftPx = Math.round((parseFloat(it.left) || 0) * mmToPxX);
+            var topPx = Math.round((parseFloat(it.top) || 0) * mmToPxY);
+            var el = createDroppedItem(it.field, leftPx + 10, topPx + 10, strip, {
+                restore: true,
+                left: leftPx,
+                top: topPx,
+                prefix: it.prefix,
+                suffix: it.suffix,
+                font: it.font,
+                font_size: it.font_size != null ? it.font_size : 8
+            });
+            if (el) {
+                el.setAttribute('data-strip-slot', slot);
+                clampDroppedItemInHalfStrip(el, strip);
+            }
+        });
     }
 
     function isBarcodeGraphicClickTarget(el) {
@@ -4938,6 +5740,9 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         if (dropLayer) dropLayer.classList.remove('drag-over');
         document.querySelectorAll('.barcode-white-drop-zone').forEach(function(z) {
             z.classList.remove('drag-over', 'dragging-active');
+        });
+        document.querySelectorAll('.barcode-82x38-fixed-half-strip').forEach(function(z) {
+            z.classList.remove('drag-over');
         });
         document.body.classList.remove('is-barcode-dragging');
         [labelCanvas1, labelCanvas2].forEach(function(c) {
@@ -5002,7 +5807,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     
     function syncToolboxHighlight() {
         var onLabelFields = {};
-        [labelPreview1, labelPreview2].forEach(function(cont) {
+        [labelPreview1, labelPreview2, get82x38StripHost(), document.getElementById('barcode82x38FixedStrips')].forEach(function(cont) {
             if (!cont) return;
             cont.querySelectorAll('.canvas-dropped-item').forEach(function(item) {
                 var f = item.getAttribute('data-field');
@@ -5022,6 +5827,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     }
     
     function addFieldToOtherBlock(fieldName, sourceContainer, prefix, suffix, font, fontSize, padTop, padRight, padBottom, padLeft) {
+        if (isStripLineField(fieldName) || isWhiteStripField(fieldName)) return;
         if (!isSecondBlockVisible()) return;
         var otherContainer = (sourceContainer === labelCanvas1 || sourceContainer === labelPreview1) ? (labelCanvas2 || labelPreview2) : (labelCanvas1 || labelPreview1);
         if (otherContainer.querySelector('.canvas-dropped-item[data-field="' + fieldName + '"]')) return;
@@ -5040,6 +5846,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     }
     
     function removeFieldFromOtherBlock(fieldName, fromContainer) {
+        if (is82x38HalfStripContainer(fromContainer)) return;
         var otherContainer = (fromContainer === labelCanvas1 || fromContainer === labelPreview1) ? (labelCanvas2 || labelPreview2) : (labelCanvas1 || labelPreview1);
         if (!otherContainer) return;
         var other = otherContainer.querySelector('.canvas-dropped-item[data-field="' + fieldName + '"]');
@@ -5066,15 +5873,575 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         }
     })();
     
+    function isStripLineField(fieldName) {
+        return String(fieldName || '').toLowerCase() === 'stripline';
+    }
+    function get82x38StripHost() {
+        return document.getElementById('barcode82x38StripLayer')
+            || document.getElementById('barcodeDualStickerShell');
+    }
+    function get82x38StickerMmScale() {
+        var host = get82x38StripHost() || document.getElementById('barcodeDualStickerShell');
+        var w = (host && host.clientWidth > 0) ? host.clientWidth : Math.round(82 * MM_TO_PX);
+        var h = (host && host.clientHeight > 0) ? host.clientHeight : Math.round(38 * MM_TO_PX);
+        return {
+            mmW: 82,
+            mmH: 38,
+            pxToMmX: 82 / w,
+            pxToMmY: 38 / h,
+            mmToPxX: w / 82,
+            mmToPxY: h / 38,
+            hostW: w,
+            hostH: h
+        };
+    }
+    function next82x38StripTopMm() {
+        var host = get82x38StripHost();
+        var count = host ? host.querySelectorAll('.canvas-strip-line').length : 0;
+        /* Defaults match typical empty zones on 82×38 (top band + mid fold). */
+        var defaults = [6, 19, 28];
+        return defaults[Math.min(count, defaults.length - 1)];
+    }
+    function addStripLineTo82x38Sticker(opts) {
+        opts = opts || {};
+        if (!is82x38TwoBoxPreset()) return null;
+        var host = get82x38StripHost();
+        if (!host) return null;
+        var sc = get82x38StickerMmScale();
+        var topMm = opts.top_mm != null ? parseFloat(opts.top_mm) : next82x38StripTopMm();
+        if (isNaN(topMm)) topMm = next82x38StripTopMm();
+        topMm = Math.max(0, Math.min(36, topMm));
+        var leftMm = opts.left_mm != null ? parseFloat(opts.left_mm) : 0;
+        if (isNaN(leftMm)) leftMm = 0;
+        var widthMm = opts.width_mm != null ? parseFloat(opts.width_mm) : 82;
+        if (isNaN(widthMm) || widthMm < 2) widthMm = 82;
+        widthMm = Math.max(2, Math.min(82 - leftMm, widthMm));
+        var leftPx = Math.round(leftMm * sc.mmToPxX);
+        var topPx = Math.round(topMm * sc.mmToPxY);
+        var widthPx = Math.round(widthMm * sc.mmToPxX);
+        var el = createDroppedItem('StripLine', leftPx, topPx, host, {
+            restore: true,
+            left: leftPx,
+            top: topPx,
+            width: widthPx,
+            prefix: '',
+            suffix: '',
+            skipOtherBlock: true
+        });
+        if (el) {
+            el.classList.add('canvas-strip-line-sticker');
+            el.setAttribute('data-strip-scope', 'sticker');
+            syncPropertiesPanelFromDroppedItem(el);
+            syncToolboxHighlight();
+        }
+        return el;
+    }
+    function collect82x38StickerStripLines() {
+        var host = get82x38StripHost();
+        if (!host || !is82x38TwoBoxPreset()) return [];
+        var sc = get82x38StickerMmScale();
+        var out = [];
+        host.querySelectorAll('.canvas-strip-line').forEach(function(item) {
+            var left = parseInt(item.style.left, 10);
+            var top = parseInt(item.style.top, 10);
+            var wPx = parseInt(item.style.width, 10);
+            if (isNaN(left)) left = 0;
+            if (isNaN(top)) top = 0;
+            if (isNaN(wPx) || wPx < 8) wPx = item.offsetWidth || sc.hostW;
+            out.push({
+                type: 'strip_line',
+                field: 'StripLine',
+                scope: 'sticker',
+                left: clampMmGlobal(left * sc.pxToMmX, 82),
+                top: clampMmGlobal(top * sc.pxToMmY, 38),
+                width: clampMmGlobal(wPx * sc.pxToMmX, 82)
+            });
+        });
+        return out;
+    }
+    function restore82x38StickerStripLines(parsed) {
+        var host = get82x38StripHost();
+        if (!host || !is82x38TwoBoxPreset()) return;
+        host.querySelectorAll('.canvas-strip-line').forEach(function(el) { el.remove(); });
+        var lines = [];
+        if (parsed && Array.isArray(parsed.sticker_strip_lines)) {
+            lines = parsed.sticker_strip_lines;
+        } else if (parsed && Array.isArray(parsed.strip_lines)) {
+            lines = parsed.strip_lines;
+        }
+        lines.forEach(function(it) {
+            if (!it) return;
+            addStripLineTo82x38Sticker({
+                top_mm: it.top != null ? it.top : it.top_mm,
+                left_mm: it.left != null ? it.left : it.left_mm,
+                width_mm: it.width != null ? it.width : it.width_mm
+            });
+        });
+    }
+
+    function isWhiteStripField(fieldName) {
+        var f = String(fieldName || '').toLowerCase().replace(/\s+/g, '');
+        return f === 'whitestrip' || f === 'blankstrip' || f === 'whitestripblank';
+    }
+    function isWhiteStripType(it) {
+        if (!it) return false;
+        var t = String(it.type || '').toLowerCase().replace(/\s+/g, '');
+        return t === 'white_strip' || t === 'whitestrip' || isWhiteStripField(it.field);
+    }
+    function showWhiteStripToast(msg) {
+        var t = document.getElementById('barcodeWsToast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'barcodeWsToast';
+            t.className = 'barcode-ws-toast';
+            document.body.appendChild(t);
+        }
+        t.textContent = msg || 'White Strip added';
+        t.classList.add('is-visible');
+        clearTimeout(showWhiteStripToast._timer);
+        showWhiteStripToast._timer = setTimeout(function() { t.classList.remove('is-visible'); }, 1800);
+    }
+    function getWhiteStripBoxNumFromContainer(container) {
+        if (!container) return 1;
+        if (container.id === 'labelCanvas2' || container.id === 'labelPreview2' || (container.closest && container.closest('#box2'))) return 2;
+        return 1;
+    }
+    function getWhiteStripPrintCanvas(boxNum) {
+        boxNum = boxNum === 2 ? 2 : 1;
+        if (boxNum === 2) return labelCanvas2 || document.getElementById('labelCanvas2') || labelPreview2 || document.getElementById('labelPreview2');
+        return labelCanvas1 || document.getElementById('labelCanvas1') || labelPreview1 || document.getElementById('labelPreview1');
+    }
+    function resolveWhiteStripDropTarget(clientX, clientY, fallbackContainer) {
+        var el = document.elementFromPoint(clientX, clientY);
+        if (el) {
+            var c2 = el.closest && (el.closest('#labelCanvas2') || el.closest('#box2') || el.closest('#labelPreview2'));
+            if (c2) return getWhiteStripPrintCanvas(2);
+            var c1 = el.closest && (el.closest('#labelCanvas1') || el.closest('#box1') || el.closest('#labelPreview1'));
+            if (c1) return getWhiteStripPrintCanvas(1);
+        }
+        var b2 = document.getElementById('box2');
+        if (b2 && b2.style.display !== 'none') {
+            var r2 = b2.getBoundingClientRect();
+            if (clientX >= r2.left && clientX <= r2.right && clientY >= r2.top && clientY <= r2.bottom) {
+                return getWhiteStripPrintCanvas(2);
+            }
+        }
+        var b1 = document.getElementById('box1');
+        if (b1) {
+            var r1 = b1.getBoundingClientRect();
+            if (clientX >= r1.left && clientX <= r1.right && clientY >= r1.top && clientY <= r1.bottom) {
+                return getWhiteStripPrintCanvas(1);
+            }
+        }
+        if (fallbackContainer && (fallbackContainer.id === 'labelCanvas1' || fallbackContainer.id === 'labelCanvas2'
+            || fallbackContainer.id === 'labelPreview1' || fallbackContainer.id === 'labelPreview2')) {
+            return fallbackContainer.id.indexOf('2') >= 0 ? getWhiteStripPrintCanvas(2) : getWhiteStripPrintCanvas(1);
+        }
+        var selectedBox = document.querySelector('.barcode-preview-block.barcode-selected, #box1.barcode-selected, #box2.barcode-selected');
+        if (selectedBox && selectedBox.id === 'box2') return getWhiteStripPrintCanvas(2);
+        return getWhiteStripPrintCanvas(1);
+    }
+    function clampWhiteStripInParent(el) {
+        if (!el || !el.parentElement) return;
+        var parent = el.parentElement;
+        var pw = parent.clientWidth || 0;
+        var ph = parent.clientHeight || 0;
+        if (pw <= 0 || ph <= 0) return;
+        var left = parseInt(el.style.left, 10); if (isNaN(left)) left = 0;
+        var top = parseInt(el.style.top, 10); if (isNaN(top)) top = 0;
+        var w = parseInt(el.style.width, 10); if (isNaN(w) || w < 10) w = Math.min(250, Math.max(10, pw - 4));
+        var h = parseInt(el.style.height, 10); if (isNaN(h) || h < 5) h = Math.min(40, Math.max(5, ph - 4));
+        w = Math.min(w, pw);
+        h = Math.min(h, ph);
+        left = Math.max(0, Math.min(left, pw - w));
+        top = Math.max(0, Math.min(top, ph - h));
+        el.style.left = Math.round(left) + 'px';
+        el.style.top = Math.round(top) + 'px';
+        el.style.width = Math.round(w) + 'px';
+        el.style.height = Math.round(h) + 'px';
+    }
+    function applyWhiteStripStyle(el) {
+        if (!el || !el.classList.contains('canvas-white-strip')) return;
+        var bg = el.getAttribute('data-bg') || el.getAttribute('data-background-color') || '#FFFFFF';
+        var borderEnabled = el.getAttribute('data-border-enabled') === '1' || el.getAttribute('data-border-enabled') === 'true';
+        var bc = el.getAttribute('data-border-color') || '#000000';
+        var bw = parseFloat(el.getAttribute('data-border-width'));
+        if (isNaN(bw)) bw = 0;
+        var br = parseFloat(el.getAttribute('data-border-radius'));
+        if (isNaN(br)) br = 0;
+        var op = parseFloat(el.getAttribute('data-opacity'));
+        if (isNaN(op)) op = 1;
+        var rot = parseFloat(el.getAttribute('data-rotation'));
+        if (isNaN(rot)) rot = 0;
+        var z = parseInt(el.getAttribute('data-z-index'), 10);
+        if (isNaN(z)) z = 5;
+        el.style.setProperty('background', bg, 'important');
+        el.style.setProperty('background-color', bg, 'important');
+        /* Print border only when enabled — designer uses CSS outline, not this border */
+        if (borderEnabled && bw > 0) {
+            el.style.setProperty('border', bw + 'px solid ' + bc, 'important');
+        } else {
+            el.style.setProperty('border', 'none', 'important');
+        }
+        el.style.borderRadius = br + 'px';
+        el.style.opacity = String(Math.max(0, Math.min(1, op)));
+        el.style.transform = rot ? ('rotate(' + rot + 'deg)') : 'none';
+        el.style.zIndex = String(z);
+        el.setAttribute('data-z-index', String(z));
+    }
+    function setWhiteStripPropsVisibility(show) {
+        document.querySelectorAll('.prop-row-white-strip').forEach(function(row) {
+            if (show) row.classList.add('is-visible');
+            else row.classList.remove('is-visible');
+        });
+    }
+    function syncWhiteStripPropsFromEl(el) {
+        if (!el || !el.classList.contains('canvas-white-strip')) {
+            setWhiteStripPropsVisibility(false);
+            return;
+        }
+        setWhiteStripPropsVisibility(true);
+        function setVal(id, v) {
+            var n = document.getElementById(id);
+            if (n) n.value = v;
+        }
+        setVal('propWhiteStripWidth', parseInt(el.style.width, 10) || el.offsetWidth || 250);
+        setVal('propWhiteStripHeight', parseInt(el.style.height, 10) || el.offsetHeight || 40);
+        setVal('propWhiteStripBg', el.getAttribute('data-bg') || '#ffffff');
+        setVal('propWhiteStripBorderEnabled', el.getAttribute('data-border-enabled') === '1' ? '1' : '0');
+        setVal('propWhiteStripBorderColor', el.getAttribute('data-border-color') || '#000000');
+        setVal('propWhiteStripBorderWidth', el.getAttribute('data-border-width') || '0');
+        setVal('propWhiteStripBorderRadius', el.getAttribute('data-border-radius') || '0');
+        setVal('propWhiteStripOpacity', el.getAttribute('data-opacity') || '1');
+        setVal('propWhiteStripRotation', el.getAttribute('data-rotation') || '0');
+        setVal('propWhiteStripZIndex', el.getAttribute('data-z-index') || '5');
+    }
+    function applyWhiteStripPropsToSelected() {
+        var sel = document.querySelector('.canvas-white-strip.selected');
+        if (!sel) return;
+        var w = parseInt(document.getElementById('propWhiteStripWidth') && document.getElementById('propWhiteStripWidth').value, 10);
+        var h = parseInt(document.getElementById('propWhiteStripHeight') && document.getElementById('propWhiteStripHeight').value, 10);
+        if (!isNaN(w) && w >= 10) sel.style.width = w + 'px';
+        if (!isNaN(h) && h >= 5) sel.style.height = h + 'px';
+        var bg = document.getElementById('propWhiteStripBg');
+        var be = document.getElementById('propWhiteStripBorderEnabled');
+        var bc = document.getElementById('propWhiteStripBorderColor');
+        var bw = document.getElementById('propWhiteStripBorderWidth');
+        var br = document.getElementById('propWhiteStripBorderRadius');
+        var op = document.getElementById('propWhiteStripOpacity');
+        var rot = document.getElementById('propWhiteStripRotation');
+        var zEl = document.getElementById('propWhiteStripZIndex');
+        if (bg) sel.setAttribute('data-bg', bg.value || '#FFFFFF');
+        if (be) sel.setAttribute('data-border-enabled', be.value === '1' ? '1' : '0');
+        if (bc) sel.setAttribute('data-border-color', bc.value || '#000000');
+        if (bw) sel.setAttribute('data-border-width', String(parseFloat(bw.value) || 0));
+        if (br) sel.setAttribute('data-border-radius', String(parseFloat(br.value) || 0));
+        if (op) sel.setAttribute('data-opacity', String(Math.max(0, Math.min(1, parseFloat(op.value)))));
+        if (rot) sel.setAttribute('data-rotation', String(parseFloat(rot.value) || 0));
+        if (zEl) sel.setAttribute('data-z-index', String(parseInt(zEl.value, 10) || 5));
+        applyWhiteStripStyle(sel);
+        clampWhiteStripInParent(sel);
+    }
+    function whiteStripMaxZ(container) {
+        var maxZ = 0;
+        (container || document).querySelectorAll('.canvas-white-strip').forEach(function(el) {
+            var z = parseInt(el.getAttribute('data-z-index'), 10);
+            if (!isNaN(z) && z > maxZ) maxZ = z;
+        });
+        return maxZ;
+    }
+    function whiteStripMinZ(container) {
+        var minZ = 9999;
+        var found = false;
+        (container || document).querySelectorAll('.canvas-white-strip').forEach(function(el) {
+            var z = parseInt(el.getAttribute('data-z-index'), 10);
+            if (!isNaN(z)) { found = true; if (z < minZ) minZ = z; }
+        });
+        return found ? minZ : 5;
+    }
+    function serializeWhiteStripEl(item, leftMm, topMm, widthMm, heightMm) {
+        var box = parseInt(item.getAttribute('data-box'), 10);
+        if (box !== 2) box = 1;
+        var op = parseFloat(item.getAttribute('data-opacity'));
+        if (isNaN(op)) op = 1;
+        var id = item.getAttribute('data-ws-id') || item.getAttribute('data-id') || ('white-strip-' + Date.now());
+        return {
+            id: id,
+            type: 'WhiteStrip',
+            field: 'WhiteStrip',
+            box: box,
+            x: leftMm,
+            y: topMm,
+            left: leftMm,
+            top: topMm,
+            width: widthMm,
+            height: heightMm,
+            backgroundColor: item.getAttribute('data-bg') || '#FFFFFF',
+            background_color: item.getAttribute('data-bg') || '#FFFFFF',
+            opacity: op,
+            rotation: parseFloat(item.getAttribute('data-rotation')) || 0,
+            borderEnabled: item.getAttribute('data-border-enabled') === '1',
+            border_enabled: item.getAttribute('data-border-enabled') === '1',
+            borderColor: item.getAttribute('data-border-color') || '#000000',
+            border_color: item.getAttribute('data-border-color') || '#000000',
+            borderWidth: parseFloat(item.getAttribute('data-border-width')) || 0,
+            border_width: parseFloat(item.getAttribute('data-border-width')) || 0,
+            borderRadius: parseFloat(item.getAttribute('data-border-radius')) || 0,
+            border_radius: parseFloat(item.getAttribute('data-border-radius')) || 0,
+            zIndex: parseInt(item.getAttribute('data-z-index'), 10) || 5,
+            z_index: parseInt(item.getAttribute('data-z-index'), 10) || 5
+        };
+    }
+    function bindWhiteStripResize(el) {
+        if (!el || el._wsResizeBound) return;
+        el._wsResizeBound = true;
+        el.querySelectorAll('.white-strip-resize-handle').forEach(function(handle) {
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var dir = handle.getAttribute('data-dir') || 'se';
+                var startX = e.clientX;
+                var startY = e.clientY;
+                var startL = parseInt(el.style.left, 10) || 0;
+                var startT = parseInt(el.style.top, 10) || 0;
+                var startW = el.offsetWidth;
+                var startH = el.offsetHeight;
+                var parent = el.parentElement;
+                var pw = parent ? parent.clientWidth : 9999;
+                var ph = parent ? parent.clientHeight : 9999;
+                function onMove(ev) {
+                    var dx = ev.clientX - startX;
+                    var dy = ev.clientY - startY;
+                    var left = startL, top = startT, w = startW, h = startH;
+                    if (dir.indexOf('e') >= 0) w = startW + dx;
+                    if (dir.indexOf('s') >= 0) h = startH + dy;
+                    if (dir.indexOf('w') >= 0) { w = startW - dx; left = startL + dx; }
+                    if (dir.indexOf('n') >= 0) { h = startH - dy; top = startT + dy; }
+                    w = Math.max(10, Math.min(w, pw));
+                    h = Math.max(5, Math.min(h, ph));
+                    left = Math.max(0, Math.min(left, pw - w));
+                    top = Math.max(0, Math.min(top, ph - h));
+                    el.style.left = Math.round(left) + 'px';
+                    el.style.top = Math.round(top) + 'px';
+                    el.style.width = Math.round(w) + 'px';
+                    el.style.height = Math.round(h) + 'px';
+                    syncWhiteStripPropsFromEl(el);
+                }
+                function onUp() {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.body.style.cursor = '';
+                    clampWhiteStripInParent(el);
+                }
+                document.body.style.cursor = handle.style.cursor || 'se-resize';
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+    function createWhiteStripItem(left, top, container, opts) {
+        opts = opts || {};
+        container = container || getWhiteStripPrintCanvas(opts.box || 1);
+        if (!container) return null;
+        /* Never place on outer sticker strip layer or grey grid */
+        if (container.id === 'barcode82x38StripLayer' || container.id === 'barcodeCanvasDrops' || container.id === 'barcodeDualStickerShell') {
+            container = getWhiteStripPrintCanvas(opts.box || 1);
+        }
+        if (!container) return null;
+        var boxNum = opts.box === 2 ? 2 : getWhiteStripBoxNumFromContainer(container);
+        var wsId = opts.id || ('white-strip-' + Date.now() + '-' + Math.floor(Math.random() * 10000));
+        var id = 'canvas-item-' + (++dropIdCounter);
+        var el = document.createElement('div');
+        el.className = 'canvas-dropped-item canvas-white-strip';
+        el.setAttribute('data-field', 'WhiteStrip');
+        el.setAttribute('data-id', id);
+        el.setAttribute('data-ws-id', wsId);
+        el.setAttribute('data-box', String(boxNum));
+        el.setAttribute('data-prefix', '');
+        el.setAttribute('data-suffix', '');
+        el.setAttribute('data-bg', opts.backgroundColor || opts.background_color || '#FFFFFF');
+        el.setAttribute('data-border-enabled', (opts.borderEnabled === true || opts.border_enabled === true || opts.borderEnabled === 1 || opts.borderEnabled === '1') ? '1' : '0');
+        el.setAttribute('data-border-color', opts.borderColor || opts.border_color || '#000000');
+        el.setAttribute('data-border-width', String(opts.borderWidth != null ? opts.borderWidth : (opts.border_width != null ? opts.border_width : 0)));
+        el.setAttribute('data-border-radius', String(opts.borderRadius != null ? opts.borderRadius : (opts.border_radius != null ? opts.border_radius : 0)));
+        el.setAttribute('data-opacity', String(opts.opacity != null && !isNaN(parseFloat(opts.opacity)) ? opts.opacity : 1));
+        el.setAttribute('data-rotation', String(opts.rotation != null ? opts.rotation : 0));
+        el.setAttribute('data-z-index', String(opts.zIndex != null ? opts.zIndex : (opts.z_index != null ? opts.z_index : 5)));
+        el.draggable = true;
+        var trashSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+        el.innerHTML = '<span class="canvas-item-remove" title="Remove">' + trashSvg + '</span>'
+            + '<span class="white-strip-resize-handle ws-handle-nw" data-dir="nw"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-n" data-dir="n"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-ne" data-dir="ne"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-e" data-dir="e"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-se" data-dir="se"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-s" data-dir="s"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-sw" data-dir="sw"></span>'
+            + '<span class="white-strip-resize-handle ws-handle-w" data-dir="w"></span>';
+        var contW = container.clientWidth > 0 ? container.clientWidth : 120;
+        var contH = container.clientHeight > 0 ? container.clientHeight : 80;
+        var defW = opts.width != null ? parseInt(opts.width, 10) : Math.min(250, Math.max(40, contW - 8));
+        var defH = opts.height != null ? parseInt(opts.height, 10) : Math.min(40, Math.max(16, Math.round(contH * 0.25)));
+        if (isNaN(defW) || defW < 10) defW = Math.min(250, Math.max(10, contW - 4));
+        if (isNaN(defH) || defH < 5) defH = Math.min(40, Math.max(5, contH - 4));
+        var leftPx, topPx;
+        if (opts.restore) {
+            leftPx = opts.left !== undefined ? opts.left : 0;
+            topPx = opts.top !== undefined ? opts.top : 0;
+        } else if (opts.center) {
+            leftPx = Math.max(0, Math.round((contW - defW) / 2));
+            topPx = Math.max(0, Math.round((contH - defH) / 2));
+        } else {
+            leftPx = Math.max(0, Math.round(left - defW / 2));
+            topPx = Math.max(0, Math.round(top - defH / 2));
+        }
+        el.style.left = leftPx + 'px';
+        el.style.top = topPx + 'px';
+        el.style.width = defW + 'px';
+        el.style.height = defH + 'px';
+        applyWhiteStripStyle(el);
+        container.appendChild(el);
+        clampWhiteStripInParent(el);
+        bindWhiteStripResize(el);
+        var rm = el.querySelector('.canvas-item-remove');
+        if (rm) {
+            rm.addEventListener('click', function(ev) {
+                ev.stopPropagation();
+                el.remove();
+                syncToolboxHighlight();
+                setWhiteStripPropsVisibility(false);
+            });
+        }
+        el.addEventListener('click', function(ev) {
+            if (ev.target.closest('.canvas-item-remove') || ev.target.closest('.white-strip-resize-handle')) return;
+            syncPropertiesPanelFromDroppedItem(el);
+        });
+        el.addEventListener('dragstart', function(e) {
+            e.dataTransfer.setData('application/x-canvas-item', id);
+            e.dataTransfer.effectAllowed = 'move';
+            e.stopPropagation();
+        });
+        el.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+        });
+        el.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var parent = el.parentElement;
+            var r = parent && parent.getBoundingClientRect ? parent.getBoundingClientRect() : getDropLayerRect();
+            handleDrop(e, r, parent || getWhiteStripPrintCanvas(1));
+        });
+        return el;
+    }
+    function collectWhiteStripItemsFromCanvas(canvasEl, mmW, mmH, pxToMmX, pxToMmY) {
+        var out = [];
+        if (!canvasEl) return out;
+        canvasEl.querySelectorAll('.canvas-white-strip').forEach(function(item) {
+            var left = parseInt(item.style.left, 10);
+            var top = parseInt(item.style.top, 10);
+            var wPx = parseInt(item.style.width, 10);
+            var hPx = parseInt(item.style.height, 10);
+            if (isNaN(left)) left = 0;
+            if (isNaN(top)) top = 0;
+            if (isNaN(wPx) || wPx < 10) wPx = item.offsetWidth || 40;
+            if (isNaN(hPx) || hPx < 5) hPx = item.offsetHeight || 20;
+            var leftMm = clampMmGlobal(left * pxToMmX, mmW);
+            var topMm = clampMmGlobal(top * pxToMmY, mmH);
+            var widthMm = clampMmGlobal(wPx * pxToMmX, mmW);
+            var heightMm = clampMmGlobal(hPx * pxToMmY, mmH);
+            var row = serializeWhiteStripEl(item, leftMm, topMm, widthMm, heightMm);
+            if (isNaN(row.opacity)) row.opacity = 1;
+            out.push(row);
+        });
+        return out;
+    }
+    function restoreWhiteStripItems(items, canvasEl, mmToPxX, mmToPxY) {
+        if (!items || !items.length || !canvasEl) return;
+        items.forEach(function(it) {
+            if (!isWhiteStripType(it)) return;
+            var leftMm = typeof it.left === 'number' ? it.left : (typeof it.x === 'number' ? it.x : (parseFloat(it.left || it.x) || 0));
+            var topMm = typeof it.top === 'number' ? it.top : (typeof it.y === 'number' ? it.y : (parseFloat(it.top || it.y) || 0));
+            var widthMm = typeof it.width === 'number' ? it.width : (parseFloat(it.width) || 0);
+            var heightMm = typeof it.height === 'number' ? it.height : (parseFloat(it.height) || 0);
+            var leftPx = Math.round(leftMm * mmToPxX);
+            var topPx = Math.round(topMm * mmToPxY);
+            var widthPx = widthMm > 0 ? Math.round(widthMm * mmToPxX) : Math.min(250, Math.max(40, (canvasEl.clientWidth || 200) - 8));
+            var heightPx = heightMm > 0 ? Math.round(heightMm * mmToPxY) : 40;
+            var target = canvasEl;
+            var boxNum = parseInt(it.box, 10);
+            if (boxNum === 1 || boxNum === 2) target = getWhiteStripPrintCanvas(boxNum) || canvasEl;
+            createWhiteStripItem(leftPx, topPx, target, {
+                restore: true,
+                id: it.id,
+                box: boxNum === 2 ? 2 : 1,
+                left: leftPx,
+                top: topPx,
+                width: widthPx,
+                height: heightPx,
+                backgroundColor: it.backgroundColor || it.background_color || '#FFFFFF',
+                borderEnabled: it.borderEnabled === true || it.border_enabled === true,
+                borderColor: it.borderColor || it.border_color || '#000000',
+                borderWidth: it.borderWidth != null ? it.borderWidth : (it.border_width != null ? it.border_width : 0),
+                borderRadius: it.borderRadius != null ? it.borderRadius : (it.border_radius != null ? it.border_radius : 0),
+                opacity: it.opacity != null && !isNaN(parseFloat(it.opacity)) ? parseFloat(it.opacity) : 1,
+                rotation: it.rotation != null ? it.rotation : 0,
+                zIndex: it.zIndex != null ? it.zIndex : (it.z_index != null ? it.z_index : 5)
+            });
+        });
+    }
+    /** @deprecated sticker-level white strips — kept for loading old saves into box 1 */
+    function collect82x38StickerWhiteStrips() {
+        return [];
+    }
+    function restore82x38StickerWhiteStrips(parsed) {
+        var host = get82x38StripHost();
+        if (host) host.querySelectorAll('.canvas-white-strip').forEach(function(el) { el.remove(); });
+        var list = [];
+        if (parsed && Array.isArray(parsed.sticker_white_strips)) list = parsed.sticker_white_strips;
+        else if (parsed && Array.isArray(parsed.white_strips)) list = parsed.white_strips;
+        if (!list.length) return;
+        /* Migrate old sticker-level strips into box 1 */
+        var canvas1 = getWhiteStripPrintCanvas(1);
+        if (!canvas1) return;
+        var sc = is82x38TwoBoxPreset() ? get82x38CanvasMmScale(canvas1) : { mmToPxX: MM_TO_PX, mmToPxY: MM_TO_PX };
+        list.forEach(function(it) {
+            if (!it) return;
+            it.box = 1;
+            restoreWhiteStripItems([it], canvas1, sc.mmToPxX, sc.mmToPxY);
+        });
+    }
+    function addWhiteStripToTarget(container, leftPx, topPx, opts) {
+        opts = opts || {};
+        var boxCanvas = resolveWhiteStripDropTarget(
+            (opts.clientX != null ? opts.clientX : 0),
+            (opts.clientY != null ? opts.clientY : 0),
+            container
+        ) || container || getWhiteStripPrintCanvas(1);
+        if (opts.box === 1 || opts.box === 2) boxCanvas = getWhiteStripPrintCanvas(opts.box);
+        var el = createWhiteStripItem(leftPx || 20, topPx || 20, boxCanvas, opts);
+        if (el) {
+            syncPropertiesPanelFromDroppedItem(el);
+            syncToolboxHighlight();
+            if (!opts.restore && !opts.silent) showWhiteStripToast('White Strip added');
+        }
+        return el;
+    }
+
     function createDroppedItem(fieldName, left, top, container, opts) {
         opts = opts || {};
+        if (isWhiteStripField(fieldName)) {
+            return createWhiteStripItem(left, top, container, opts);
+        }
         container = container || labelCanvas1 || labelPreview1;
         var id = 'canvas-item-' + (++dropIdCounter);
         var el = document.createElement('div');
         el.className = 'canvas-dropped-item';
         el.setAttribute('data-field', fieldName);
         el.setAttribute('data-id', id);
-        var prefix = opts.prefix !== undefined ? opts.prefix : fieldName;
+        var isStrip = isStripLineField(fieldName);
+        var prefix = opts.prefix !== undefined ? opts.prefix : (isStrip ? '' : fieldName);
         var suffix = opts.suffix !== undefined ? opts.suffix : '';
         var font = opts.font !== undefined ? opts.font : (document.getElementById('propFont') && document.getElementById('propFont').value ? document.getElementById('propFont').value : 'Arial');
         var fontSize = opts.font_size !== undefined ? String(opts.font_size) : (document.getElementById('propFontSize') && document.getElementById('propFontSize').value ? document.getElementById('propFontSize').value : '10');
@@ -5092,17 +6459,46 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         el.setAttribute('data-pad-left', String(padLeft));
         el.draggable = true;
         var trashSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-        el.innerHTML = '<span class="canvas-item-text">' + (prefix + (suffix ? ' ' + suffix : '')).trim() + '</span><span class="canvas-item-remove" title="Remove">' + trashSvg + '</span>';
-        if (opts.restore && (opts.left !== undefined || opts.top !== undefined)) {
-            el.style.left = (opts.left !== undefined ? opts.left : (left - 10)) + 'px';
-            el.style.top = (opts.top !== undefined ? opts.top : (top - 10)) + 'px';
+        if (isStrip) {
+            el.classList.add('canvas-strip-line');
+            el.innerHTML = '<span class="canvas-strip-line-bar" aria-hidden="true"></span><span class="canvas-item-remove" title="Remove">' + trashSvg + '</span>';
+            var contW = (container && container.clientWidth > 0) ? container.clientWidth : 120;
+            var lineW = opts.width !== undefined ? parseInt(opts.width, 10) : Math.max(24, contW - 4);
+            if (isNaN(lineW) || lineW < 8) lineW = Math.max(24, contW - 4);
+            el.style.width = lineW + 'px';
+            if (opts.restore && (opts.left !== undefined || opts.top !== undefined)) {
+                el.style.left = (opts.left !== undefined ? opts.left : 2) + 'px';
+                el.style.top = (opts.top !== undefined ? opts.top : Math.max(0, top - 5)) + 'px';
+            } else {
+                el.style.left = '2px';
+                el.style.top = Math.max(0, (top - 5)) + 'px';
+                el.style.width = Math.max(24, contW - 4) + 'px';
+            }
         } else {
-            el.style.left = (left - 10) + 'px';
-            el.style.top = (top - 10) + 'px';
+            el.innerHTML = '<span class="canvas-item-text">' + (prefix + (suffix ? ' ' + suffix : '')).trim() + '</span><span class="canvas-item-remove" title="Remove">' + trashSvg + '</span>';
+            if (opts.restore && (opts.left !== undefined || opts.top !== undefined)) {
+                el.style.left = (opts.left !== undefined ? opts.left : (left - 10)) + 'px';
+                el.style.top = (opts.top !== undefined ? opts.top : (top - 10)) + 'px';
+            } else {
+                el.style.left = (left - 10) + 'px';
+                el.style.top = (top - 10) + 'px';
+            }
         }
         container.appendChild(el);
-        updateDroppedItemDisplay(el);
-        applyDroppedItemFont(el);
+        if (is82x38HalfStripContainer(container)) {
+            el.setAttribute('data-strip-slot', container.getAttribute('data-fixed-half-strip') || 'top-left');
+            if (!opts.restore) {
+                el.setAttribute('data-font-size', el.getAttribute('data-font-size') || '8');
+                /* Keep text flush to top of strip (avoid scrolled-down look). */
+                el.style.top = '0px';
+                el.style.left = Math.max(0, (parseInt(el.style.left, 10) || 0)) + 'px';
+            }
+            clampDroppedItemInHalfStrip(el, container);
+        }
+        if (!isStrip) {
+            updateDroppedItemDisplay(el);
+            applyDroppedItemFont(el);
+        }
 
         el.querySelector('.canvas-item-remove').addEventListener('click', function(ev) {
             ev.stopPropagation();
@@ -5182,6 +6578,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             canvas.querySelectorAll('.canvas-dropped-item').forEach(function(el) {
                 var f = el.getAttribute('data-field');
                 if (!f) return;
+                if (isWhiteStripField(f) || el.classList.contains('canvas-white-strip')) return;
                 if (seen[f]) el.remove();
                 else seen[f] = true;
             });
@@ -5194,7 +6591,8 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         var seen = {};
         return items.filter(function(it) {
             if (!it) return false;
-            if (it.type === 'barcode_image') return true;
+            if (it.type === 'barcode_image' || it.type === 'white_strip') return true;
+            if (isWhiteStripField(it.field)) return true;
             var f = it.field;
             if (!f) return true;
             if (seen[f]) return false;
@@ -5210,7 +6608,13 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         for (var i = 0; i < items.length; i++) {
             var it = items[i];
             if (!it) continue;
-            if (it.type === 'barcode_image') {
+            if (it.type === 'barcode_image' || it.type === 'qr_image' || it.type === 'white_strip' || it.type === 'WhiteStrip' || isWhiteStripField(it.field)) {
+                out.push(it);
+                continue;
+            }
+            if (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)) {
+                if (seen['__StripLine__']) continue;
+                seen['__StripLine__'] = true;
                 out.push(it);
                 continue;
             }
@@ -5256,9 +6660,42 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 item.style.left = Math.round(leftMm / pxToMmX) + 'px';
                 item.style.top = Math.round(topMm / pxToMmY) + 'px';
             }
+            var fieldName = item.getAttribute('data-field') || '';
+            if (isStripLineField(fieldName) || item.classList.contains('canvas-strip-line')) {
+                var wPx = parseInt(item.style.width, 10);
+                if (isNaN(wPx) || wPx < 8) wPx = item.offsetWidth || Math.round(mmW / pxToMmX);
+                var widthMm = clampMmGlobal(wPx * pxToMmX, mmW);
+                if (!opts.skipDomSync) {
+                    item.style.width = Math.round(widthMm / pxToMmX) + 'px';
+                }
+                itemsArr.push({
+                    type: 'strip_line',
+                    field: 'StripLine',
+                    left: leftMm,
+                    top: topMm,
+                    width: widthMm
+                });
+                return;
+            }
+            if (isWhiteStripField(fieldName) || item.classList.contains('canvas-white-strip')) {
+                var wPxWs = parseInt(item.style.width, 10);
+                var hPxWs = parseInt(item.style.height, 10);
+                if (isNaN(wPxWs) || wPxWs < 8) wPxWs = item.offsetWidth || 40;
+                if (isNaN(hPxWs) || hPxWs < 4) hPxWs = item.offsetHeight || 20;
+                var widthMmWs = clampMmGlobal(wPxWs * pxToMmX, mmW);
+                var heightMmWs = clampMmGlobal(hPxWs * pxToMmY, mmH);
+                if (!opts.skipDomSync) {
+                    item.style.width = Math.round(widthMmWs / pxToMmX) + 'px';
+                    item.style.height = Math.round(heightMmWs / pxToMmY) + 'px';
+                }
+                var wsRow = serializeWhiteStripEl(item, leftMm, topMm, widthMmWs, heightMmWs);
+                if (isNaN(wsRow.opacity)) wsRow.opacity = 1;
+                itemsArr.push(wsRow);
+                return;
+            }
             itemsArr.push({
                 type: 'text',
-                field: item.getAttribute('data-field') || '',
+                field: fieldName,
                 left: leftMm,
                 top: topMm,
                 prefix: item.getAttribute('data-prefix') || '',
@@ -5275,11 +6712,29 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     function restoreCanvasTextFieldsFromItems(items, canvasEl, mmToPxX, mmToPxY) {
         if (!items || !items.length || !canvasEl) return;
         items.forEach(function(it) {
-            if (!it || !it.field || it.type === 'barcode_image') return;
-            var leftMm = typeof it.left === 'number' ? it.left : (parseFloat(it.left) || 0);
-            var topMm = typeof it.top === 'number' ? it.top : (parseFloat(it.top) || 0);
+            if (!it || it.type === 'barcode_image' || it.type === 'qr_image') return;
+            var leftMm = typeof it.left === 'number' ? it.left : (typeof it.x === 'number' ? it.x : (parseFloat(it.left || it.x) || 0));
+            var topMm = typeof it.top === 'number' ? it.top : (typeof it.y === 'number' ? it.y : (parseFloat(it.top || it.y) || 0));
             var leftPx = Math.round(leftMm * mmToPxX);
             var topPx = Math.round(topMm * mmToPxY);
+            if (it.type === 'white_strip' || isWhiteStripType(it)) {
+                restoreWhiteStripItems([it], canvasEl, mmToPxX, mmToPxY);
+                return;
+            }
+            if (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)) {
+                var widthMm = typeof it.width === 'number' ? it.width : (parseFloat(it.width) || 0);
+                var widthPx = widthMm > 0 ? Math.round(widthMm * mmToPxX) : Math.max(24, (canvasEl.clientWidth || 100) - 4);
+                createDroppedItem('StripLine', leftPx, topPx, canvasEl, {
+                    prefix: '',
+                    suffix: '',
+                    left: leftPx,
+                    top: topPx,
+                    width: widthPx,
+                    restore: true
+                });
+                return;
+            }
+            if (!it.field) return;
             createDroppedItem(it.field, leftPx, topPx, canvasEl, {
                 prefix: it.prefix !== undefined ? it.prefix : it.field,
                 suffix: it.suffix !== undefined ? it.suffix : '',
@@ -5309,8 +6764,12 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             : (parsed.fields || parsed.items || []);
         var arr2 = (parsed.box2 && Array.isArray(parsed.box2.items)) ? parsed.box2.items
             : (parsed.fields2 || parsed.items2 || []);
-        arr1 = dedupeSavedLayoutItems(arr1);
-        arr2 = dedupeSavedLayoutItems(arr2);
+        arr1 = dedupeSavedLayoutItems(arr1).filter(function(it) {
+            return !(it && (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)));
+        });
+        arr2 = dedupeSavedLayoutItems(arr2).filter(function(it) {
+            return !(it && (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)));
+        });
         if (canvas1) {
             var sc1 = get82x38CanvasMmScale(canvas1);
             restoreCanvasTextFieldsFromItems(arr1, canvas1, sc1.mmToPxX, sc1.mmToPxY);
@@ -5320,6 +6779,9 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             restoreCanvasTextFieldsFromItems(arr2, canvas2, sc2.mmToPxX, sc2.mmToPxY);
         }
         dedupeCanvasDomFields();
+        restore82x38StickerStripLines(parsed);
+        restore82x38StickerWhiteStrips(parsed);
+        restore82x38HalfStripFields(parsed);
     }
     /** Saved print size for 82×38 SVG barcodes — use saved mm box, not SVG intrinsic height. */
     function get82x38BarcodeSaveSizePx(wrap, svgEl) {
@@ -6011,7 +7473,11 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
             if (!p.svg || !p.wrap) return;
             p.wrap.style.display = 'block';
             p.wrap.style.visibility = 'visible';
-            p.svg.style.display = 'block';
+            p.wrap.classList.remove('qr-graphic-mode');
+            p.svg.style.setProperty('display', 'block', 'important');
+            p.svg.style.setProperty('visibility', 'visible', 'important');
+            p.svg.style.setProperty('width', '100%', 'important');
+            p.svg.style.setProperty('height', '100%', 'important');
             p.svg.setAttribute('data-barcode', p.code);
             if (!is82x38TwoBoxPreset() || !p.wrap.classList.contains('barcode-inner-draggable')) {
                 initBarcodePrintWrapInteractions(p.wrap);
@@ -6260,8 +7726,32 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                         }
                         return;
                     }
+                    if (it.type === 'white_strip' || isWhiteStripType(it)) {
+                        if (is82Restore) return;
+                        restoreWhiteStripItems([it], labelCanvas1 || labelPreview1, mmToPxX, mmToPxY);
+                        return;
+                    }
+                    if (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)) {
+                        if (is82Restore) return;
+                        var leftMmS = typeof it.left === 'number' ? it.left : (parseFloat(it.left) || 0);
+                        var topMmS = typeof it.top === 'number' ? it.top : (parseFloat(it.top) || 0);
+                        var leftPxS = Math.round(leftMmS * mmToPxX);
+                        var topPxS = Math.round(topMmS * mmToPxY);
+                        var widthMmS = typeof it.width === 'number' ? it.width : (parseFloat(it.width) || 0);
+                        var widthPxS = widthMmS > 0 ? Math.round(widthMmS * mmToPxX) : Math.max(24, cw - 4);
+                        createDroppedItem('StripLine', leftPxS, topPxS, labelCanvas1 || labelPreview1, {
+                            prefix: '',
+                            suffix: '',
+                            left: leftPxS,
+                            top: topPxS,
+                            width: widthPxS,
+                            restore: true
+                        });
+                        return;
+                    }
                     if (it.field) {
                         if (is82Restore) return;
+                        if (isWhiteStripField(it.field)) return;
                         var leftMm = typeof it.left === 'number' ? it.left : (parseFloat(it.left) || 0);
                         var topMm = typeof it.top === 'number' ? it.top : (parseFloat(it.top) || 0);
                         var leftPx = (it.type === 'text' || leftMm <= 200) ? Math.round(leftMm * mmToPxX) : (parseInt(it.left, 10) || 15);
@@ -6372,8 +7862,33 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                         }
                         return;
                     }
+                    if (it.type === 'white_strip' || isWhiteStripType(it)) {
+                        if (is82Restore) return;
+                        restoreWhiteStripItems([it], canvas2Restore || preview2ForRestore, mmToPxX2, mmToPxY2);
+                        return;
+                    }
+                    if (it.type === 'strip_line' || it.type === 'line' || isStripLineField(it.field)) {
+                        if (is82Restore) return;
+                        var leftMmS2 = typeof it.left === 'number' ? it.left : (parseFloat(it.left) || 0);
+                        var topMmS2 = typeof it.top === 'number' ? it.top : (parseFloat(it.top) || 0);
+                        var leftPxS2 = Math.round(leftMmS2 * mmToPxX2);
+                        var topPxS2 = Math.round(topMmS2 * mmToPxY2);
+                        var widthMmS2 = typeof it.width === 'number' ? it.width : (parseFloat(it.width) || 0);
+                        var c2w = (canvas2Restore || preview2ForRestore);
+                        var widthPxS2 = widthMmS2 > 0 ? Math.round(widthMmS2 * mmToPxX2) : Math.max(24, (c2w && c2w.clientWidth ? c2w.clientWidth : 100) - 4);
+                        createDroppedItem('StripLine', leftPxS2, topPxS2, canvas2Restore || preview2ForRestore, {
+                            prefix: '',
+                            suffix: '',
+                            left: leftPxS2,
+                            top: topPxS2,
+                            width: widthPxS2,
+                            restore: true
+                        });
+                        return;
+                    }
                     if (it.field) {
                         if (is82Restore) return;
+                        if (isWhiteStripField(it.field)) return;
                         var leftMm = typeof it.left === 'number' ? it.left : (parseFloat(it.left) || 0);
                         var topMm = typeof it.top === 'number' ? it.top : (parseFloat(it.top) || 0);
                         var leftPx = Math.round(leftMm * mmToPxX2);
@@ -6726,6 +8241,75 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         if (propFontSize) { propFontSize.addEventListener('input', syncFontToSelected); propFontSize.addEventListener('change', syncFontToSelected); }
     })();
 
+    (function initWhiteStripProperties() {
+        var ids = [
+            'propWhiteStripWidth', 'propWhiteStripHeight', 'propWhiteStripBg', 'propWhiteStripBorderEnabled',
+            'propWhiteStripBorderColor', 'propWhiteStripBorderWidth', 'propWhiteStripBorderRadius',
+            'propWhiteStripOpacity', 'propWhiteStripRotation', 'propWhiteStripZIndex'
+        ];
+        ids.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', applyWhiteStripPropsToSelected);
+            el.addEventListener('change', applyWhiteStripPropsToSelected);
+        });
+        function selectedWs() {
+            return document.querySelector('.canvas-white-strip.selected');
+        }
+        function setZ(sel, z) {
+            sel.setAttribute('data-z-index', String(z));
+            applyWhiteStripStyle(sel);
+            var zEl = document.getElementById('propWhiteStripZIndex');
+            if (zEl) zEl.value = String(z);
+        }
+        var btnFwd = document.getElementById('btnWhiteStripBringForward');
+        var btnBackOne = document.getElementById('btnWhiteStripSendBackward');
+        var btnFront = document.getElementById('btnWhiteStripBringFront');
+        var btnBack = document.getElementById('btnWhiteStripSendBack');
+        if (btnFwd) {
+            btnFwd.addEventListener('click', function() {
+                var sel = selectedWs(); if (!sel) return;
+                setZ(sel, (parseInt(sel.getAttribute('data-z-index'), 10) || 5) + 1);
+            });
+        }
+        if (btnBackOne) {
+            btnBackOne.addEventListener('click', function() {
+                var sel = selectedWs(); if (!sel) return;
+                setZ(sel, Math.max(0, (parseInt(sel.getAttribute('data-z-index'), 10) || 5) - 1));
+            });
+        }
+        if (btnFront) {
+            btnFront.addEventListener('click', function() {
+                var sel = selectedWs(); if (!sel) return;
+                var parent = sel.parentElement || document;
+                setZ(sel, whiteStripMaxZ(parent) + 1);
+                if (parent && parent.appendChild) parent.appendChild(sel);
+            });
+        }
+        if (btnBack) {
+            btnBack.addEventListener('click', function() {
+                var sel = selectedWs(); if (!sel) return;
+                var parent = sel.parentElement;
+                setZ(sel, Math.max(0, whiteStripMinZ(parent) - 1));
+                if (parent) parent.insertBefore(sel, parent.firstChild);
+            });
+        }
+        /* Mark designer mode for CSS helpers */
+        document.body.classList.add('page-set-software');
+        var canvasEl = document.getElementById('barcodeCanvas');
+        if (canvasEl) canvasEl.classList.add('barcode-designer-mode');
+        /* Track which 82×38 box is active for click-to-add White Strip */
+        ['box1', 'box2'].forEach(function(id) {
+            var box = document.getElementById(id);
+            if (!box || box._wsBoxSelectBound) return;
+            box._wsBoxSelectBound = true;
+            box.addEventListener('mousedown', function() {
+                document.querySelectorAll('#box1, #box2').forEach(function(b) { b.classList.remove('barcode-selected'); });
+                box.classList.add('barcode-selected');
+            }, true);
+        });
+    })();
+
     (function() {
         var padMap = [['propPadTop', 'data-pad-top'], ['propPadRight', 'data-pad-right'], ['propPadBottom', 'data-pad-bottom'], ['propPadLeft', 'data-pad-left']];
         function syncPaddingToSelected() {
@@ -6749,8 +8333,10 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
     // Move selected item: buttons + arrow keys
     var MOVE_STEP = 8;
     function move82x38SelectedGraphic(dx, dy) {
-        var barSel = getActiveBarcodePrintWrap();
-        if (!barSel || !is82x38TwoBoxPreset()) return false;
+        if (!is82x38TwoBoxPreset()) return false;
+        /* Only move barcode bars when a barcode wrap is explicitly selected (not the barcode1 fallback). */
+        var barSel = document.querySelector('.barcode-print-wrap.barcode-selected, .barcode-inner-draggable.barcode-selected');
+        if (!barSel) return false;
         var index = get82x38BarcodeIndex(barSel);
         var leftMm = parseFloat(String(barSel.style.left || '').replace('mm', ''));
         var topMm = parseFloat(String(barSel.style.top || '').replace('mm', ''));
@@ -6779,28 +8365,63 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
         save82x38CurrentLayoutToHiddenJson();
         return true;
     }
+    function clampDroppedItemInParent(el) {
+        if (!el || !el.parentElement) return;
+        var parent = el.parentElement;
+        if (typeof is82x38HalfStripContainer === 'function' && is82x38HalfStripContainer(parent)) {
+            clampDroppedItemInHalfStrip(el, parent);
+            return;
+        }
+        if (el.classList.contains('canvas-white-strip')) {
+            clampWhiteStripInParent(el);
+            return;
+        }
+        var pw = parent.clientWidth || parent.offsetWidth || 0;
+        var ph = parent.clientHeight || parent.offsetHeight || 0;
+        if (pw <= 0 || ph <= 0) return;
+        var l = parseInt(el.style.left, 10); if (isNaN(l)) l = el.offsetLeft || 0;
+        var t = parseInt(el.style.top, 10); if (isNaN(t)) t = el.offsetTop || 0;
+        var w = el.offsetWidth || 0;
+        var h = el.offsetHeight || 0;
+        el.style.left = Math.max(0, Math.min(Math.max(0, pw - Math.max(8, w)), l)) + 'px';
+        el.style.top = Math.max(0, Math.min(Math.max(0, ph - Math.max(8, h)), t)) + 'px';
+    }
     function moveSelected(dx, dy) {
-        if (move82x38SelectedGraphic(dx, dy)) return;
+        /* Prefer selected column/text field over barcode graphic (82×38 was always stealing arrows). */
         var sel = document.querySelector('.canvas-dropped-item.selected');
-        if (!sel) return;
-        var l = parseInt(sel.style.left, 10) || 0;
-        var t = parseInt(sel.style.top, 10) || 0;
-        sel.style.left = (l + dx) + 'px';
-        sel.style.top = (t + dy) + 'px';
-        syncToSecondLabel();
+        if (sel) {
+            var l = parseInt(sel.style.left, 10);
+            var t = parseInt(sel.style.top, 10);
+            if (isNaN(l)) l = sel.offsetLeft || 0;
+            if (isNaN(t)) t = sel.offsetTop || 0;
+            sel.style.left = (l + dx) + 'px';
+            sel.style.top = (t + dy) + 'px';
+            clampDroppedItemInParent(sel);
+            if (typeof syncToSecondLabel === 'function') syncToSecondLabel();
+            if (typeof is82x38TwoBoxPreset === 'function' && is82x38TwoBoxPreset()
+                && typeof save82x38CurrentLayoutToHiddenJson === 'function') {
+                save82x38CurrentLayoutToHiddenJson();
+            }
+            return;
+        }
+        if (move82x38SelectedGraphic(dx, dy)) return;
     }
     document.getElementById('btnMoveUp').addEventListener('click', function() { moveSelected(0, -MOVE_STEP); });
     document.getElementById('btnMoveDown').addEventListener('click', function() { moveSelected(0, MOVE_STEP); });
     document.getElementById('btnMoveLeft').addEventListener('click', function() { moveSelected(-MOVE_STEP, 0); });
     document.getElementById('btnMoveRight').addEventListener('click', function() { moveSelected(MOVE_STEP, 0); });
     document.addEventListener('keydown', function(e) {
+        var tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
         var sel = document.querySelector('.canvas-dropped-item.selected');
-        var barSel = getActiveBarcodePrintWrap();
-        if (!sel && !(barSel && is82x38TwoBoxPreset())) return;
-        if (e.key === 'ArrowUp') { e.preventDefault(); moveSelected(0, -MOVE_STEP); }
-        else if (e.key === 'ArrowDown') { e.preventDefault(); moveSelected(0, MOVE_STEP); }
-        else if (e.key === 'ArrowLeft') { e.preventDefault(); moveSelected(-MOVE_STEP, 0); }
-        else if (e.key === 'ArrowRight') { e.preventDefault(); moveSelected(MOVE_STEP, 0); }
+        var barSel = document.querySelector('.barcode-print-wrap.barcode-selected, .barcode-inner-draggable.barcode-selected');
+        if (!sel && !(barSel && typeof is82x38TwoBoxPreset === 'function' && is82x38TwoBoxPreset())) return;
+        e.preventDefault();
+        if (e.key === 'ArrowUp') moveSelected(0, -MOVE_STEP);
+        else if (e.key === 'ArrowDown') moveSelected(0, MOVE_STEP);
+        else if (e.key === 'ArrowLeft') moveSelected(-MOVE_STEP, 0);
+        else if (e.key === 'ArrowRight') moveSelected(MOVE_STEP, 0);
     });
 
     // Barcode blocks: both draggable independently (mouse drag)
@@ -7259,6 +8880,37 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 if (isNaN(top)) top = 0;
                 var leftMm = clampMmGlobal(left * pxToMmX1, labelW);
                 var topMm = clampMmGlobal(top * pxToMmY1, labelH);
+                var fieldNameSave = item.getAttribute('data-field') || '';
+                if (isStripLineField(fieldNameSave) || item.classList.contains('canvas-strip-line')) {
+                    var wPxStrip = parseInt(item.style.width, 10);
+                    if (isNaN(wPxStrip) || wPxStrip < 8) wPxStrip = item.offsetWidth || Math.round(labelW / pxToMmX1);
+                    var widthMmStrip = clampMmGlobal(wPxStrip * pxToMmX1, labelW);
+                    item.style.top = Math.round(topMm / pxToMmY1) + 'px';
+                    item.style.width = Math.round(widthMmStrip / pxToMmX1) + 'px';
+                    designItems.push({
+                        type: 'strip_line',
+                        field: 'StripLine',
+                        left: leftMm,
+                        top: topMm,
+                        width: widthMmStrip
+                    });
+                    return;
+                }
+                if (isWhiteStripField(fieldNameSave) || item.classList.contains('canvas-white-strip')) {
+                    var wPxWs1 = parseInt(item.style.width, 10);
+                    var hPxWs1 = parseInt(item.style.height, 10);
+                    if (isNaN(wPxWs1) || wPxWs1 < 8) wPxWs1 = item.offsetWidth || 40;
+                    if (isNaN(hPxWs1) || hPxWs1 < 4) hPxWs1 = item.offsetHeight || 20;
+                    var widthMmWs1 = clampMmGlobal(wPxWs1 * pxToMmX1, labelW);
+                    var heightMmWs1 = clampMmGlobal(hPxWs1 * pxToMmY1, labelH);
+                    item.style.top = Math.round(topMm / pxToMmY1) + 'px';
+                    item.style.width = Math.round(widthMmWs1 / pxToMmX1) + 'px';
+                    item.style.height = Math.round(heightMmWs1 / pxToMmY1) + 'px';
+                    var wsSave1 = serializeWhiteStripEl(item, leftMm, topMm, widthMmWs1, heightMmWs1);
+                    if (isNaN(wsSave1.opacity)) wsSave1.opacity = 1;
+                    designItems.push(wsSave1);
+                    return;
+                }
                 if (barcodeBottomMm > 0) {
                     topMm = resolveTextTopMmBelowBarcodeIfOverlap(leftMm, topMm, barcodeLeftMm, barcodeRightMm, barcodeTopMm, barcodeBottomMm, labelW, labelH, gapMm);
                 }
@@ -7267,7 +8919,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 item.style.top = newTopPx + 'px';
                 designItems.push({
                     type: 'text',
-                    field: item.getAttribute('data-field') || '',
+                    field: fieldNameSave,
                     left: leftMm,
                     top: topMm,
                     prefix: item.getAttribute('data-prefix') || '',
@@ -7354,6 +9006,37 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 if (isNaN(top)) top = 0;
                 var leftMm = clampMmGlobal(left * pxToMmX2, labelWHalf);
                 var topMm = clampMmGlobal(top * pxToMmY2, labelHSave);
+                var fieldNameSave2 = item.getAttribute('data-field') || '';
+                if (isStripLineField(fieldNameSave2) || item.classList.contains('canvas-strip-line')) {
+                    var wPxStrip2 = parseInt(item.style.width, 10);
+                    if (isNaN(wPxStrip2) || wPxStrip2 < 8) wPxStrip2 = item.offsetWidth || Math.round(labelWHalf / pxToMmX2);
+                    var widthMmStrip2 = clampMmGlobal(wPxStrip2 * pxToMmX2, labelWHalf);
+                    item.style.top = Math.round(topMm / pxToMmY2) + 'px';
+                    item.style.width = Math.round(widthMmStrip2 / pxToMmX2) + 'px';
+                    designItems2.push({
+                        type: 'strip_line',
+                        field: 'StripLine',
+                        left: leftMm,
+                        top: topMm,
+                        width: widthMmStrip2
+                    });
+                    return;
+                }
+                if (isWhiteStripField(fieldNameSave2) || item.classList.contains('canvas-white-strip')) {
+                    var wPxWs2 = parseInt(item.style.width, 10);
+                    var hPxWs2 = parseInt(item.style.height, 10);
+                    if (isNaN(wPxWs2) || wPxWs2 < 8) wPxWs2 = item.offsetWidth || 40;
+                    if (isNaN(hPxWs2) || hPxWs2 < 4) hPxWs2 = item.offsetHeight || 20;
+                    var widthMmWs2 = clampMmGlobal(wPxWs2 * pxToMmX2, labelWHalf);
+                    var heightMmWs2 = clampMmGlobal(hPxWs2 * pxToMmY2, labelHSave);
+                    item.style.top = Math.round(topMm / pxToMmY2) + 'px';
+                    item.style.width = Math.round(widthMmWs2 / pxToMmX2) + 'px';
+                    item.style.height = Math.round(heightMmWs2 / pxToMmY2) + 'px';
+                    var wsSave2 = serializeWhiteStripEl(item, leftMm, topMm, widthMmWs2, heightMmWs2);
+                    if (isNaN(wsSave2.opacity)) wsSave2.opacity = 1;
+                    designItems2.push(wsSave2);
+                    return;
+                }
                 var gap2 = 1.5;
                 if (barcodeBottomMm2 > 0) {
                     topMm = resolveTextTopMmBelowBarcodeIfOverlap(leftMm, topMm, barcodeLeftMm2, barcodeRightMm2, barcodeTopMm2, barcodeBottomMm2, labelW, labelH, gap2);
@@ -7363,7 +9046,7 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 item.style.top = newTopPx2 + 'px';
                 designItems2.push({
                     type: 'text',
-                    field: item.getAttribute('data-field') || '',
+                    field: fieldNameSave2,
                     left: leftMm,
                     top: topMm,
                     prefix: item.getAttribute('data-prefix') || '',
@@ -7431,21 +9114,39 @@ body.page-set-software.is-barcode-dragging .barcode-canvas-drops {
                 height: boxLayout.box2_barcode_height_mm,
                 display_width_mm: boxLayout.box2_barcode_width_mm
             };
-            var box1ExtraItems = designItems.filter(function(it) { return it && it.type !== 'barcode_image'; });
-            var box2ExtraItems = designItems2.filter(function(it) { return it && it.type !== 'barcode_image'; });
+            var box1ExtraItems = designItems.filter(function(it) {
+                return it && it.type !== 'barcode_image' && it.type !== 'strip_line' && it.type !== 'line' && !isStripLineField(it.field)
+                    && it.type !== 'white_strip' && it.type !== 'WhiteStrip' && !isWhiteStripField(it.field);
+            });
+            var box2ExtraItems = designItems2.filter(function(it) {
+                return it && it.type !== 'barcode_image' && it.type !== 'strip_line' && it.type !== 'line' && !isStripLineField(it.field)
+                    && it.type !== 'white_strip' && it.type !== 'WhiteStrip' && !isWhiteStripField(it.field);
+            });
+            layoutPayload.sticker_strip_lines = collect82x38StickerStripLines();
+            layoutPayload.sticker_white_strips = [];
+            layoutPayload.sticker_half_strip_fields = collect82x38HalfStripFields();
+            /* White strips live inside each print box canvas (box 1 / box 2) */
+            var box1Ws = collectWhiteStripItemsFromCanvas(labelCanvas1 || labelPreview1, boxLayout.box_width_mm, boxLayout.box_height_mm,
+                (labelCanvas1 && labelCanvas1.clientWidth > 0) ? (boxLayout.box_width_mm / labelCanvas1.clientWidth) : (1 / MM_TO_PX),
+                (labelCanvas1 && labelCanvas1.clientHeight > 0) ? (boxLayout.box_height_mm / labelCanvas1.clientHeight) : (1 / MM_TO_PX));
+            var box2Ws = collectWhiteStripItemsFromCanvas(labelCanvas2 || labelPreview2, boxLayout.box_width_mm, boxLayout.box_height_mm,
+                (labelCanvas2 && labelCanvas2.clientWidth > 0) ? (boxLayout.box_width_mm / labelCanvas2.clientWidth) : (1 / MM_TO_PX),
+                (labelCanvas2 && labelCanvas2.clientHeight > 0) ? (boxLayout.box_height_mm / labelCanvas2.clientHeight) : (1 / MM_TO_PX));
+            box1Ws.forEach(function(w) { w.box = 1; });
+            box2Ws.forEach(function(w) { w.box = 2; });
             layoutPayload.box1 = {
                 left_mm: boxLayout.box1_left_mm,
                 top_mm: boxLayout.box1_top_mm,
                 width_mm: boxLayout.box_width_mm,
                 height_mm: boxLayout.box_height_mm,
-                items: [box1BarcodeItem].concat(box1ExtraItems)
+                items: [box1BarcodeItem].concat(box1ExtraItems).concat(box1Ws)
             };
             layoutPayload.box2 = {
                 left_mm: boxLayout.box2_left_mm,
                 top_mm: boxLayout.box2_top_mm,
                 width_mm: boxLayout.box_width_mm,
                 height_mm: boxLayout.box_height_mm,
-                items: [box2BarcodeItem].concat(box2ExtraItems)
+                items: [box2BarcodeItem].concat(box2ExtraItems).concat(box2Ws)
             };
             layoutPayload.items = layoutPayload.box1.items.slice(0);
             layoutPayload.items2 = layoutPayload.box2.items.slice(0);

@@ -57,6 +57,25 @@ if (!$conn || !($conn instanceof mysqli)) {
 $allowed = auragold_permission_all_keys_flat();
 $grants  = isset($in['grants']) && is_array($in['grants']) ? $in['grants'] : [];
 
+// Nav checks require the parent "{module}.menu" grant before any page is visible,
+// so a granted sub-menu action must imply menu access (otherwise the grant is dead).
+foreach (auragold_permission_tree() as $pmMod) {
+    $pmMenuKey = $pmMod['key'] . '.menu';
+    if (!empty($grants[$pmMenuKey]) && filter_var($grants[$pmMenuKey], FILTER_VALIDATE_BOOLEAN)) {
+        continue;
+    }
+    foreach ($pmMod['pages'] as $pmPage) {
+        $pmNs = auragold_permission_grant_namespace_for_page($pmMod, $pmPage);
+        foreach ($pmPage['actions'] as $pmAct) {
+            $pmActKey = $pmNs . '.' . $pmPage['key'] . '.' . $pmAct;
+            if (!empty($grants[$pmActKey]) && filter_var($grants[$pmActKey], FILTER_VALIDATE_BOOLEAN)) {
+                $grants[$pmMenuKey] = 1;
+                continue 3;
+            }
+        }
+    }
+}
+
 mysqli_begin_transaction($conn);
 
 $del = mysqli_query(
@@ -106,4 +125,4 @@ if (function_exists('auragold_permission_invalidate_session_cache')) {
     auragold_permission_invalidate_session_cache($userId);
 }
 
-echo json_encode(['ok' => true, 'message' => 'Permissions saved.']);
+echo json_encode(['ok' => true, 'message' => 'Permission saved successfully']);

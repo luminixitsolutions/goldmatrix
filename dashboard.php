@@ -1342,15 +1342,19 @@ $dash_metal_icons = [
             ?>
             <div class="dash-rate-conversions">
               <label for="dashRateConversionUrls-<?= htmlspecialchars($dash_rate_conv_uid, ENT_QUOTES, 'UTF-8') ?>">Rate Conversions</label>
-              <select id="dashRateConversionUrls-<?= htmlspecialchars($dash_rate_conv_uid, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" autocomplete="off"
-                onchange="var u=this.value;if(u){window.open(u,'_blank','noopener,noreferrer');}this.selectedIndex=0;">
-                <option value="">Select URL…</option>
+              <select id="dashRateConversionUrls-<?= htmlspecialchars($dash_rate_conv_uid, ENT_QUOTES, 'UTF-8') ?>"
+                class="form-control form-control-sm js-dash-rate-source-url" autocomplete="off"
+                data-metal="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>">
+                <option value="">Select URL to fetch live rates…</option>
                 <option value="https://dubaicityofgold.com/">https://dubaicityofgold.com/</option>
                 <option value="https://igold.ae/gold-rate">https://igold.ae/gold-rate</option>
                 <option value="https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate">https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate</option>
                 <option value="https://www.kitco.com/">https://www.kitco.com/</option>
                 <option value="https://goldprice.org/">https://goldprice.org/</option>
               </select>
+              <input type="hidden" class="js-meta-source" value="<?= htmlspecialchars((string) ($m['source_url'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+              <input type="hidden" class="js-meta-ounce" value="<?= htmlspecialchars(preg_replace('/[^\d.]/', '', (string) ($m['ounce_rate'] ?? '0')), ENT_QUOTES, 'UTF-8') ?>">
+              <p class="js-dash-fetch-status small text-muted mb-0 mt-1" aria-live="polite"></p>
             </div>
             <?php if ($key === 'gold'): ?>
             <h3>Gold rate sheet</h3>
@@ -1984,6 +1988,81 @@ window.AURAGOLD_DASH_BRANCH_ID = <?= (int) $dash_rates_branch_id ?>;
         var $pane = $(this).closest('.tab-pane');
         if (!$pane.length) return;
         saveMetalRates($pane);
+    });
+
+    function applyFetchedRates($pane, rows) {
+        if (!rows || !rows.length) {
+            return 0;
+        }
+        var byLabel = {};
+        rows.forEach(function (r) {
+            if (!r || !r.carat) return;
+            byLabel[String(r.carat)] = r.rate;
+        });
+        var filled = 0;
+        $pane.find('tbody tr[data-carat-label]').each(function () {
+            var label = $(this).attr('data-carat-label');
+            if (!label || !(label in byLabel)) {
+                return;
+            }
+            var rate = byLabel[label];
+            $(this).find('.js-rate-new').val(rate).trigger('input');
+            $(this).find('.js-rate-current').text(rate);
+            filled++;
+        });
+        if ($pane.attr('id') === 'pane-gold') {
+            syncGoldSnapshot($pane);
+        }
+        return filled;
+    }
+
+    $(document).on('change', '.js-dash-rate-source-url', function () {
+        var $sel = $(this);
+        var url = $.trim($sel.val() || '');
+        var $pane = $sel.closest('.tab-pane');
+        var $status = $pane.find('.js-dash-fetch-status').first();
+        if (!url) {
+            $status.text('');
+            return;
+        }
+        var metal = $sel.attr('data-metal') || ($pane.attr('id') || '').replace('pane-', '') || 'gold';
+        var labels = [];
+        $pane.find('tbody tr[data-carat-label]').each(function () {
+            var lab = $(this).attr('data-carat-label');
+            if (lab) labels.push(lab);
+        });
+        $sel.prop('disabled', true);
+        $status.removeClass('text-danger text-success').addClass('text-muted').text('Fetching live rates…');
+        $.ajax({
+            url: 'ajax/fetch-dashboard-rates.php',
+            method: 'POST',
+            contentType: 'application/json; charset=UTF-8',
+            data: JSON.stringify({ url: url, metal: metal, labels: labels }),
+            dataType: 'json'
+        }).done(function (res) {
+            if (!res || res.status !== 'ok') {
+                $status.removeClass('text-muted text-success').addClass('text-danger')
+                    .text((res && res.message) ? res.message : 'Could not fetch rates.');
+                return;
+            }
+            $pane.find('.js-meta-source').val(url);
+            if (res.ounce_rate !== undefined && res.ounce_rate !== null) {
+                $pane.find('.js-meta-ounce').val(String(res.ounce_rate));
+            }
+            var n = applyFetchedRates($pane, res.rows || []);
+            $status.removeClass('text-muted text-danger').addClass('text-success')
+                .text((res.message || 'Rates loaded.') + (n ? ' (' + n + ' rows filled) — click Save to store.' : ''));
+        }).fail(function (xhr) {
+            var msg = 'Could not fetch rates.';
+            try {
+                var j = JSON.parse(xhr.responseText);
+                if (j && j.message) msg = j.message;
+            } catch (e) {}
+            $status.removeClass('text-muted text-success').addClass('text-danger').text(msg);
+        }).always(function () {
+            $sel.prop('disabled', false);
+            $sel.val('');
+        });
     });
 
     $(document).on('change', '#dashBranchRatesSelect', function () {

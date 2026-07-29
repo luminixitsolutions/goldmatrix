@@ -90,6 +90,14 @@
         if (!sel) return;
         sel.innerHTML = '<option value="">— Select country first —</option>';
         sel.disabled = true;
+        resetCitySelect();
+    }
+
+    function resetCitySelect() {
+        var sel = document.getElementById('branchAddCity');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">— Select state first —</option>';
+        sel.disabled = true;
     }
 
     function loadStatesForCountry(countryId) {
@@ -102,6 +110,7 @@
         }
         sel.disabled = true;
         sel.innerHTML = '<option value="">Loading…</option>';
+        resetCitySelect();
         fetch('ajax/get-states-by-country.php?country_id=' + encodeURIComponent(cid), {
             credentials: 'same-origin',
         })
@@ -129,10 +138,54 @@
             });
     }
 
+    function loadCitiesForState(stateId) {
+        var sel = document.getElementById('branchAddCity');
+        if (!sel) return;
+        var sid = parseInt(stateId, 10) || 0;
+        if (sid <= 0) {
+            resetCitySelect();
+            return;
+        }
+        sel.disabled = true;
+        sel.innerHTML = '<option value="">Loading…</option>';
+        fetch('ajax/get-cities-by-state.php?state_id=' + encodeURIComponent(sid), {
+            credentials: 'same-origin',
+        })
+            .then(function (r) {
+                return parseJsonSafe(r);
+            })
+            .then(function (d) {
+                if (d && d.status === 'success' && Array.isArray(d.cities)) {
+                    sel.innerHTML = '<option value="">— Select —</option>';
+                    d.cities.forEach(function (row) {
+                        var opt = document.createElement('option');
+                        opt.value = String(row.id);
+                        opt.textContent = row.name || '';
+                        sel.appendChild(opt);
+                    });
+                    sel.disabled = false;
+                } else {
+                    sel.innerHTML = '<option value="">No cities found</option>';
+                    sel.disabled = false;
+                }
+            })
+            .catch(function () {
+                sel.innerHTML = '<option value="">Could not load cities</option>';
+                sel.disabled = true;
+            });
+    }
+
     var countrySel = document.getElementById('branchAddCountry');
     if (countrySel) {
         countrySel.addEventListener('change', function () {
             loadStatesForCountry(countrySel.value);
+        });
+    }
+
+    var stateSel = document.getElementById('branchAddState');
+    if (stateSel) {
+        stateSel.addEventListener('change', function () {
+            loadCitiesForState(stateSel.value);
         });
     }
 
@@ -421,6 +474,8 @@
                         hostUrlManuallyEdited = false;
                         if (form) form.reset();
                         resetStateSelect();
+                        var phoneCc = document.getElementById('branchAddPhoneCountryCode');
+                        if (phoneCc) phoneCc.value = '971';
                         var activeCb = document.getElementById('branchAddActive');
                         if (activeCb) activeCb.checked = true;
                         setFormErr('');
@@ -493,6 +548,35 @@
             }
             if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
                 setFormErr('Enter a valid email or leave it empty.');
+                return;
+            }
+
+            var phoneCcEl = document.getElementById('branchAddPhoneCountryCode');
+            var phoneCc = phoneCcEl ? String(phoneCcEl.value || '').trim() : '';
+            var countryId = parseInt((document.getElementById('branchAddCountry') || {}).value, 10) || 0;
+            var stateId = parseInt((document.getElementById('branchAddState') || {}).value, 10) || 0;
+            var cityId = parseInt((document.getElementById('branchAddCity') || {}).value, 10) || 0;
+            if (!phoneCc) {
+                setFormErr('Country code is required.');
+                if (phoneCcEl) phoneCcEl.focus();
+                return;
+            }
+            if (countryId <= 0) {
+                setFormErr('Country is required.');
+                var cEl = document.getElementById('branchAddCountry');
+                if (cEl) cEl.focus();
+                return;
+            }
+            if (stateId <= 0) {
+                setFormErr('State is required.');
+                var sEl = document.getElementById('branchAddState');
+                if (sEl) sEl.focus();
+                return;
+            }
+            if (cityId <= 0) {
+                setFormErr('City is required.');
+                var cityEl = document.getElementById('branchAddCity');
+                if (cityEl) cityEl.focus();
                 return;
             }
 

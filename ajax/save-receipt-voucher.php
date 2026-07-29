@@ -516,8 +516,9 @@ try {
     $prev_silver = (float)($last_balance['balance_silver'] ?? 0);
     $prev_gold_pure = $use_gold_pure ? (float)($last_balance['balance_gold_pure'] ?? 0) : 0.000;
 
-    // Receipt: money on customer Credit (reduces receivable); final balance_amount = prev - total_amount.
-    // Metal: debit gold/silver on customer (main line). Scrap rupee value: extra line(s) Debit vs OJB so running Dr−Cr matches.
+    // Receipt: money on party Credit side; Cash/Bank Debit (money in).
+    // balance_amount follows CL = opening + Dr − Cr → Credit reduces running balance.
+    // Metal: debit gold/silver on customer (main line). Scrap rupee value: extra Credit line(s) vs OJB.
     $new_balance_amt_final = $prev_amt - $total_amount;
     $new_balance_gold = $prev_gold - $total_gold;
     $new_balance_silver = $prev_silver - $total_silver;
@@ -682,8 +683,8 @@ try {
                     $voucher_id,
                     '$voucher_no',
                     '$voucher_date',
-                    $samt,
                     0,
+                    $samt,
                     $ledger_zero_metal
                     $ledger_bal_scrap
                     '$desc_scrap_esc',
@@ -735,7 +736,7 @@ try {
             $cash_prev_balance = (float)($cash_balance_record['balance_amount'] ?? 0);
             $cash_new_balance = $cash_prev_balance + $line_amt;
             $cash_desc_esc = mysqli_real_escape_string($conn, "Receipt from {$customer_name} (Receipt Voucher {$voucher_no})");
-            $ca_line_esc = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt, $line_amt));
+            $ca_line_esc = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt, $line_amt, 'Cr'));
 
             if ($ledger_has_against_cols) {
                 $cash_ledger_sql = "

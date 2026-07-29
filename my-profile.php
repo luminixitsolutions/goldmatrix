@@ -1,12 +1,15 @@
 <?php
 require_once __DIR__ . '/includes/session_init.php';
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/session_login_type.php';
 require_once __DIR__ . '/includes/login_authenticate.php';
 require_once __DIR__ . '/includes/branch_profile_schema.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/international-dial-codes.php';
 require_once __DIR__ . '/includes/location-helpers.php';
 require_once __DIR__ . '/includes/auragold_user_menu_preferences.php';
+require_once __DIR__ . '/includes/auragold_api_shop_connection.php';
+require_once __DIR__ . '/includes/auragold_access_token.php';
 
 if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0 || empty($_SESSION['Admin'])) {
     header('Location: index.php');
@@ -26,6 +29,23 @@ if ((!$userRow || !is_array($userRow)) && function_exists('getRecordMaster')) {
 if (!$userRow || !is_array($userRow)) {
     header('Location: index.php');
     exit;
+}
+
+// Shop access token (same as /api/shops.php) — used by CRM + customers API.
+$shopAccessToken = '';
+if (function_exists('auragold_bootstrap_session_shop_access_token')) {
+    $shopAccessToken = auragold_bootstrap_session_shop_access_token();
+}
+$userAccessToken = $shopAccessToken;
+if ($userAccessToken === '' && function_exists('auragold_bootstrap_session_access_token')) {
+    // Fallback to user token if shop token unavailable.
+    $userAccessToken = auragold_bootstrap_session_access_token();
+}
+if ($userAccessToken === '') {
+    $userAccessToken = trim((string) ($userRow['access_token'] ?? ''));
+}
+if ($userAccessToken !== '') {
+    $userRow['access_token'] = $userAccessToken;
 }
 
 $targetBid = auragold_my_profile_target_branch_id();
@@ -216,10 +236,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
     $profile_city_id    = (int) ($_POST['profile_city_id'] ?? 0);
     $profile_phone_country_code = trim((string) ($_POST['profile_phone_country_code'] ?? ''));
     if ($profile_phone_country_code === '') {
-        $profile_phone_country_code = '971';
+        $fail('Country code is required.');
     }
-    if (strlen($profile_phone_country_code) > 10) {
+    if (strlen($profile_phone_country_code) > 10 || !preg_match('/^\d{1,10}$/', $profile_phone_country_code)) {
         $fail('Invalid phone country code.');
+    }
+    if ($profile_country_id <= 0) {
+        $fail('Country is required.');
+    }
+    if ($profile_state_id <= 0) {
+        $fail('State is required.');
+    }
+    if ($profile_city_id <= 0) {
+        $fail('City is required.');
+    }
+
+    // Validate country / state / city relationship
+    if (!empty($conn)) {
+        require_once __DIR__ . '/includes/location-helpers.php';
+        if (function_exists('auragold_bootstrap_location_data')) {
+            auragold_bootstrap_location_data($conn);
+        }
+        $cr = getRecord('SELECT id FROM tbl_countries WHERE id = ' . (int) $profile_country_id . ' AND status = 1 LIMIT 1');
+        if (!$cr) {
+            $fail('Selected country is invalid.');
+        }
+        $sr = getRecord(
+            'SELECT id, country_id FROM tbl_states WHERE id = ' . (int) $profile_state_id . ' AND status = 1 LIMIT 1'
+        );
+        if (!$sr || (int) ($sr['country_id'] ?? 0) !== $profile_country_id) {
+            $fail('Selected state is invalid or does not belong to the selected country.');
+        }
+        $cir = getRecord(
+            'SELECT id, state_id, name FROM tbl_cities WHERE id = ' . (int) $profile_city_id . ' AND status = 1 LIMIT 1'
+        );
+        if (!$cir || (int) ($cir['state_id'] ?? 0) !== $profile_state_id) {
+            $fail('Selected city is invalid or does not belong to the selected state.');
+        }
+        $cityName = trim((string) ($cir['name'] ?? ''));
+        if ($cityName !== '' && $location_area === '') {
+            $location_area = $cityName;
+        }
     }
 
     $profile_base_currency_id = (int) ($_POST['profile_base_currency_id'] ?? 0);
@@ -337,6 +394,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if ((!$userRow || !is_array($userRow)) && function_exists('getRecordMaster')) {
         $userRow = getRecordMaster('SELECT * FROM tbl_users WHERE id = ' . $uid . ' LIMIT 1');
     }
+    if (is_array($userRow)) {
+        $tok = trim((string) ($userRow['access_token'] ?? ''));
+        if ($tok === '' && !empty($userAccessToken)) {
+            $userRow['access_token'] = $userAccessToken;
+        } elseif ($tok !== '') {
+            $userAccessToken = $tok;
+        }
+    }
     if ($branchRow) {
         $branchRow = getRecordMaster('SELECT * FROM tbl_branches WHERE id = ' . $targetBid . ' LIMIT 1');
     }
@@ -423,6 +488,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
         $uPhotoUrl = $uPhotoPath . '?v=' . (int) @filemtime(__DIR__ . '/' . $uPhotoPath);
     }
     $uMenuStyle = auragold_normalize_menu_style($ur['menu_style'] ?? auragold_get_user_menu_style($uid));
+    $uAccessToken = trim((string) ($ur['access_token'] ?? $userAccessToken ?? ''));
     ?>
         <form method="post" action="my-profile.php" enctype="multipart/form-data" autocomplete="on" class="mb-3">
             <input type="hidden" name="profile_form" value="user">
@@ -497,9 +563,48 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                     </div>
                     <div class="mp-hint">Choose how the main navigation appears. Vertical mode opens submenus below each item (like Region in Set Software). Use the tab on the menu edge to hide or show the sidebar.</div>
                 </div>
+                <div class="form-group mb-3">
+                    <label for="mp_access_token">Shop access token</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="mp_access_token" maxlength="64"
+                               value="<?php echo htmlspecialchars($uAccessToken); ?>"
+                               readonly style="background:#f8fafc;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;">
+                        <?php if ($uAccessToken !== ''): ?>
+                        <div class="input-group-append">
+                            <button type="button" class="btn btn-outline-secondary" id="mp_copy_access_token" title="Copy token" style="border-radius:0 8px 8px 0;">Copy</button>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="mp-hint">Shop token for CRM and APIs (same as /api/shops.php). Created once and not changed when you save your profile.</div>
+                </div>
                 <button type="submit" class="btn mp-btn-save">Save profile</button>
             </div>
         </form>
+        <script>
+        (function () {
+            var btn = document.getElementById('mp_copy_access_token');
+            var inp = document.getElementById('mp_access_token');
+            if (!btn || !inp) return;
+            btn.addEventListener('click', function () {
+                var val = inp.value || '';
+                if (!val) return;
+                var done = function () {
+                    var prev = btn.textContent;
+                    btn.textContent = 'Copied';
+                    setTimeout(function () { btn.textContent = prev; }, 1500);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(val).then(done).catch(function () {
+                        inp.select();
+                        try { document.execCommand('copy'); done(); } catch (e) {}
+                    });
+                } else {
+                    inp.select();
+                    try { document.execCommand('copy'); done(); } catch (e) {}
+                }
+            });
+        })();
+        </script>
 
     <?php if ($branch_profile_hint !== '' && !$branchRow): ?>
         <div class="mp-card">
@@ -580,9 +685,9 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                 </div>
                 <div class="form-row">
                     <div class="form-group col-md-4 mb-3">
-                        <label for="phone">Phone</label>
+                        <label for="mpPhoneCountryCode">Country code <span style="color:#b91c1c">*</span> / Phone</label>
                         <div class="input-group">
-                            <select class="form-control" id="mpPhoneCountryCode" name="profile_phone_country_code" style="max-width:96px;font-size:0.85rem;padding:0.4rem 0.5rem;height:38px;border-radius:8px 0 0 8px;">
+                            <select class="form-control" id="mpPhoneCountryCode" name="profile_phone_country_code" required aria-required="true" style="max-width:96px;font-size:0.85rem;padding:0.4rem 0.5rem;height:38px;border-radius:8px 0 0 8px;">
                                 <?php auragold_render_dial_code_select($mp_pcc); ?>
                             </select>
                             <input type="text" class="form-control" id="phone" name="phone" maxlength="50"
@@ -604,8 +709,8 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                 </div>
                 <div class="form-row">
                     <div class="form-group col-md-4 mb-3">
-                        <label for="mpCountry">Country</label>
-                        <select class="form-control" id="mpCountry" name="profile_country_id"
+                        <label for="mpCountry">Country <span style="color:#b91c1c">*</span></label>
+                        <select class="form-control" id="mpCountry" name="profile_country_id" required aria-required="true"
                                 data-initial-state-id="<?php echo (int) ($r['profile_state_id'] ?? 0); ?>"
                                 data-initial-city-id="<?php echo (int) ($r['profile_city_id'] ?? 0); ?>">
                             <option value="">Select Country</option>
@@ -616,14 +721,14 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                         </select>
                     </div>
                     <div class="form-group col-md-4 mb-3">
-                        <label for="mpState">State</label>
-                        <select class="form-control" id="mpState" name="profile_state_id">
+                        <label for="mpState">State <span style="color:#b91c1c">*</span></label>
+                        <select class="form-control" id="mpState" name="profile_state_id" required aria-required="true">
                             <option value="">Select State</option>
                         </select>
                     </div>
                     <div class="form-group col-md-4 mb-3">
-                        <label for="mpCity">City</label>
-                        <select class="form-control" id="mpCity" name="profile_city_id">
+                        <label for="mpCity">City <span style="color:#b91c1c">*</span></label>
+                        <select class="form-control" id="mpCity" name="profile_city_id" required aria-required="true">
                             <option value="">Select City</option>
                         </select>
                     </div>

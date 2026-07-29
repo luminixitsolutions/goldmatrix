@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/session_login_type.php';
 require_once __DIR__ . '/../includes/user_management_schema.php';
 require_once __DIR__ . '/../includes/auragold_employee_management_schema.php';
+require_once __DIR__ . '/../includes/roles_schema.php';
 
 if (empty($_SESSION['Admin']) || !auragold_session_is_admin_login_type()) {
     echo json_encode(['ok' => false, 'message' => 'Unauthorized']);
@@ -13,6 +14,10 @@ if (empty($_SESSION['Admin']) || !auragold_session_is_admin_login_type()) {
 }
 
 auragold_ensure_user_management_columns($conn);
+auragold_ensure_roles_table($conn_master);
+$employeeBranchId = auragold_em_resolve_branch_id();
+auragold_em_ensure_tables($conn);
+auragold_em_seed_defaults($conn, $employeeBranchId);
 
 $raw = file_get_contents('php://input');
 $in  = json_decode($raw, true);
@@ -30,6 +35,46 @@ $phone_num = isset($in['phone']) ? preg_replace('/\s+/', '', (string) $in['phone
 $role      = isset($in['user_role']) ? trim((string) $in['user_role']) : 'Admin';
 $active    = !empty($in['active']);
 $username  = isset($in['username']) ? trim((string) $in['username']) : '';
+$monthly_salary = isset($in['monthly_salary']) ? (float) $in['monthly_salary'] : 0.0;
+$department_id = isset($in['department_id']) ? max(0, (int) $in['department_id']) : 0;
+$designation_id = isset($in['designation_id']) ? max(0, (int) $in['designation_id']) : 0;
+if ($monthly_salary < 0) {
+    $monthly_salary = 0.0;
+}
+
+if ($department_id > 0) {
+    $departmentOk = getRecord(
+        'SELECT id FROM tbl_employee_departments WHERE id = ' . $department_id . ' AND status = 1 LIMIT 1'
+    );
+    if (!$departmentOk) {
+        echo json_encode(['ok' => false, 'message' => 'Selected department is not available.']);
+        exit;
+    }
+}
+if ($designation_id > 0) {
+    $designationOk = getRecord(
+        'SELECT id, department_id FROM tbl_employee_designations WHERE id = ' . $designation_id . ' AND status = 1 LIMIT 1'
+    );
+    if (!$designationOk) {
+        echo json_encode(['ok' => false, 'message' => 'Selected designation is not available.']);
+        exit;
+    }
+    if ($department_id <= 0 || (int) ($designationOk['department_id'] ?? 0) !== $department_id) {
+        echo json_encode(['ok' => false, 'message' => 'Selected designation does not belong to the selected department.']);
+        exit;
+    }
+}
+
+if ($role === '') {
+    echo json_encode(['ok' => false, 'message' => 'Role is required.']);
+    exit;
+}
+$rn_esc = esc($role);
+$roleOk = getRecordMaster("SELECT id FROM tbl_roles WHERE role_name = '$rn_esc' AND is_active = 1 LIMIT 1");
+if (!$roleOk) {
+    echo json_encode(['ok' => false, 'message' => 'Selected role is not available. Add/activate it under Roles first.']);
+    exit;
+}
 
 $branch_ids_in = [];
 if (isset($in['branch_ids']) && is_array($in['branch_ids'])) {
@@ -166,6 +211,7 @@ $st_esc = esc($status);
 $rl_esc = esc($role);
 $bl_esc = esc($branches);
 $ub_esc = esc($ids_norm);
+$sal_sql = number_format($monthly_salary, 2, '.', '');
 
 if ($is_update) {
     $exists = getRecord("SELECT * FROM tbl_users WHERE id = $id LIMIT 1");
@@ -188,6 +234,9 @@ if ($is_update) {
         "user_role='$rl_esc'",
         "branch_labels='$bl_esc'",
         "user_branch_ids='$ub_esc'",
+        "monthly_salary=$sal_sql",
+        "department_id=$department_id",
+        "designation_id=$designation_id",
         "ModifiedBy=$mod",
     ];
     if ($password !== '') {
@@ -207,9 +256,10 @@ if ($is_update) {
 $pw_esc = esc($password);
 $sql = "
     INSERT INTO tbl_users (Fname, Lname, Username, Phone, EmailId, Password, Status,
-        CreatedBy, ModifiedBy, user_role, branch_labels, user_branch_ids, two_factor_enabled)
+        CreatedBy, ModifiedBy, user_role, branch_labels, user_branch_ids, two_factor_enabled,
+        monthly_salary, department_id, designation_id)
     VALUES ('$fn_esc', '$ln_esc', '$u_esc', '$ph_esc', '$em_esc', '$pw_esc', '$st_esc',
-        $uid, $uid, '$rl_esc', '$bl_esc', '$ub_esc', 0)
+        $uid, $uid, '$rl_esc', '$bl_esc', '$ub_esc', 0, $sal_sql, $department_id, $designation_id)
 ";
 
 if (!mysqli_query($conn, $sql)) {

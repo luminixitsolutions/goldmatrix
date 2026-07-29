@@ -92,7 +92,10 @@ if ($pmBranchId > 0) {
 
 $defaults = auragold_permission_all_keys_flat();
 if ($selId > 0) {
-    $stored = auragold_permission_grants_map_for_user_branch($conn_master, $selId, $pmBranchId);
+    // Read from $conn (branch operational DB): the save/get AJAX endpoints write and
+    // read grants there, so $conn_master (registry) may not have these rows at all.
+    $pm_grants_conn = (isset($conn) && $conn instanceof mysqli) ? $conn : $conn_master;
+    $stored = auragold_permission_grants_map_for_user_branch($pm_grants_conn, $selId, $pmBranchId);
     foreach ($defaults as $k => $_) {
         $defaults[$k] = array_key_exists($k, $stored) ? (int) $stored[$k] : 0;
     }
@@ -344,7 +347,7 @@ $auragold_admin_tab = 'permissions';
                                         <span style="color:var(--pm-muted);font-weight:600;">(<?php echo (int) $nPages; ?>)</span>
                                     </td>
                                     <td class="pm-cb">
-                                        <input type="checkbox" class="pm-grant" data-key="<?php echo htmlspecialchars($menuKey, ENT_QUOTES, 'UTF-8'); ?>"<?php echo !empty($defaults[$menuKey]) ? ' checked' : ''; ?>>
+                                        <input type="checkbox" class="pm-grant pm-menu-grant" data-key="<?php echo htmlspecialchars($menuKey, ENT_QUOTES, 'UTF-8'); ?>" data-mod="<?php echo htmlspecialchars($modKey, ENT_QUOTES, 'UTF-8'); ?>"<?php echo !empty($defaults[$menuKey]) ? ' checked' : ''; ?> title="Check to grant this menu and all its sub-menu actions">
                                     </td>
                                     <td class="pm-na" colspan="4" title="Use sub-menu rows below for View / Add / Update / Delete">—</td>
                                 </tr>
@@ -420,11 +423,71 @@ $auragold_admin_tab = 'permissions';
             });
         }
 
+        /** When main-menu access is toggled, sync all sub-menu View/Add/Update/Delete under that module. */
+        function syncSubmenuGrantsFromMenu(modKey, on) {
+            if (!modKey) return;
+            document.querySelectorAll('.perm-child[data-parent="' + modKey + '"] .pm-grant').forEach(function (cb) {
+                cb.checked = !!on;
+            });
+        }
+
+        document.getElementById('pmTable').addEventListener('change', function (e) {
+            var t = e.target;
+            if (!t || !t.classList || !t.classList.contains('pm-grant')) {
+                return;
+            }
+            if (t.classList.contains('pm-menu-grant')) {
+                var modKey = t.getAttribute('data-mod') || '';
+                if (!modKey) {
+                    var key = t.getAttribute('data-key') || '';
+                    if (key.slice(-5) === '.menu') {
+                        modKey = key.slice(0, -5);
+                    }
+                }
+                syncSubmenuGrantsFromMenu(modKey, t.checked);
+                return;
+            }
+            // Sub-menu action granted: the sidebar hides the whole module without
+            // the parent ".menu" grant, so auto-check Menu access as well.
+            if (t.checked) {
+                var childRow = t.closest('.perm-child');
+                var parentMod = childRow ? (childRow.getAttribute('data-parent') || '') : '';
+                if (parentMod) {
+                    var menuCb = document.querySelector('.pm-menu-grant[data-mod="' + parentMod + '"]');
+                    if (menuCb && !menuCb.checked) {
+                        menuCb.checked = true;
+                    }
+                }
+            }
+        });
+
         function showMsg(text, ok) {
             var el = document.getElementById('pmMsg');
             el.style.display = text ? 'block' : 'none';
             el.textContent = text || '';
             el.className = 'pm-msg ' + (ok ? 'ok' : 'err');
+        }
+
+        function pmNotify(title, text, type) {
+            var msg = text || title || '';
+            if (typeof swal === 'function') {
+                var opts = {
+                    title: title || (type === 'success' ? 'Success' : 'Notice'),
+                    text: msg,
+                    type: type || 'success',
+                    confirmButtonText: 'OK',
+                    allowOutsideClick: true
+                };
+                if (type === 'success') {
+                    opts.timer = 2200;
+                }
+                swal(opts);
+                return;
+            }
+            showMsg(msg, type === 'success');
+            if (type !== 'success') {
+                window.alert(msg);
+            }
         }
 
         function syncPmUrl() {
@@ -494,17 +557,23 @@ $auragold_admin_tab = 'permissions';
                 btn.disabled = false;
                 if (!res.data || typeof res.data !== 'object') {
                     showMsg('Save failed (invalid response). Check server logs.', false);
+                    pmNotify('Save failed', 'Invalid response from server. Check server logs.', 'error');
                     return;
                 }
                 if (res.data.ok) {
-                    showMsg(res.data.message || 'Saved.', true);
+                    var okMsg = res.data.message || 'Permission saved successfully';
+                    showMsg(okMsg, true);
+                    pmNotify('Permission saved successfully', okMsg, 'success');
                 } else {
-                    showMsg(res.data.message || 'Error', false);
+                    var errMsg = res.data.message || 'Could not save permissions.';
+                    showMsg(errMsg, false);
+                    pmNotify('Save failed', errMsg, 'error');
                 }
             })
             .catch(function () {
                 btn.disabled = false;
                 showMsg('Network error — request did not complete.', false);
+                pmNotify('Save failed', 'Network error — request did not complete.', 'error');
             });
         });
 
@@ -540,5 +609,6 @@ $auragold_admin_tab = 'permissions';
         });
     })();
     </script>
+    <?php include __DIR__ . '/footer-script.php'; ?>
 </body>
 </html>

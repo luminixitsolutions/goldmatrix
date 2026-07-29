@@ -82,6 +82,19 @@ if (!empty($result['success'])) {
         auragold_session_refresh_live_cookie();
     }
 
+    if (isset($conn) && $conn instanceof mysqli) {
+        require_once dirname(__DIR__) . '/includes/activity_logger.php';
+        if (function_exists('auragold_activity_log_login')) {
+            $alConn = function_exists('auragold_activity_operational_conn')
+                ? auragold_activity_operational_conn($conn)
+                : $conn;
+            auragold_activity_log_login($alConn);
+            if ($alConn instanceof mysqli && $alConn !== $conn) {
+                @mysqli_close($alConn);
+            }
+        }
+    }
+
     echo json_encode(['status' => 1, 'msg' => $result['message'] ?? 'Login success']);
     exit;
 }

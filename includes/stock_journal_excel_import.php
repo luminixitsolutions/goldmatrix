@@ -247,12 +247,85 @@ if (!function_exists('auragold_sj_excel_sj_cell_s')) {
     }
 }
 
+if (!function_exists('auragold_sj_excel_value_looks_like_karat')) {
+    /** True when a cell value is likely metal karat (24K, 22, 18K) rather than diamond carat weight. */
+    function auragold_sj_excel_value_looks_like_karat(string $v): bool
+    {
+        $v = trim($v);
+        if ($v === '') {
+            return false;
+        }
+        if (preg_match('/\d\s*k\b/i', $v) === 1) {
+            return true;
+        }
+        if (preg_match('/^\d{1,2}$/', $v) === 1) {
+            $n = (int) $v;
+
+            return $n >= 1 && $n <= 24;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('auragold_sj_excel_resolve_carat_id')) {
+    /**
+     * Resolve Excel karat text (24K, 22, numeric id) to tbl_carat id + display name.
+     *
+     * @return array{karat: string, carat_id: string}
+     */
+    function auragold_sj_excel_resolve_carat_id(mysqli $conn, string $karatRaw): array
+    {
+        $karatRaw = trim($karatRaw);
+        $out = ['karat' => $karatRaw, 'carat_id' => ''];
+        if ($karatRaw === '') {
+            return $out;
+        }
+        if (ctype_digit($karatRaw)) {
+            $id = (int) $karatRaw;
+            $row = getRecord('SELECT id, name FROM tbl_carat WHERE id = ' . $id . ' AND status = 1 LIMIT 1');
+            if ($row) {
+                $out['carat_id'] = (string) (int) ($row['id'] ?? 0);
+                $out['karat'] = trim((string) ($row['name'] ?? $karatRaw));
+
+                return $out;
+            }
+        }
+        $esc = mysqli_real_escape_string($conn, $karatRaw);
+        $row = getRecord(
+            "SELECT id, name FROM tbl_carat WHERE status = 1 AND (name = '" . $esc . "' OR LOWER(name) = LOWER('" . $esc . "')) LIMIT 1"
+        );
+        if ($row) {
+            $out['carat_id'] = (string) (int) ($row['id'] ?? 0);
+            $out['karat'] = trim((string) ($row['name'] ?? $karatRaw));
+
+            return $out;
+        }
+        $num = (float) preg_replace('/[^0-9.]/', '', $karatRaw);
+        if ($num > 0) {
+            $rows = getList('SELECT id, name FROM tbl_carat WHERE status = 1 ORDER BY id ASC');
+            foreach ($rows as $r) {
+                $nameNum = (float) preg_replace('/[^0-9.]/', '', (string) ($r['name'] ?? ''));
+                if ($nameNum > 0 && abs($nameNum - $num) < 0.001) {
+                    $out['carat_id'] = (string) (int) ($r['id'] ?? 0);
+                    $out['karat'] = trim((string) ($r['name'] ?? $karatRaw));
+
+                    return $out;
+                }
+            }
+        }
+
+        return $out;
+    }
+}
+
 if (!function_exists('auragold_sj_excel_map_stock_journals_extended')) {
     /**
      * @param array<int,string> $headers 1..N
+     * @param int $metal_id Active metal tab (Gold vs Diamond) — controls single "Carat" column meaning
      * @return array<string,int> logical field => column index
      */
-    function auragold_sj_excel_map_stock_journals_extended(array $headers): array
+    function auragold_sj_excel_map_stock_journals_extended(array $headers, int $metal_id = 0): array
     {
         $out = [];
         $caratCols = [];
@@ -261,6 +334,7 @@ if (!function_exists('auragold_sj_excel_map_stock_journals_extended')) {
                 $out[$k] = $c;
             }
         };
+        $karatHeaderKeys = ['karat', 'karat_k', 'metal_karat', 'select_karat', 'metal_k'];
         $normMap = [
             'id' => 'excel_id', 'vouchertype' => 'voucher_type', 'vouchertypeid' => 'voucher_type', 'voucher' => 'voucher_type',
             'rfidcode' => 'rfid_code', 'category' => 'category', 'calculation' => 'calculation', 'product' => 'product_name_in',
@@ -295,6 +369,10 @@ if (!function_exists('auragold_sj_excel_map_stock_journals_extended')) {
             }
             if ($n === 'carat') {
                 $caratCols[] = $c;
+                continue;
+            }
+            if (in_array($n, $karatHeaderKeys, true)) {
+                $put('karat_carat', $c);
                 continue;
             }
             if (preg_match('/product\\s*name/i', $r) !== 0 && stripos($r, 'product id') === false) {
@@ -334,11 +412,30 @@ if (!function_exists('auragold_sj_excel_map_stock_journals_extended')) {
                 $put('weight_metal', $c);
             }
         }
-        if (count($caratCols) > 0) {
-            $out['stone_weight_carat'] = (int) $caratCols[0];
+        $isDiamondTab = count($caratCols) >= 2;
+        if ($metal_id > 0) {
+            if (!function_exists('auragold_excel_sample_tab_shows_diamond_columns')) {
+                require_once __DIR__ . '/auragold_excel_sample_columns.php';
+            }
+            if (function_exists('auragold_excel_sample_tab_shows_diamond_columns')) {
+                $isDiamondTab = auragold_excel_sample_tab_shows_diamond_columns($metal_id);
+            }
         }
-        if (count($caratCols) > 1) {
-            $out['karat_carat'] = (int) $caratCols[1];
+        if (count($caratCols) >= 2) {
+            if (!isset($out['stone_weight_carat'])) {
+                $out['stone_weight_carat'] = (int) $caratCols[0];
+            }
+            if (!isset($out['karat_carat'])) {
+                $out['karat_carat'] = (int) $caratCols[1];
+            }
+        } elseif (count($caratCols) === 1) {
+            if ($isDiamondTab) {
+                if (!isset($out['stone_weight_carat'])) {
+                    $out['stone_weight_carat'] = (int) $caratCols[0];
+                }
+            } elseif (!isset($out['karat_carat'])) {
+                $out['karat_carat'] = (int) $caratCols[0];
+            }
         }
 
         return $out;

@@ -37,29 +37,9 @@ require_once __DIR__ . '/auragold_superadmin.php';
 
 if (!function_exists('auragold_session_may_see_set_software_branches_menu')) {
     /**
-     * "Branches" under Set Software: superadmin, superbranch template, or an effective main-branch row only — not a sub-branch context.
-     * (tbl_users logins stay user_role=admin, so the effective row must be checked on top of that.)
+     * Branches menu / page: visible for every logged-in session (main branch, sub-branch, admin, branch login).
      */
     function auragold_session_may_see_set_software_branches_menu(): bool {
-        if (function_exists('auragold_session_is_superadmin') && auragold_session_is_superadmin()) {
-            return true;
-        }
-        $su = (string) ($_SESSION['Admin']['Username'] ?? $_SESSION['Admin']['username'] ?? '');
-        if (strcasecmp(trim($su), 'superbranch') === 0) {
-            return true;
-        }
-        require_once __DIR__ . '/auragold_branch_data_scope.php';
-        $eff = (int) auragold_effective_branch_id();
-        if ($eff <= 0) {
-            return true;
-        }
-        if (!function_exists('getRecordMaster')) {
-            return true;
-        }
-        $row = getRecordMaster('SELECT id, main_branch_id FROM tbl_branches WHERE id = ' . (int) $eff . ' LIMIT 1');
-        if (!$row) {
-            return true;
-        }
-        return (int) ($row['main_branch_id'] ?? 0) === 0;
+        return !empty($_SESSION['Admin']);
     }
 }

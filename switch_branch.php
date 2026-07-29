@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/session_init.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/login_authenticate.php';
+require_once __DIR__ . '/includes/branch_panel_password.php';
 
 if (empty($_SESSION['Admin'])) {
     header('Location: index.php');
@@ -16,6 +17,12 @@ if (empty($_SESSION['Admin'])) {
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 if ($id <= 0) {
     header('Location: branches.php');
+    exit;
+}
+
+$switchToken = isset($_GET['token']) ? trim((string) $_GET['token']) : '';
+if ($switchToken === '' || !auragold_branch_panel_consume_switch($id, $switchToken)) {
+    header('Location: branches.php?switch_branch_id=' . $id);
     exit;
 }
 

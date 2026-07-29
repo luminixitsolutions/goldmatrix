@@ -994,7 +994,15 @@ function jwqMaybeApplyAutoLoss(tr) {
     if (nw <= 0.0000001) {
         return;
     }
-    var loss = orig - nw;
+    /* Baseline must use the CURRENT diamond weight: orig total baked in the old diamond, so after a
+       diamond is removed "orig − total" would book the missing diamond as loss and spiral the total down. */
+    var mwCur = jwqLineFieldNum(tr, 'metal_wt');
+    var dwCur = jwqLineFieldNum(tr, 'diamond_wt');
+    if (!isFinite(dwCur) || dwCur < 0) {
+        dwCur = 0;
+    }
+    var baseline = (isFinite(mwCur) && mwCur > 0.0000001) ? (mwCur + dwCur) : orig;
+    var loss = baseline - nw;
     if (loss < 0) {
         loss = 0;
     }
@@ -1379,6 +1387,10 @@ function jwqSyncOrderLineDiamondWtFromMaterialTable() {
         var mInp = jwqLineFieldEl(tr, 'metal_wt');
         var orderPool = parseFloat(tr.getAttribute('data-jwq-order-diamond-wt'));
         if (!isFinite(orderPool) || orderPool < 0) {
+            orderPool = 0;
+        }
+        if (tr.getAttribute('data-jwq-diamond-manual') === '1') {
+            /* User typed Diamond Wt: only real issued/grid diamonds may change it, not the BOM pool gap. */
             orderPool = 0;
         }
         if (orderPool < 0.0000001) {
@@ -1948,13 +1960,23 @@ function jwqOpenModal(btn, opts) {
 
     jwqFillDeptSelect(fromDept);
     jwqFillDeptSelect(toDeptSel);
-    if (fromDept) fromDept.value = currentDept > 0 ? String(currentDept) : '';
-    jwqFillUserSelectForDept(fromUser, currentDept);
-    if (fromUser) fromUser.value = currentUser > 0 ? String(currentUser) : '';
+    if (opts.forWeight && opts.weightMode === 'add') {
+        /* Add Weight: weight comes INTO the current department → To Dept = existing dept, From Dept = user chooses source */
+        if (fromDept) fromDept.value = '';
+        jwqFillUserSelectForDept(fromUser, 0);
+        if (fromUser) fromUser.value = '';
+        if (toDeptSel) toDeptSel.value = currentDept > 0 ? String(currentDept) : '';
+        jwqFillUserSelectForDept(toUserSel, currentDept);
+        if (toUserSel) toUserSel.value = currentUser > 0 ? String(currentUser) : '';
+    } else {
+        if (fromDept) fromDept.value = currentDept > 0 ? String(currentDept) : '';
+        jwqFillUserSelectForDept(fromUser, currentDept);
+        if (fromUser) fromUser.value = currentUser > 0 ? String(currentUser) : '';
 
-    if (toDeptSel) toDeptSel.value = '';
-    jwqFillUserSelectForDept(toUserSel, 0);
-    if (toUserSel) toUserSel.value = '';
+        if (toDeptSel) toDeptSel.value = '';
+        jwqFillUserSelectForDept(toUserSel, 0);
+        if (toUserSel) toUserSel.value = '';
+    }
 
     jwqSetNowDateTime();
     var timerDisp = document.getElementById('jwqTotalTimeDisplay');
@@ -2896,6 +2918,8 @@ function jwqHandleOrderLineWeightInput(e) {
         var trd = inD.closest('tr');
         if (trd) {
             trd.removeAttribute('data-jwq-freeze-weights');
+            /* User typed the diamond weight — later syncs must not resurrect it from the BOM pool gap. */
+            trd.setAttribute('data-jwq-diamond-manual', '1');
         }
         if (trd && typeof jwqRefreshLineDiamondBaseFromUi === 'function') {
             jwqRefreshLineDiamondBaseFromUi(trd);
@@ -3016,6 +3040,15 @@ function initJobworkQueueModal() {
             var toD = document.getElementById('jwqToDept');
             var toU = document.getElementById('jwqToUser');
             var toDeptId = toD ? parseInt(toD.value || '0', 10) : 0;
+            var fromDRef = document.getElementById('jwqFromDept');
+            var fromURef = document.getElementById('jwqFromUser');
+            var reduceOnly = typeof window.jwqIsReduceWeightMode === 'function' && window.jwqIsReduceWeightMode();
+            var toUserVal = toU && toU.value ? toU.value : '';
+            if (reduceOnly && toDeptId < 1) {
+                /* Reduce Weight: no transfer — save against the current (From) department. */
+                toDeptId = fromDRef ? parseInt(fromDRef.value || '0', 10) : 0;
+                toUserVal = fromURef && fromURef.value ? fromURef.value : '';
+            }
             if (toDeptId < 1) {
                 alert('Please select destination department (To Dept.). The job will move to that department after save.');
                 return;
@@ -3030,8 +3063,11 @@ function initJobworkQueueModal() {
                 var fd = new FormData();
                 fd.append('jobwork_order_id', String(id));
                 fd.append('to_dept_id', String(toDeptId));
-                if (toU && toU.value) {
-                    fd.append('to_user_id', toU.value);
+                if (toUserVal) {
+                    fd.append('to_user_id', toUserVal);
+                }
+                if (reduceOnly) {
+                    fd.append('reduce_only', '1');
                 }
                 var lines = typeof jwqCollectQueueLinePayload === 'function' ? jwqCollectQueueLinePayload() : [];
                 fd.append('queue_lines', JSON.stringify(lines));

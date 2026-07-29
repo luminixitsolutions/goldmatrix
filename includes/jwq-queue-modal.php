@@ -286,7 +286,7 @@ if (!isset($jwq_order_line_columns) || !is_array($jwq_order_line_columns)) {
                                 <th>Added dept</th>
                                 <th>Added by</th>
                                 <th>Issued</th>
-                                <th class="text-center" style="width:44px;" aria-label="Remove"></th>
+                                <th class="text-center" style="width:56px;" aria-label="Actions"></th>
                             </tr>
                         </thead>
                         <tbody id="jwqDiamondUsedModalBody">

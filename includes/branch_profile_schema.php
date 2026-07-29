@@ -73,6 +73,11 @@ function auragold_ensure_tbl_users_profile_photo_column($conn) {
     $doneUser[$key] = true;
 }
 
+// Access token helpers live in includes/auragold_access_token.php (also bootstrapped from config.php).
+if (is_file(__DIR__ . '/auragold_access_token.php')) {
+    require_once __DIR__ . '/auragold_access_token.php';
+}
+
 /**
  * Branch row id this profile page edits: branch login = own row; admin user = working branch.
  * For tbl_users logins, branch chosen at login sets $_SESSION['branch_id']; working DB may also set

@@ -159,7 +159,7 @@ if ($pc_cat_sql !== '') {
 }
 $inner_sql = implode(' AND ', $inner_where);
 
-$gas_stk_in_types_sql = "'opening','purchase','stock_journal','balance','sale_return'";
+$gas_stk_in_types_sql = "'opening','purchase','stock_journal','balance','sale_return','inward'";
 
 $agg_subquery = "
     SELECT s.barcode, s.branch_id,

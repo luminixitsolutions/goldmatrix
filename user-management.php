@@ -4,6 +4,8 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/session_login_type.php';
 require_once __DIR__ . '/includes/user_management_schema.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
+require_once __DIR__ . '/includes/roles_schema.php';
+require_once __DIR__ . '/includes/auragold_employee_management_schema.php';
 
 if (empty($_SESSION['Admin'])) {
     header('Location: index.php');
@@ -16,6 +18,26 @@ if (!auragold_session_is_admin_login_type()) {
 
 // tbl_users lives on the operational connection ($conn), same as login — not the registry master alone.
 auragold_ensure_user_management_columns($conn);
+auragold_ensure_roles_table($conn_master);
+$um_employee_branch_id = auragold_em_resolve_branch_id();
+auragold_em_ensure_tables($conn);
+auragold_em_seed_defaults($conn, $um_employee_branch_id);
+$um_departments = auragold_em_get_master_list($conn, 'tbl_employee_departments', $um_employee_branch_id);
+$um_designations = auragold_em_get_master_list($conn, 'tbl_employee_designations', $um_employee_branch_id);
+
+/** Active roles from Role Management (tbl_roles) for the user form dropdown. */
+$um_roles = getListMaster('SELECT id, role_name FROM tbl_roles WHERE is_active = 1 ORDER BY role_name ASC');
+if (!is_array($um_roles)) {
+    $um_roles = [];
+}
+if ($um_roles === []) {
+    // Fallback if roles table is empty
+    $um_roles = [
+        ['id' => 0, 'role_name' => 'Admin'],
+        ['id' => 0, 'role_name' => 'Branch Manager'],
+        ['id' => 0, 'role_name' => 'Sales Person'],
+    ];
+}
 
 $um_users_table = 'tbl_users';
 $um_connection_db = '';
@@ -410,13 +432,23 @@ $auragold_admin_tab = 'users';
         .um-form-group input[type="text"],
         .um-form-group input[type="email"],
         .um-form-group input[type="password"],
+        .um-form-group input[type="number"],
         .um-form-group select {
             width: 100%;
             border: 1px solid var(--um-border);
             border-radius: 8px;
             padding: 10px 12px;
             font-size: 14px;
+            color: var(--um-text);
+            background: #fff;
             box-sizing: border-box;
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+        .um-form-group input[type="number"]::-webkit-outer-spin-button,
+        .um-form-group input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
         .um-form-group input:focus,
         .um-form-group select:focus {
@@ -656,6 +688,7 @@ $auragold_admin_tab = 'users';
                                     <th>Mail ID <span class="um-sort"><i class="feather icon-chevron-up"></i><i class="feather icon-chevron-down"></i></span></th>
                                     <th>Contact <span class="um-sort"><i class="feather icon-chevron-up"></i><i class="feather icon-chevron-down"></i></span></th>
                                     <th>User Role <span class="um-sort"><i class="feather icon-chevron-up"></i><i class="feather icon-chevron-down"></i></span></th>
+                                    <th>Monthly Salary</th>
                                     <th class="um-status-cell">Status</th>
                                     <th class="um-actions-cell">Actions</th>
                                     <th class="um-th-actions"><i class="feather icon-settings" style="color:#11294b;" title="Column settings"></i></th>
@@ -667,7 +700,7 @@ $auragold_admin_tab = 'users';
                                 if ($n === 0):
                                 ?>
                                 <tr>
-                                    <td colspan="8" class="um-empty-cell">No Rows To Show</td>
+                                    <td colspan="9" class="um-empty-cell">No Rows To Show</td>
                                 </tr>
                                 <?php else: ?>
                                     <?php foreach ($users as $u): ?>
@@ -702,6 +735,7 @@ $auragold_admin_tab = 'users';
                                             }
                                         }
                                         $pw_b64 = base64_encode($pw_raw);
+                                        $salary = (float) ($u['monthly_salary'] ?? 0);
                                         ?>
                                         <tr data-user-id="<?php echo $uid; ?>">
                                             <td><?php echo htmlspecialchars($disp, ENT_QUOTES, 'UTF-8'); ?></td>
@@ -709,6 +743,7 @@ $auragold_admin_tab = 'users';
                                             <td><?php echo htmlspecialchars($email !== '' ? $email : '—', ENT_QUOTES, 'UTF-8'); ?></td>
                                             <td><?php echo htmlspecialchars($phone !== '' ? $phone : '', ENT_QUOTES, 'UTF-8'); ?></td>
                                             <td><?php echo htmlspecialchars($role, ENT_QUOTES, 'UTF-8'); ?></td>
+                                            <td style="text-align:right;font-variant-numeric:tabular-nums;"><?php echo htmlspecialchars(number_format($salary, 2), ENT_QUOTES, 'UTF-8'); ?></td>
                                             <td class="um-status-cell">
                                                 <input type="checkbox" class="um-status-cb" data-id="<?php echo $uid; ?>" <?php echo $ok ? 'checked' : ''; ?> <?php echo $is_self ? 'disabled title="Cannot deactivate own account"' : ''; ?>>
                                             </td>
@@ -723,6 +758,9 @@ $auragold_admin_tab = 'users';
                                                     data-branch-ids="<?php echo htmlspecialchars($ub_ids_str, ENT_QUOTES, 'UTF-8'); ?>"
                                                     data-username="<?php echo htmlspecialchars($uname, ENT_QUOTES, 'UTF-8'); ?>"
                                                     data-active="<?php echo $ok ? '1' : '0'; ?>"
+                                                    data-monthly-salary="<?php echo htmlspecialchars(number_format($salary, 2, '.', ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                                    data-department-id="<?php echo (int) ($u['department_id'] ?? 0); ?>"
+                                                    data-designation-id="<?php echo (int) ($u['designation_id'] ?? 0); ?>"
                                                     data-password-b64="<?php echo htmlspecialchars($pw_b64, ENT_QUOTES, 'UTF-8'); ?>"
                                                     aria-label="Edit"><i class="feather icon-edit-2"></i></button>
                                                 <a class="um-btn-edit" style="text-decoration:none;margin-right:2px;" href="permission-management.php?user_id=<?php echo $uid; ?>" title="Branch permissions"><i class="feather icon-shield"></i></a>
@@ -787,19 +825,46 @@ $auragold_admin_tab = 'users';
                                         <input type="text" id="umPhone" name="phone" required maxlength="20" inputmode="tel" autocomplete="tel" placeholder="Phone number">
                                     </div>
                                 </div>
+                                <!-- Role field hidden from UI; kept in the form so saves keep working and
+                                     editing an existing user preserves their current role. -->
+                                <div class="um-form-group" style="display:none;" aria-hidden="true">
+                                    <select id="umRole" name="user_role">
+                                        <?php foreach ($um_roles as $um_role_row):
+                                            $um_role_name = trim((string) ($um_role_row['role_name'] ?? ''));
+                                            if ($um_role_name === '') {
+                                                continue;
+                                            }
+                                        ?>
+                                        <option value="<?php echo htmlspecialchars($um_role_name, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($um_role_name, ENT_QUOTES, 'UTF-8'); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
                                 <div class="um-form-group">
-                                    <label>Role <span class="um-req">*</span></label>
-                                    <div class="um-role-row">
-                                        <select id="umRole" name="user_role" required>
-                                            <option value="Admin">Admin</option>
-                                            <option value="Branch Manager">Branch Manager</option>
-                                            <option value="Sales Person">Sales Person</option>
-                                        </select>
-                                        <label class="um-check-inline">
-                                            <input type="checkbox" id="umActive" name="active" checked>
-                                            Active
-                                        </label>
-                                    </div>
+                                    <label class="um-check-inline">
+                                        <input type="checkbox" id="umActive" name="active" checked>
+                                        Active
+                                    </label>
+                                </div>
+                                <div class="um-form-group">
+                                    <label for="umDepartment">Department</label>
+                                    <select id="umDepartment" name="department_id">
+                                        <option value="0">— Select department —</option>
+                                        <?php foreach ($um_departments as $um_department): ?>
+                                        <option value="<?php echo (int) ($um_department['id'] ?? 0); ?>"><?php echo htmlspecialchars((string) ($um_department['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="um-form-group">
+                                    <label for="umDesignation">Designation</label>
+                                    <select id="umDesignation" name="designation_id">
+                                        <option value="0">— Select designation —</option>
+                                        <?php foreach ($um_designations as $um_designation): ?>
+                                        <option value="<?php echo (int) ($um_designation['id'] ?? 0); ?>"
+                                            data-department-id="<?php echo (int) ($um_designation['department_id'] ?? 0); ?>">
+                                            <?php echo htmlspecialchars((string) ($um_designation['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </div>
                                 <div class="um-form-group">
                                     <label id="umBranchFieldLabel" style="display:block;font-weight:600;margin-bottom:8px;color:var(--um-text);">Branch <span class="um-req">*</span></label>
@@ -846,6 +911,11 @@ $auragold_admin_tab = 'users';
                                     <input type="text" id="umUsername" name="username" required maxlength="100" autocomplete="username" placeholder="Login username">
                                 </div>
                                 <div class="um-form-group">
+                                    <label for="umMonthlySalary">Monthly Salary</label>
+                                    <input type="number" id="umMonthlySalary" name="monthly_salary" step="0.01" min="0" value="0" placeholder="0.00">
+                                    <p style="font-size:12px;color:var(--um-muted);margin:6px 0 0;">Used as basic salary in Employee Salary / Payroll.</p>
+                                </div>
+                                <div class="um-form-group">
                                     <label for="umPassword">Password <span class="um-req" id="umPwStar1">*</span></label>
                                     <div class="um-pw-wrap">
                                         <input type="password" id="umPassword" name="password" required maxlength="50" autocomplete="new-password">
@@ -880,6 +950,32 @@ $auragold_admin_tab = 'users';
         var xBtn = document.getElementById('umModalX');
         var form = document.getElementById('umAddForm');
         var errEl = document.getElementById('umFormError');
+        var departmentSelect = document.getElementById('umDepartment');
+        var designationSelect = document.getElementById('umDesignation');
+
+        function filterDesignations() {
+            var departmentId = parseInt(departmentSelect.value, 10) || 0;
+            Array.prototype.forEach.call(designationSelect.options, function (option, index) {
+                if (index === 0) {
+                    option.hidden = false;
+                    option.disabled = false;
+                    return;
+                }
+                var belongsTo = parseInt(option.getAttribute('data-department-id'), 10) || 0;
+                var show = departmentId > 0 && belongsTo === departmentId;
+                option.hidden = !show;
+                option.disabled = !show;
+            });
+            var selected = designationSelect.options[designationSelect.selectedIndex];
+            if (selected && selected.disabled) {
+                designationSelect.value = '0';
+            }
+        }
+        departmentSelect.addEventListener('change', function () {
+            designationSelect.value = '0';
+            filterDesignations();
+        });
+        filterDesignations();
 
         function parsePhone(s) {
             s = (s || '').trim();
@@ -972,6 +1068,10 @@ $auragold_admin_tab = 'users';
             document.getElementById('umEditId').value = '0';
             document.getElementById('umAddTitle').textContent = 'Add User';
             document.getElementById('umActive').checked = true;
+            document.getElementById('umMonthlySalary').value = '0';
+            departmentSelect.value = '0';
+            designationSelect.value = '0';
+            filterDesignations();
             setPasswordMode(false);
             errEl.style.display = 'none';
             errEl.textContent = '';
@@ -1006,7 +1106,23 @@ $auragold_admin_tab = 'users';
             }
             ccSel.value = p.cc;
             document.getElementById('umPhone').value = p.num;
-            document.getElementById('umRole').value = btn.getAttribute('data-role') || 'Admin';
+            var roleSel = document.getElementById('umRole');
+            var roleVal = btn.getAttribute('data-role') || 'Admin';
+            var roleFound = false;
+            var ri;
+            for (ri = 0; ri < roleSel.options.length; ri++) {
+                if (roleSel.options[ri].value === roleVal) {
+                    roleFound = true;
+                    break;
+                }
+            }
+            if (!roleFound && roleVal) {
+                var roleOpt = document.createElement('option');
+                roleOpt.value = roleVal;
+                roleOpt.textContent = roleVal;
+                roleSel.appendChild(roleOpt);
+            }
+            roleSel.value = roleVal;
             document.getElementById('umActive').checked = btn.getAttribute('data-active') === '1';
             var idsStr = btn.getAttribute('data-branch-ids') || '';
             var idParts = idsStr.split(',').map(function (x) {
@@ -1028,6 +1144,10 @@ $auragold_admin_tab = 'users';
                 }
             });
             document.getElementById('umUsername').value = btn.getAttribute('data-username') || '';
+            document.getElementById('umMonthlySalary').value = btn.getAttribute('data-monthly-salary') || '0';
+            departmentSelect.value = btn.getAttribute('data-department-id') || '0';
+            filterDesignations();
+            designationSelect.value = btn.getAttribute('data-designation-id') || '0';
             var b64 = btn.getAttribute('data-password-b64');
             var pw = '';
             try {
@@ -1110,6 +1230,9 @@ $auragold_admin_tab = 'users';
                 active: document.getElementById('umActive').checked,
                 branch_ids: branch_ids,
                 username: document.getElementById('umUsername').value.trim(),
+                monthly_salary: document.getElementById('umMonthlySalary').value,
+                department_id: parseInt(document.getElementById('umDepartment').value, 10) || 0,
+                designation_id: parseInt(document.getElementById('umDesignation').value, 10) || 0,
                 password: document.getElementById('umPassword').value,
                 confirm_password: document.getElementById('umPassword2').value
             };

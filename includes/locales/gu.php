@@ -30,6 +30,7 @@ return [
     'lang_settings.saved'           => 'ભાષા સાચવી.',
     'user.my_profile'               => 'મારૂં પ્રોફાઇલ',
     'user.change_password'          => 'પાસવર્ડ બદલો',
+    'user.branch'                   => 'બ્રાન્ચ',
     'user.notifications'            => 'નોટિફિકેશન',
     'user.logout'                  => 'લૉગઆઉટ',
     'mobile.open_menu'              => 'મેનૂ ખોલો',

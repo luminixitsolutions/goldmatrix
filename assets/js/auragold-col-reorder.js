@@ -28,6 +28,8 @@
             '}',
             'table.acr-col-table thead th .acr-th-drag .feather { width: 0.95rem; height: 0.95rem; }',
             'table.acr-col-table thead th .acr-th-drag:active { cursor: grabbing; }',
+            'table.acr-col-table thead th.acr-th-reorder { cursor: grab; }',
+            'table.acr-col-table thead th.acr-sortable-drag { opacity: 0.95; background: #fff7ed !important; }',
             'table.acr-col-table thead th .acr-th-resize {',
             '  position: absolute; right: 0; top: 0; bottom: 0; width: 6px;',
             '  cursor: col-resize; z-index: 4;',
@@ -206,31 +208,40 @@
         return keys.every(function (k) { return need[k] === 1; });
     }
 
-    function enhanceHeaders(table, fixedFirst, fixedKey) {
+    function enhanceHeaders(table, fixedFirst, fixedKey, fixedLast, fixedKeys) {
         var tr = theadRow(table);
         if (!tr) return;
         var ths = tr.querySelectorAll('th');
+        var lastIdx = ths.length - 1;
+        var fixedKeySet = {};
+        if (fixedKeys && fixedKeys.length) {
+            fixedKeys.forEach(function (k) { if (k) fixedKeySet[k] = true; });
+        }
         ths.forEach(function (th, idx) {
             if (th._acrEnhanced) return;
             th._acrEnhanced = true;
             var k = th.getAttribute('data-col');
-            var isFixed = fixedFirst && (idx === 0 || (fixedKey && k === fixedKey));
+            var isFixed = (fixedFirst && (idx === 0 || (fixedKey && k === fixedKey)))
+                || (fixedLast && idx === lastIdx)
+                || (k && fixedKeySet[k]);
             th.classList.toggle('acr-th-fixed', isFixed);
             th.classList.toggle('acr-th-reorder', !isFixed);
-            th.classList.add('acr-th-resizable');
-            if (!th.querySelector('.acr-th-resize')) {
-                var resize = document.createElement('span');
-                resize.className = 'acr-th-resize';
-                resize.title = 'Drag to resize column';
-                resize.setAttribute('aria-hidden', 'true');
-                th.appendChild(resize);
-            }
-            if (!isFixed && !th.querySelector('.acr-th-drag')) {
-                var drag = document.createElement('span');
-                drag.className = 'acr-th-drag';
-                drag.title = 'Drag to reorder columns';
-                drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
-                th.appendChild(drag);
+            if (!isFixed) {
+                th.classList.add('acr-th-resizable');
+                if (!th.querySelector('.acr-th-resize')) {
+                    var resize = document.createElement('span');
+                    resize.className = 'acr-th-resize';
+                    resize.title = 'Drag to resize column';
+                    resize.setAttribute('aria-hidden', 'true');
+                    th.appendChild(resize);
+                }
+                if (!th.querySelector('.acr-th-drag')) {
+                    var drag = document.createElement('span');
+                    drag.className = 'acr-th-drag';
+                    drag.title = 'Drag to reorder columns';
+                    drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
+                    th.appendChild(drag);
+                }
             }
         });
     }
@@ -274,7 +285,7 @@
         });
     }
 
-    function bindSortable(table, storageKey, fixedFirst, fixedKey) {
+    function bindSortable(table, storageKey, fixedFirst, fixedKey, fixedLast) {
         if (typeof Sortable === 'undefined') return;
         var tr = theadRow(table);
         if (!tr) return;
@@ -289,18 +300,29 @@
         refreshLastGood();
         tr._acrSortable = Sortable.create(tr, {
             animation: 150,
-            handle: '.acr-th-drag',
+            // Whole header is draggable; resize handle is filtered out.
+            // forceFallback is required for <table>/<th> column reorder in Chromium.
+            handle: 'th.acr-th-reorder',
             draggable: 'th.acr-th-reorder',
             filter: '.acr-th-fixed, .acr-th-resize',
             preventOnFilter: true,
+            forceFallback: true,
+            fallbackOnBody: true,
+            fallbackTolerance: 3,
+            direction: 'horizontal',
             ghostClass: 'acr-sortable-ghost',
             chosenClass: 'acr-sortable-chosen',
+            dragClass: 'acr-sortable-drag',
             onEnd: function () {
                 var order = getOrder(table);
                 var ok = validPermutation(order, lastGood);
                 if (fixedFirst) {
                     var fk = fixedKey || theadRow(table).cells[0].getAttribute('data-col');
                     if (order[0] !== fk) ok = false;
+                }
+                if (fixedLast && order.length) {
+                    var lastKey = lastGood[lastGood.length - 1];
+                    if (order[order.length - 1] !== lastKey) ok = false;
                 }
                 if (!ok) {
                     applyOrder(table, lastGood);
@@ -325,7 +347,7 @@
 
     /**
      * @param {string|HTMLElement} selector
-     * @param {{ storageKey: string, widthsStorageKey?: string, fixedFirst?: boolean, fixedKey?: string, minWidth?: number }} opts
+     * @param {{ storageKey: string, widthsStorageKey?: string, fixedFirst?: boolean, fixedKey?: string, fixedLast?: boolean, fixedKeys?: string[], minWidth?: number }} opts
      */
     function init(selector, opts) {
         opts = opts || {};
@@ -349,13 +371,18 @@
         var defaultOrder = getOrder(table);
         var saved = loadOrder(opts.storageKey);
         var order = normalizeOrder(saved, defaultOrder);
+        if (opts.fixedLast && order.length && defaultOrder.length) {
+            var lastKey = defaultOrder[defaultOrder.length - 1];
+            order = order.filter(function (k) { return k !== lastKey; });
+            order.push(lastKey);
+        }
         if (validPermutation(order, defaultOrder)) {
             applyOrder(table, order);
         }
 
-        enhanceHeaders(table, !!opts.fixedFirst, opts.fixedKey || null);
+        enhanceHeaders(table, !!opts.fixedFirst, opts.fixedKey || null, !!opts.fixedLast, opts.fixedKeys || null);
         bindResize(table, opts.widthsStorageKey, opts.minWidth);
-        bindSortable(table, opts.storageKey, !!opts.fixedFirst, opts.fixedKey || null);
+        bindSortable(table, opts.storageKey, !!opts.fixedFirst, opts.fixedKey || null, !!opts.fixedLast);
 
         var savedW = loadWidths(opts.widthsStorageKey);
         if (savedW) applyWidths(table, savedW, opts.minWidth);

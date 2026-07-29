@@ -68,8 +68,11 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
         int $newSubBranchId,
         string $targetDbName,
         string $targetDbUser,
-        string $targetDbPass
+        string $targetDbPass,
+        array $opts = []
     ): array {
+        $skipCarat      = !empty($opts['skip_carat']);
+        $skipTaxMaster  = !empty($opts['skip_tax_master']);
         $mainBranchId   = (int) $mainBranchId;
         $newSubBranchId = (int) $newSubBranchId;
         $targetDbName   = trim($targetDbName);
@@ -106,10 +109,16 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
             if (!$link) {
                 return ['ok' => false, 'message' => 'Could not connect to branch database for master copy.'];
             }
-            $seed = auragold_seed_subbranch_masters_from_main($link, $mainBranchId, $newSubBranchId);
+            $seedOpts = [];
+            if ($skipTaxMaster) {
+                $seedOpts['skip_tax_master'] = true;
+            }
+            $seed = auragold_seed_subbranch_masters_from_main($link, $mainBranchId, $newSubBranchId, $seedOpts);
             return [
                 'ok'            => true,
-                'message'       => 'Metals and carats shared with main branch (same database). Other masters copied where needed.',
+                'message'       => 'Metals shared with main branch (same database). Other masters copied where needed.'
+                    . ($skipCarat ? ' Carat master was not copied.' : '')
+                    . ($skipTaxMaster ? ' Tax master was not copied.' : ''),
                 'metals'        => 0,
                 'carats'        => 0,
                 'shared_master' => true,
@@ -137,7 +146,11 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
         $sq = '`' . str_replace('`', '``', $sourceDb) . '`';
         $tq = '`' . str_replace('`', '``', $targetDbName) . '`';
 
-        foreach (['tbl_metal', 'tbl_carat'] as $t) {
+        $tablesToCopy = ['tbl_metal'];
+        if (!$skipCarat) {
+            $tablesToCopy[] = 'tbl_carat';
+        }
+        foreach ($tablesToCopy as $t) {
             if (!auragold_schema_table_exists_on_link($srcConn, $sourceDb, $t)
                 || !auragold_schema_table_exists_on_link($tgtConn, $targetDbName, $t)) {
                 mysqli_close($srcConn);
@@ -218,7 +231,9 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
         };
 
         mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=0');
-        mysqli_query($tgtConn, 'DELETE FROM ' . $tq . '.`tbl_carat`');
+        if (!$skipCarat) {
+            mysqli_query($tgtConn, 'DELETE FROM ' . $tq . '.`tbl_carat`');
+        }
         mysqli_query($tgtConn, 'DELETE FROM ' . $tq . '.`tbl_metal`');
 
         $metalCount = 0;
@@ -251,41 +266,48 @@ if (!function_exists('auragold_seed_sub_branch_metal_and_carat_from_main')) {
         }
 
         $caratCount = 0;
-        $rCarats    = mysqli_query($srcConn, 'SELECT * FROM ' . $sq . '.`tbl_carat` WHERE ' . $caratWhere . ' ORDER BY `id` ASC');
-        if (!$rCarats) {
-            $err = mysqli_error($srcConn);
-            mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
-            mysqli_close($srcConn);
-            mysqli_close($tgtConn);
-            return ['ok' => false, 'message' => 'Could not read carats from main branch: ' . $err];
-        }
-        while ($caratRow = mysqli_fetch_assoc($rCarats)) {
-            $overrides = [];
-            if (isset($tgtCaratCols['branch_id'])) {
-                $overrides['branch_id'] = $newSubBranchId;
-            }
-            if (!$insertRow($tgtConn, $tq, 'tbl_carat', $caratRow, $tgtCaratCols, $overrides)) {
-                $err = mysqli_error($tgtConn);
-                mysqli_free_result($rCarats);
+        if (!$skipCarat) {
+            $rCarats = mysqli_query($srcConn, 'SELECT * FROM ' . $sq . '.`tbl_carat` WHERE ' . $caratWhere . ' ORDER BY `id` ASC');
+            if (!$rCarats) {
+                $err = mysqli_error($srcConn);
                 mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
                 mysqli_close($srcConn);
                 mysqli_close($tgtConn);
-                return ['ok' => false, 'message' => 'Copy tbl_carat failed: ' . $err];
+                return ['ok' => false, 'message' => 'Could not read carats from main branch: ' . $err];
             }
-            $caratCount++;
-        }
-        mysqli_free_result($rCarats);
-        if ($caratCount > 0) {
-            $resetAutoInc($tgtConn, $tq, 'tbl_carat');
+            while ($caratRow = mysqli_fetch_assoc($rCarats)) {
+                $overrides = [];
+                if (isset($tgtCaratCols['branch_id'])) {
+                    $overrides['branch_id'] = $newSubBranchId;
+                }
+                if (!$insertRow($tgtConn, $tq, 'tbl_carat', $caratRow, $tgtCaratCols, $overrides)) {
+                    $err = mysqli_error($tgtConn);
+                    mysqli_free_result($rCarats);
+                    mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
+                    mysqli_close($srcConn);
+                    mysqli_close($tgtConn);
+                    return ['ok' => false, 'message' => 'Copy tbl_carat failed: ' . $err];
+                }
+                $caratCount++;
+            }
+            mysqli_free_result($rCarats);
+            if ($caratCount > 0) {
+                $resetAutoInc($tgtConn, $tq, 'tbl_carat');
+            }
         }
 
         mysqli_query($tgtConn, 'SET FOREIGN_KEY_CHECKS=1');
         mysqli_close($srcConn);
         mysqli_close($tgtConn);
 
+        $msg = 'Copied ' . $metalCount . ' metal(s) from main branch (same ids, branch_id ' . $newSubBranchId . ').';
+        if (!$skipCarat) {
+            $msg = 'Copied ' . $metalCount . ' metal(s) and ' . $caratCount . ' carat row(s) from main branch (same ids, branch_id ' . $newSubBranchId . ').';
+        }
+
         return [
             'ok'      => true,
-            'message' => 'Copied ' . $metalCount . ' metal(s) and ' . $caratCount . ' carat row(s) from main branch (same ids, branch_id ' . $newSubBranchId . ').',
+            'message' => $msg,
             'metals'  => $metalCount,
             'carats'  => $caratCount,
         ];

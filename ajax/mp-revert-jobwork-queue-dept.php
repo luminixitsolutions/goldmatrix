@@ -65,7 +65,70 @@ if (!$last || empty($last['id'])) {
 }
 
 if (!$last || empty($last['id'])) {
-    echo json_encode(['ok' => false, 'message' => 'No department transfer found to undo for this job.']);
+    /* Job is still in its first department (no transfer to undo): remove it from the manufacturing
+       floor instead — return issued diamonds to stock, drop the queue activity, clear the department. */
+    mysqli_begin_transaction($conn);
+    $uq_ok = true;
+    $uq_err = '';
+
+    if (function_exists('mp_jwq_remove_diamond_issues_for_jobwork')) {
+        mp_jwq_ensure_diamond_issue_table($conn);
+        $issue_tbl = mp_jwq_diamond_issue_table_name();
+        $issue_rows = function_exists('getList')
+            ? getList("SELECT id AS issue_id, stock_id, barcode FROM `{$issue_tbl}` WHERE jobwork_order_id = {$id}")
+            : [];
+        if (is_array($issue_rows) && $issue_rows !== []) {
+            mp_jwq_remove_diamond_issues_for_jobwork($conn, $id, $issue_rows, $uq_ok, $uq_err);
+        }
+    }
+
+    if ($uq_ok) {
+        if (!@mysqli_query($conn, 'DELETE FROM `' . $act_tbl . '` WHERE jobwork_order_id = ' . $id)) {
+            $uq_ok = false;
+            $uq_err = 'Could not remove queue activity records. DB: ' . mysqli_error($conn);
+        }
+    }
+
+    if ($uq_ok) {
+        $parts = ['department_id = NULL'];
+        $cu = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_jobwork_orders LIKE 'department_user_id'");
+        if ($cu && mysqli_num_rows($cu) > 0) {
+            $parts[] = 'department_user_id = NULL';
+        }
+        if ($cu) {
+            mysqli_free_result($cu);
+        }
+        if (!@mysqli_query($conn, 'UPDATE tbl_jobwork_orders SET ' . implode(', ', $parts) . ' WHERE id = ' . $id . ' LIMIT 1')) {
+            $uq_ok = false;
+            $uq_err = 'Could not remove job from the manufacturing floor. DB: ' . mysqli_error($conn);
+        }
+    }
+
+    if ($uq_ok) {
+        $soid = (int) ($jwo['sale_order_id'] ?? 0);
+        if ($soid > 0) {
+            $cd_so = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_sale_orders LIKE 'department_id'");
+            if ($cd_so && mysqli_num_rows($cd_so) > 0) {
+                mysqli_free_result($cd_so);
+                @mysqli_query($conn, 'UPDATE tbl_sale_orders SET department_id = NULL WHERE id = ' . $soid);
+            } elseif ($cd_so) {
+                mysqli_free_result($cd_so);
+            }
+        }
+    }
+
+    if ($uq_ok) {
+        mysqli_commit($conn);
+        echo json_encode([
+            'ok' => true,
+            'removed_from_queue' => true,
+            'message' => 'Job removed from the manufacturing floor. Issued diamonds were returned to stock.',
+            'jobwork_order_id' => $id,
+        ], JSON_UNESCAPED_UNICODE);
+    } else {
+        mysqli_rollback($conn);
+        echo json_encode(['ok' => false, 'message' => $uq_err !== '' ? $uq_err : 'Could not remove job from the manufacturing floor.']);
+    }
     exit;
 }
 

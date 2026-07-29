@@ -5,8 +5,8 @@ $db_prefix = "goldmatrix_";
 // Set to your base domain (host only) to auto-fill branch “IP/URL” with https://{name-slug}.HOST, e.g. "goldmatrixsoft.com"
 $auragold_branch_subdomain_base_host = 'goldmatrixsoft.com';
 // Branch schema clone (production): main/template database and a MySQL user that can read it. Used when cloning a new branch DB; often goldmatrix_main + that DB’s user. Leave empty to use the main app DB (DB_NAME) and app credentials (DB_USER/DB_PASS).
-$auragold_schema_clone_source_db  = '';
-$auragold_clone_source_mysql_user = '';
+$auragold_schema_clone_source_db  = 'root';
+$auragold_clone_source_mysql_user = 'auragold';
 $auragold_clone_source_mysql_pass = '';
 // Production only: cPanel UAPI (create_database / create_user / set_privileges) — ignored on local.
 $cpanelUser = '';
@@ -480,6 +480,7 @@ if (PHP_SAPI !== 'cli' && function_exists('session_status') && session_status() 
 }
 
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
+require_once __DIR__ . '/includes/auragold_date_helpers.php';
 
 if (is_file(__DIR__ . '/includes/auragold_i18n.php')) {
     require_once __DIR__ . '/includes/auragold_i18n.php';
@@ -490,6 +491,30 @@ if (is_file(__DIR__ . '/includes/auragold_i18n.php')) {
 
 if (PHP_SAPI !== 'cli' && function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
     require_once __DIR__ . '/includes/auragold_minimal_nav_gate.php';
+}
+
+if (PHP_SAPI !== 'cli'
+    && function_exists('session_status')
+    && session_status() === PHP_SESSION_ACTIVE
+    && isset($conn)
+    && $conn instanceof mysqli
+) {
+    require_once __DIR__ . '/includes/activity_logger.php';
+    if (function_exists('auragold_activity_bootstrap_request_tracking')) {
+        auragold_activity_bootstrap_request_tracking($conn);
+    }
+}
+
+// Create fixed user access_token once if missing (any page that includes config.php).
+if (is_file(__DIR__ . '/includes/auragold_access_token.php')) {
+    require_once __DIR__ . '/includes/auragold_access_token.php';
+    if (PHP_SAPI !== 'cli'
+        && function_exists('session_status')
+        && session_status() === PHP_SESSION_ACTIVE
+        && function_exists('auragold_bootstrap_session_access_token')
+    ) {
+        auragold_bootstrap_session_access_token();
+    }
 }
 
 function getRecords($sql){
@@ -994,10 +1019,11 @@ function auragold_sale_order_so_item_still_pending($conn, $so_item_id, $order_id
 }
 
 /**
- * Account ledger "Against Ledger" on Cash/Bank lines when paying a party:
- * e.g. RK Jewellers(Bank - 200.00Dr), RK Jewellers(UPI - 800.00Dr)
+ * Account ledger "Against Ledger" on Cash/Bank lines when paying/receiving a party:
+ * e.g. RK Jewellers(Bank - 200.00Dr), RK Jewellers(UPI - 800.00Cr)
+ * $party_side: Dr/Cr as posted on the party ledger for this line.
  */
-function accountledger_against_party_payment_label($party_name, $payment_type_raw, $line_amount) {
+function accountledger_against_party_payment_label($party_name, $payment_type_raw, $line_amount, $party_side = 'Dr') {
     $party_name = trim((string) $party_name);
     $pt = strtolower(trim((string) $payment_type_raw));
     $map = [
@@ -1012,7 +1038,12 @@ function accountledger_against_party_payment_label($party_name, $payment_type_ra
     ];
     $label = isset($map[$pt]) ? $map[$pt] : ($pt !== '' ? ucfirst($pt) : 'Payment');
     $amt = number_format(abs((float) $line_amount), 2, '.', '');
-    return $party_name . '(' . $label . ' - ' . $amt . 'Dr)';
+    $side = strtoupper(trim((string) $party_side));
+    if ($side !== 'CR' && $side !== 'DR') {
+        $side = 'DR';
+    }
+    $side = ($side === 'CR') ? 'Cr' : 'Dr';
+    return $party_name . '(' . $label . ' - ' . $amt . $side . ')';
 }
 
 /** Extract purchase invoice number from tbl_sale_fixing_direct.against_of (e.g. PI-6, PRI2). */
@@ -5185,8 +5216,9 @@ function auragold_barcode_design_coord_to_mm($raw, float $label_limit_mm, float 
 
 /**
  * Render one barcode label from design_layout JSON. Same logic for preview and print.
- * design_layout: array of items, each with type (barcode_image|qr_image|text), left/top in mm,
- * and for barcode_image / qr_image: width/height in mm; for text: field, font, font_size, prefix, suffix.
+ * design_layout: array of items, each with type (barcode_image|qr_image|text|strip_line), left/top in mm,
+ * and for barcode_image / qr_image: width/height in mm; for text: field, font, font_size, prefix, suffix;
+ * for strip_line: optional width in mm (horizontal divider across the label).
  * Linear layout: every item uses saved left/top (px→mm via auragold_barcode_design_coord_to_mm). No auto-placed barcode or footer text.
  *
  * @param array $productData  Keys: barcode, BarcodeNo, ActualPurity, product_name, price, etc.
@@ -5283,6 +5315,91 @@ function renderBarcodeLayout($productData, $settings) {
                 $html .= '<svg class="' . htmlspecialchars($svgClass, ENT_QUOTES, 'UTF-8') . '" data-barcode="' . htmlspecialchars($barcode) . '"' . $svgIdAttr . '></svg>';
                 $html .= '</div>';
             }
+            continue;
+        }
+
+        if ($type === 'text' && isset($el['field']) && strcasecmp(trim((string) $el['field']), 'StripLine') === 0) {
+            $type = 'strip_line';
+        }
+
+        if ($type === 'strip_line' || $type === 'line') {
+            $left_mm = auragold_barcode_design_coord_to_mm($el['left'] ?? 0, $label_width_mm, $px_to_mm) + $design_left_inset_mm;
+            $top_mm  = auragold_barcode_design_coord_to_mm($el['top'] ?? 0, $label_height_mm, $px_to_mm);
+            $w = isset($el['width']) ? (float) $el['width'] : max(2.0, $label_width_mm - $left_mm);
+            if ($w <= 0) {
+                $w = max(2.0, $label_width_mm - $left_mm);
+            }
+            if ($left_mm + $w > $label_width_mm) {
+                $w = max(1.0, $label_width_mm - $left_mm);
+            }
+            $thickness = isset($el['thickness']) ? max(0.3, min(3.0, (float) $el['thickness'])) : 0.4;
+            $style = sprintf(
+                'position:absolute;left:%smm;top:%smm;width:%smm;height:0;margin:0;padding:0;border:none;border-top:%smm solid #0f172a;box-sizing:border-box;z-index:1;line-height:0;overflow:hidden;',
+                round($left_mm, 2),
+                round($top_mm, 2),
+                round($w, 2),
+                round($thickness, 2)
+            );
+            $html .= '<div class="design-field design-strip-line" style="' . $style . '" aria-hidden="true"></div>';
+            continue;
+        }
+
+        if ($type === 'text' && isset($el['field']) && (strcasecmp(trim((string) $el['field']), 'WhiteStrip') === 0 || strcasecmp(trim((string) $el['field']), 'White Strip') === 0)) {
+            $type = 'white_strip';
+        }
+        $typeNorm = strtolower(str_replace([' ', '-'], ['_', '_'], (string) $type));
+        if ($typeNorm === 'whitestrip' || $type === 'WhiteStrip') {
+            $type = 'white_strip';
+        }
+
+        if ($type === 'white_strip') {
+            $left_mm = auragold_barcode_design_coord_to_mm($el['left'] ?? ($el['x'] ?? 0), $label_width_mm, $px_to_mm) + $design_left_inset_mm;
+            $top_mm  = auragold_barcode_design_coord_to_mm($el['top'] ?? ($el['y'] ?? 0), $label_height_mm, $px_to_mm);
+            $w = isset($el['width']) ? (float) $el['width'] : 20.0;
+            $h = isset($el['height']) ? (float) $el['height'] : 5.0;
+            if ($w <= 0) {
+                $w = 20.0;
+            }
+            if ($h <= 0) {
+                $h = 5.0;
+            }
+            $bg = isset($el['backgroundColor']) ? trim((string) $el['backgroundColor']) : (isset($el['background_color']) ? trim((string) $el['background_color']) : '#FFFFFF');
+            if ($bg === '' || ($bg[0] ?? '') !== '#') {
+                $bg = '#FFFFFF';
+            }
+            $borderEnabled = !empty($el['borderEnabled']) || !empty($el['border_enabled']);
+            $bc = isset($el['borderColor']) ? trim((string) $el['borderColor']) : (isset($el['border_color']) ? trim((string) $el['border_color']) : '#000000');
+            if ($bc === '' || ($bc[0] ?? '') !== '#') {
+                $bc = '#000000';
+            }
+            $bwPx = isset($el['borderWidth']) ? (float) $el['borderWidth'] : (isset($el['border_width']) ? (float) $el['border_width'] : 0.0);
+            $bw = max(0.0, min(5.0, $bwPx > 3 ? $bwPx * 0.2646 : $bwPx));
+            $brPx = isset($el['borderRadius']) ? (float) $el['borderRadius'] : (isset($el['border_radius']) ? (float) $el['border_radius'] : 0.0);
+            $br = max(0.0, min(20.0, $brPx > 10 ? $brPx * 0.2646 : $brPx));
+            $op = isset($el['opacity']) ? max(0.0, min(1.0, (float) $el['opacity'])) : 1.0;
+            if (!is_finite($op)) {
+                $op = 1.0;
+            }
+            $rot = isset($el['rotation']) ? (float) $el['rotation'] : 0.0;
+            $z = isset($el['zIndex']) ? (int) $el['zIndex'] : (isset($el['z_index']) ? (int) $el['z_index'] : 5);
+            $transform = abs($rot) > 0.01 ? ('transform:rotate(' . round($rot, 2) . 'deg);') : '';
+            $borderCss = ($borderEnabled && $bw > 0)
+                ? sprintf('border:%smm solid %s;', round($bw, 3), htmlspecialchars($bc, ENT_QUOTES, 'UTF-8'))
+                : 'border:none;';
+            $style = sprintf(
+                'position:absolute;left:%smm;top:%smm;width:%smm;height:%smm;margin:0;padding:0;box-sizing:border-box;background:%s;%sborder-radius:%smm;opacity:%s;z-index:%d;%soutline:none;box-shadow:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;',
+                round($left_mm, 2),
+                round($top_mm, 2),
+                round($w, 2),
+                round($h, 2),
+                htmlspecialchars($bg, ENT_QUOTES, 'UTF-8'),
+                $borderCss,
+                round($br, 3),
+                round($op, 3),
+                $z,
+                $transform
+            );
+            $html .= '<div class="design-field design-white-strip" style="' . $style . '" aria-hidden="true"></div>';
             continue;
         }
 
@@ -5540,10 +5657,108 @@ function render82x38DesignStickerLabel(array $print_item, array $settings, array
     $boxH = (float) $layout['box_height_mm'];
     $idSuffix = ($page_index > 0) ? ('_' . (int) $page_index) : '';
     $html = '<div class="sticker-page" style="width:82mm;height:38mm;position:relative;overflow:hidden;">';
+    /* Columns dropped onto half strips (CompanyName, Qty, Wt, …) — render INSIDE each strip so text cannot print above the white band. */
+    $halfStripFields = [];
+    if (!empty($snapshot['sticker_half_strip_fields']) && is_array($snapshot['sticker_half_strip_fields'])) {
+        $halfStripFields = $snapshot['sticker_half_strip_fields'];
+    } elseif (!empty($snapshot['half_strip_fields']) && is_array($snapshot['half_strip_fields'])) {
+        $halfStripFields = $snapshot['half_strip_fields'];
+    }
+    $halfStripOrigins = [
+        'top-left' => ['left' => 0.0, 'top' => 5.0, 'width' => 62.0, 'height' => 4.5, 'box' => 2],
+        'bottom-right' => ['left' => 20.0, 'top' => 30.6, 'width' => 62.0, 'height' => 4.5, 'box' => 1],
+    ];
+    /* Drop legacy mid-lower strip fields onto the single bottom strip */
+    foreach ($halfStripFields as &$hsField) {
+        if (!is_array($hsField)) {
+            continue;
+        }
+        $hsSlot = isset($hsField['strip']) ? trim((string) $hsField['strip']) : (isset($hsField['slot']) ? trim((string) $hsField['slot']) : '');
+        if ($hsSlot === 'mid-lower') {
+            $hsField['strip'] = 'bottom-right';
+        }
+    }
+    unset($hsField);
+    $halfStripFieldsBySlot = ['top-left' => [], 'bottom-right' => []];
+    foreach ($halfStripFields as $sf) {
+        if (!is_array($sf)) {
+            continue;
+        }
+        $slot = isset($sf['strip']) ? trim((string) $sf['strip']) : (isset($sf['slot']) ? trim((string) $sf['slot']) : 'top-left');
+        if (!isset($halfStripOrigins[$slot])) {
+            $slot = 'top-left';
+        }
+        $halfStripFieldsBySlot[$slot][] = $sf;
+    }
+    foreach ($halfStripOrigins as $slot => $origin) {
+        $stripStyle = sprintf(
+            'position:absolute;left:%smm;top:%smm;width:%smm;height:%smm;margin:0;padding:0;border:none;background:#ffffff;background-color:#ffffff;box-sizing:border-box;overflow:hidden;z-index:4;-webkit-print-color-adjust:exact;print-color-adjust:exact;',
+            round((float) $origin['left'], 2),
+            round((float) $origin['top'], 2),
+            round((float) $origin['width'], 2),
+            round((float) $origin['height'], 2)
+        );
+        $html .= '<div class="sticker-fixed-half-strip sticker-fixed-half-strip--' . htmlspecialchars($slot, ENT_QUOTES, 'UTF-8') . '" style="' . $stripStyle . '">';
+        $boxNum = (int) ($origin['box'] ?? 1);
+        $pairItem = $print_item['box' . $boxNum] ?? ($print_item['box1'] ?? ($print_item['box2'] ?? null));
+        $productDataStrip = is_array($pairItem)
+            ? array_merge($pairItem['row'] ?? [], ['barcode' => $pairItem['barcode'] ?? ''])
+            : [];
+        foreach ($halfStripFieldsBySlot[$slot] as $sf) {
+            if (!is_array($pairItem)) {
+                continue;
+            }
+            $relLeft = isset($sf['left']) ? (float) $sf['left'] : 0.0;
+            $relTop = isset($sf['top']) ? (float) $sf['top'] : 0.0;
+            /* Coords are relative to the strip; keep text inside the band. */
+            $relLeft = max(0.0, min((float) $origin['width'], $relLeft));
+            $fsEl = (int) ($sf['font_size'] ?? ($settings['font_size'] ?? 8));
+            if ($fsEl < 6) {
+                $fsEl = 6;
+            }
+            if ($fsEl > 14) {
+                $fsEl = 14;
+            }
+            $fontHmm = max(1.2, min((float) $origin['height'], $fsEl * 0.264583));
+            $maxTop = max(0.0, (float) $origin['height'] - $fontHmm);
+            /* Prefer vertical center when saved top is flush (0) so print matches “inside strip”. */
+            if ($relTop <= 0.15) {
+                $relTop = round($maxTop / 2, 2);
+            } else {
+                $relTop = max(0.0, min($maxTop, $relTop));
+            }
+            $stripFieldEl = array_merge($sf, [
+                'type' => 'text',
+                'left' => $relLeft,
+                'top' => $relTop,
+                'font_size' => $fsEl,
+            ]);
+            $fieldHtml = renderBarcodeLayout($productDataStrip, [
+                'label_width_mm'  => (float) $origin['width'],
+                'label_height_mm' => (float) $origin['height'],
+                'design_layout'   => [$stripFieldEl],
+                'font_size'       => $fsEl,
+                'px_to_mm'        => isset($settings['px_to_mm']) ? (float) $settings['px_to_mm'] : 0.264583,
+            ]);
+            /* Transparent bg so strip white shows through; keep absolute coords relative to strip. */
+            $fieldHtml = str_replace(
+                'class="design-field"',
+                'class="design-field design-field--half-strip"',
+                $fieldHtml
+            );
+            $html .= $fieldHtml;
+        }
+        $html .= '</div>';
+    }
     $pairs = [
         1 => ['pos' => $layout['box1'], 'item' => $print_item['box1'] ?? null],
         2 => ['pos' => $layout['box2'], 'item' => $print_item['box2'] ?? null],
     ];
+    /* Single-barcode print: mirror box1 onto box2 so both sides of 82×38 show. */
+    if (is_array($pairs[1]['item']) && !empty($pairs[1]['item']['barcode'])
+        && (!is_array($pairs[2]['item']) || empty($pairs[2]['item']['barcode']))) {
+        $pairs[2]['item'] = $pairs[1]['item'];
+    }
     foreach ($pairs as $num => $pair) {
         if (!is_array($pair['item']) || empty($pair['item']['barcode'])) {
             continue;
@@ -5581,6 +5796,54 @@ function render82x38DesignStickerLabel(array $print_item, array $settings, array
         $html .= '<div class="barcode-box-inner" style="position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;">';
         $html .= $inner;
         $html .= '</div></div>';
+    }
+    $stripLines = [];
+    if (!empty($snapshot['sticker_strip_lines']) && is_array($snapshot['sticker_strip_lines'])) {
+        $stripLines = $snapshot['sticker_strip_lines'];
+    } elseif (!empty($snapshot['strip_lines']) && is_array($snapshot['strip_lines'])) {
+        $stripLines = $snapshot['strip_lines'];
+    }
+    foreach ($stripLines as $sl) {
+        if (!is_array($sl)) {
+            continue;
+        }
+        $left_mm = isset($sl['left']) ? (float) $sl['left'] : (isset($sl['left_mm']) ? (float) $sl['left_mm'] : 0.0);
+        $top_mm = isset($sl['top']) ? (float) $sl['top'] : (isset($sl['top_mm']) ? (float) $sl['top_mm'] : 0.0);
+        $w = isset($sl['width']) ? (float) $sl['width'] : (isset($sl['width_mm']) ? (float) $sl['width_mm'] : 82.0);
+        if ($w <= 0) {
+            $w = 82.0;
+        }
+        $left_mm = max(0.0, min(82.0, $left_mm));
+        $top_mm = max(0.0, min(38.0, $top_mm));
+        $w = max(1.0, min(82.0 - $left_mm, $w));
+        $thickness = isset($sl['thickness']) ? max(0.3, min(2.0, (float) $sl['thickness'])) : 0.45;
+        $style = sprintf(
+            'position:absolute;left:%smm;top:%smm;width:%smm;height:0;margin:0;padding:0;border:none;border-top:%smm solid #0f172a;box-sizing:border-box;z-index:3;line-height:0;',
+            round($left_mm, 2),
+            round($top_mm, 2),
+            round($w, 2),
+            round($thickness, 2)
+        );
+        $html .= '<div class="design-strip-line sticker-strip-line" style="' . $style . '" aria-hidden="true"></div>';
+    }
+    $whiteStrips = [];
+    if (!empty($snapshot['sticker_white_strips']) && is_array($snapshot['sticker_white_strips'])) {
+        $whiteStrips = $snapshot['sticker_white_strips'];
+    } elseif (!empty($snapshot['white_strips']) && is_array($snapshot['white_strips'])) {
+        $whiteStrips = $snapshot['white_strips'];
+    }
+    foreach ($whiteStrips as $ws) {
+        if (!is_array($ws)) {
+            continue;
+        }
+        $wsSettings = [
+            'label_width_mm'  => 82.0,
+            'label_height_mm' => 38.0,
+            'design_layout'   => [array_merge($ws, ['type' => 'white_strip'])],
+            'font_size'       => (int) ($settings['font_size'] ?? 12),
+            'px_to_mm'        => isset($settings['px_to_mm']) ? (float) $settings['px_to_mm'] : 0.264583,
+        ];
+        $html .= renderBarcodeLayout([], $wsSettings);
     }
     $html .= '</div>';
     return $html;

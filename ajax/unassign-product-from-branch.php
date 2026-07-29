@@ -5,6 +5,7 @@
  */
 session_start();
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/auragold_product_catalog_scope.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,46 +25,50 @@ if ($product_id <= 0) {
     exit;
 }
 
-$working = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
-if ($working <= 0 || !$conn_master) {
-    echo json_encode(['status' => false, 'message' => 'Branch context not found.']);
+if (!($conn instanceof mysqli)) {
+    echo json_encode(['status' => false, 'message' => 'Database connection not available.']);
     exit;
 }
 
-$branch = getRecordMaster('SELECT id, main_branch_id FROM tbl_branches WHERE id = ' . $working . ' LIMIT 1');
-if (!$branch || (int) ($branch['main_branch_id'] ?? 0) <= 0) {
-    echo json_encode(['status' => false, 'message' => 'This action is only available on a sub-branch.']);
-    exit;
-}
+try {
+    $payload = auragold_with_product_catalog_conn($conn, static function (array $ctx) use ($product_id) {
+        if (empty($ctx['is_sub']) || (int) ($ctx['sub_branch_id'] ?? 0) <= 0) {
+            return ['status' => false, 'message' => 'This action is only available on a sub-branch.'];
+        }
 
-$tb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_product_branches'");
-if (!$tb || mysqli_num_rows($tb) === 0) {
-    if ($tb) {
+        global $conn;
+        $tb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_product_branches'");
+        if (!$tb || mysqli_num_rows($tb) === 0) {
+            if ($tb) {
+                mysqli_free_result($tb);
+            }
+            return ['status' => false, 'message' => 'Product branch assignment table is not available.'];
+        }
         mysqli_free_result($tb);
-    }
-    echo json_encode(['status' => false, 'message' => 'Product branch assignment table is not available.']);
+
+        $sub_id = (int) ($ctx['sub_branch_id'] ?? 0);
+        $exists = getRecord(
+            "SELECT 1 AS ok FROM tbl_product_branches WHERE branch_id = $sub_id AND product_id = $product_id LIMIT 1"
+        );
+        if (!$exists) {
+            return ['status' => false, 'message' => 'This product is not assigned to your branch.'];
+        }
+
+        if (!mysqli_query(
+            $conn,
+            "DELETE FROM tbl_product_branches WHERE branch_id = $sub_id AND product_id = $product_id"
+        )) {
+            return ['status' => false, 'message' => mysqli_error($conn)];
+        }
+
+        return [
+            'status'  => true,
+            'message' => 'Product removed from this branch. It remains on the main branch.',
+        ];
+    });
+} catch (Throwable $e) {
+    echo json_encode(['status' => false, 'message' => $e->getMessage()]);
     exit;
 }
-mysqli_free_result($tb);
 
-$sub_id = (int) $branch['id'];
-$exists = getRecord(
-    "SELECT 1 AS ok FROM tbl_product_branches WHERE branch_id = $sub_id AND product_id = $product_id LIMIT 1"
-);
-if (!$exists) {
-    echo json_encode(['status' => false, 'message' => 'This product is not assigned to your branch.']);
-    exit;
-}
-
-if (!mysqli_query(
-    $conn,
-    "DELETE FROM tbl_product_branches WHERE branch_id = $sub_id AND product_id = $product_id"
-)) {
-    echo json_encode(['status' => false, 'message' => mysqli_error($conn)]);
-    exit;
-}
-
-echo json_encode([
-    'status'  => true,
-    'message' => 'Product removed from this branch. It remains on the main branch.',
-]);
+echo json_encode($payload);

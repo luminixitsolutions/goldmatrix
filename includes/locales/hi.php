@@ -30,6 +30,7 @@ return [
     'lang_settings.saved'           => 'भाषा सहेजी गई।',
     'user.my_profile'               => 'मेरा प्रोफ़ाइल',
     'user.change_password'          => 'पासवर्ड बदलें',
+    'user.branch'                   => 'ब्रांच',
     'user.notifications'            => 'सूचनाएँ',
     'user.logout'                   => 'लॉग आउट',
     'mobile.open_menu'              => 'मेनू खोलें',

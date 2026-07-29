@@ -61,6 +61,11 @@ if ($method === 'GET' && $action === 'payroll') {
     $respond(['success' => true, 'payroll' => auragold_em_get_payroll($conn, $branch_id, $month)]);
 }
 
+if ($method === 'GET' && $action === 'advances') {
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $respond(['success' => true, 'advances' => auragold_em_get_advances($conn, $branch_id, $status)]);
+}
+
 if ($method === 'GET' && $action === 'tasks') {
     $status = trim((string) ($_GET['status'] ?? ''));
     $respond(['success' => true, 'tasks' => auragold_em_get_tasks($conn, $branch_id, $status)]);
@@ -73,7 +78,8 @@ if ($method === 'GET' && $action === 'performance') {
 if ($method === 'GET' && $action === 'reports') {
     $from = trim((string) ($_GET['from'] ?? ''));
     $to = trim((string) ($_GET['to'] ?? ''));
-    $respond(['success' => true, 'reports' => auragold_em_get_reports($conn, $branch_id, $from, $to)]);
+    $employeeId = isset($_GET['employee_id']) ? (int) $_GET['employee_id'] : 0;
+    $respond(['success' => true, 'reports' => auragold_em_get_reports($conn, $branch_id, $from, $to, $employeeId)]);
 }
 
 if ($method !== 'POST') {
@@ -85,10 +91,16 @@ $action = trim((string) ($data['action'] ?? ''));
 
 switch ($action) {
     case 'save_employee':
+        if (!auragold_em_is_admin_manager()) {
+            $respond(['success' => false, 'message' => 'Only admin can manage employees.']);
+        }
         $result = auragold_em_save_employee($conn, $branch_id, $data);
         $respond(['success' => $result['ok'], 'message' => $result['message'], 'id' => $result['id'] ?? 0]);
         break;
     case 'delete_employee':
+        if (!auragold_em_is_admin_manager()) {
+            $respond(['success' => false, 'message' => 'Only admin can manage employees.']);
+        }
         $result = auragold_em_delete_employee($conn, (int) ($data['id'] ?? 0), $branch_id);
         $respond(['success' => $result['ok'], 'message' => $result['message']]);
         break;
@@ -155,8 +167,117 @@ switch ($action) {
         $result = auragold_em_save_payroll($conn, $branch_id, $data);
         $respond(['success' => $result['ok'], 'message' => $result['message'], 'id' => $result['id'] ?? 0]);
         break;
+    case 'payroll_calc':
+        $employeeId = (int) ($data['employee_id'] ?? 0);
+        $month = trim((string) ($data['payroll_month'] ?? ''));
+        $monthPart = trim((string) ($data['payroll_month_part'] ?? ''));
+        $yearPart = trim((string) ($data['payroll_year'] ?? ''));
+        if ($monthPart !== '' && $yearPart !== '') {
+            $month = auragold_em_payroll_month_from_parts($monthPart, $yearPart);
+        }
+        if ($employeeId <= 0) {
+            $respond(['success' => false, 'message' => 'Employee is required.']);
+        }
+        $access = auragold_em_assert_employee_access($conn, $branch_id, $employeeId);
+        if (empty($access['ok'])) {
+            $respond(['success' => false, 'message' => $access['message']]);
+        }
+        $monthlySalary = (float) ($data['monthly_salary'] ?? 0);
+        $calc = auragold_em_payroll_calc_context(
+            $conn,
+            $branch_id,
+            (int) $access['employee_id'],
+            $month,
+            $monthlySalary
+        );
+        $respond(['success' => true, 'data' => $calc]);
+        break;
+    case 'advance_limit':
+        $employeeId = (int) ($data['employee_id'] ?? 0);
+        $advanceDate = trim((string) ($data['advance_date'] ?? date('Y-m-d')));
+        $excludeId = (int) ($data['id'] ?? 0);
+        if ($employeeId <= 0) {
+            $respond(['success' => false, 'message' => 'Employee is required.']);
+        }
+        $access = auragold_em_assert_employee_access($conn, $branch_id, $employeeId);
+        if (empty($access['ok'])) {
+            $respond(['success' => false, 'message' => $access['message']]);
+        }
+        $info = auragold_em_advance_limit_info(
+            $conn,
+            $branch_id,
+            (int) $access['employee_id'],
+            $advanceDate,
+            $excludeId
+        );
+        $respond(['success' => true, 'data' => $info]);
+        break;
     case 'delete_payroll':
         $result = auragold_em_delete_row($conn, 'payroll', (int) ($data['id'] ?? 0), $branch_id);
+        $respond(['success' => $result['ok'], 'message' => $result['message']]);
+        break;
+    case 'save_advance':
+        $requester = trim((string) ($_SESSION['Admin']['name'] ?? $_SESSION['username'] ?? $_SESSION['Admin']['Fname'] ?? 'User'));
+        if ($requester === '' || $requester === 'User') {
+            $requester = trim((string) (($_SESSION['Admin']['Fname'] ?? '') . ' ' . ($_SESSION['Admin']['Lname'] ?? '')));
+        }
+        if ($requester === '') {
+            $requester = 'User';
+        }
+        $data['requested_by'] = $requester;
+        $result = auragold_em_save_advance($conn, $branch_id, $data);
+        $respond(['success' => $result['ok'], 'message' => $result['message'], 'id' => $result['id'] ?? 0]);
+        break;
+    case 'advance_status':
+        $approver = trim((string) ($_SESSION['Admin']['name'] ?? $_SESSION['username'] ?? 'Admin'));
+        if ($approver === '' || $approver === 'Admin') {
+            $approver = trim((string) (($_SESSION['Admin']['Fname'] ?? '') . ' ' . ($_SESSION['Admin']['Lname'] ?? '')));
+        }
+        if ($approver === '') {
+            $approver = 'Admin';
+        }
+        $approvedAmount = isset($data['approved_amount']) && $data['approved_amount'] !== ''
+            ? (float) $data['approved_amount']
+            : null;
+        $result = auragold_em_update_advance_status(
+            $conn,
+            (int) ($data['id'] ?? 0),
+            $branch_id,
+            (string) ($data['status'] ?? ''),
+            $approver,
+            $approvedAmount
+        );
+        $respond([
+            'success' => $result['ok'],
+            'message' => $result['message'],
+            'payroll_month' => $result['payroll_month'] ?? '',
+            'approved_amount' => $result['approved_amount'] ?? null,
+        ]);
+        break;
+    case 'delete_advance':
+        $delId = (int) ($data['id'] ?? 0);
+        if ($delId <= 0) {
+            $respond(['success' => false, 'message' => 'Invalid advance request.']);
+        }
+        $delRow = getRecord(
+            'SELECT id, status, employee_id FROM tbl_employee_advances
+             WHERE id = ' . $delId . ' AND branch_id = ' . (int) $branch_id . ' AND record_status = 1 LIMIT 1'
+        );
+        if (!$delRow) {
+            $respond(['success' => false, 'message' => 'Advance request not found.']);
+        }
+        if (strcasecmp((string) ($delRow['status'] ?? ''), 'Pending') !== 0) {
+            $respond(['success' => false, 'message' => 'Only pending advance requests can be deleted.']);
+        }
+        if (!auragold_em_is_admin_manager()) {
+            $myEmp = function_exists('auragold_em_current_employee_id')
+                ? (int) auragold_em_current_employee_id($conn, $branch_id)
+                : 0;
+            if ($myEmp <= 0 || $myEmp !== (int) ($delRow['employee_id'] ?? 0)) {
+                $respond(['success' => false, 'message' => 'You can only delete your own pending advance requests.']);
+            }
+        }
+        $result = auragold_em_delete_row($conn, 'advances', $delId, $branch_id);
         $respond(['success' => $result['ok'], 'message' => $result['message']]);
         break;
     case 'save_task':
@@ -184,6 +305,9 @@ switch ($action) {
         $respond(['success' => $result['ok'], 'message' => $result['message']]);
         break;
     case 'generate_payroll':
+        if (!auragold_em_is_admin_manager()) {
+            $respond(['success' => false, 'message' => 'Only admin can generate payroll.']);
+        }
         $month = trim((string) ($data['payroll_month'] ?? date('Y-m')));
         $created = 0;
         foreach (auragold_em_get_employees($conn, $branch_id, 'Active') as $emp) {
@@ -196,14 +320,25 @@ switch ($action) {
                 continue;
             }
             $basic = (float) ($emp['basic_salary'] ?? 0);
+            $advRec = getRecord(
+                "SELECT COALESCE(SUM(amount),0) AS total_adv
+                 FROM tbl_employee_advances
+                 WHERE employee_id = $eid
+                   AND branch_id = " . (int) $branch_id . "
+                   AND record_status = 1
+                   AND status = 'Approved'
+                   AND payroll_month = '" . auragold_em_esc($conn, $month) . "'"
+            );
+            $advDed = (float) ($advRec['total_adv'] ?? 0);
             auragold_em_save_payroll($conn, $branch_id, [
                 'employee_id' => $eid,
                 'payroll_month' => $month,
                 'basic_salary' => $basic,
                 'allowances' => 0,
-                'deductions' => 0,
-                'net_salary' => $basic,
+                'deductions' => $advDed,
+                'net_salary' => $basic - $advDed,
                 'status' => 'Draft',
+                'notes' => $advDed > 0 ? ('Advance recovery ' . number_format($advDed, 2)) : '',
             ]);
             $created++;
         }

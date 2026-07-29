@@ -3,6 +3,7 @@ session_start();
 require_once 'config.php';
 require_once __DIR__ . '/includes/auragold_product_catalog_scope.php';
 require_once __DIR__ . '/includes/auragold_product_branch_local_schema.php';
+require_once __DIR__ . '/includes/auragold_product_branch_login_context.php';
 require_once __DIR__ . '/includes/branch_product_delete_permission.php';
 if (isset($conn) && $conn instanceof mysqli) {
     auragold_ensure_product_branch_local_schema($conn);
@@ -145,6 +146,23 @@ if (count($metals_list) > 1) {
     $metals_list = $metals_dedup;
 }
 
+// Sub-branch product master lives in the parent main operational database (not the sub-branch DB).
+$auragold_catalog_mysqli = null;
+$auragold_catalog_mysqli_close = false;
+$auragold_po_conn_restore = null;
+if ($auragold_sub_branch_mode && $conn instanceof mysqli) {
+    $auragold_pcat_ctx = auragold_product_opening_mysqli_for_login($conn);
+    if (!empty($auragold_pcat_ctx['ok']) && $auragold_pcat_ctx['link'] instanceof mysqli) {
+        $auragold_catalog_mysqli = $auragold_pcat_ctx['link'];
+        $auragold_catalog_mysqli_close = !empty($auragold_pcat_ctx['close_after']);
+        auragold_ensure_tbl_product_branches_is_active($auragold_catalog_mysqli);
+        auragold_ensure_product_branch_local_schema($auragold_catalog_mysqli);
+        $auragold_po_conn_restore = $conn;
+        $conn = $auragold_catalog_mysqli;
+        $GLOBALS['conn'] = $auragold_catalog_mysqli;
+    }
+}
+
 // Load Products from database
 $search_term = isset($_GET['search']) ? esc($_GET['search']) : '';
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
@@ -158,7 +176,11 @@ if ($auragold_sub_branch_mode && $auragold_main_branch_id_for_catalog > 0 && $au
         mysqli_free_result($tb_list);
         $auragold_sub_branch_list_from_pb = true;
         $sub_b_list = (int) $auragold_working_branch_id;
-        $where_clause = "p.status IN (0, 1) AND pb.branch_id = $sub_b_list";
+        $pb_active_sql = function_exists('auragold_tbl_product_branches_has_is_active')
+            && auragold_tbl_product_branches_has_is_active($conn)
+            ? ' AND IFNULL(pb.is_active, 1) = 1'
+            : '';
+        $where_clause = "p.status IN (0, 1) AND pb.branch_id = $sub_b_list" . $pb_active_sql;
     } else {
         if ($tb_list) {
             mysqli_free_result($tb_list);
@@ -337,6 +359,16 @@ if ($edit_product_id > 0) {
             );
         }
     }
+}
+
+if ($auragold_po_conn_restore instanceof mysqli) {
+    $conn = $auragold_po_conn_restore;
+    $GLOBALS['conn'] = $auragold_po_conn_restore;
+    $auragold_po_conn_restore = null;
+}
+if ($auragold_catalog_mysqli_close && $auragold_catalog_mysqli instanceof mysqli) {
+    mysqli_close($auragold_catalog_mysqli);
+    $auragold_catalog_mysqli = null;
 }
 
 $auragold_po_sub_branch_edit = !empty($auragold_sub_branch_mode) && $edit_product_id > 0;
@@ -3112,8 +3144,11 @@ $(document).ready(function() {
     // Sub-branch: remove allocation only (does not delete the product master)
     $(document).on('click', '.unassign-product-from-branch', function(e) {
         e.stopPropagation();
-        const productId = $(this).data('product-id');
-        const productName = $(this).data('product-name') || '';
+        const productId = parseInt($(this).attr('data-product-id'), 10);
+        const productName = $(this).attr('data-product-name') || '';
+        if (!productId) {
+            return;
+        }
         if (confirm('Remove "' + productName + '" from this branch?\n\nThe product will stay on the main branch and can be added again from "Active products for this branch".')) {
             $.ajax({
                 url: 'ajax/unassign-product-from-branch.php',
@@ -3211,8 +3246,15 @@ $(document).ready(function() {
         $('#subbranchCatalogSaveBtn').on('click', function () {
             var ids = [];
             $('.subbranch-cat-chk:checked').each(function () {
-                ids.push(parseInt($(this).data('product-id'), 10));
+                var pid = parseInt($(this).attr('data-product-id'), 10);
+                if (!isNaN(pid) && pid > 0) {
+                    ids.push(pid);
+                }
             });
+            if (ids.length === 0) {
+                showMessage('error', 'Select at least one product to activate for this branch.');
+                return;
+            }
             $('#ajaxLoader').show();
             $.ajax({
                 url: 'ajax/save-subbranch-product-activation.php',
@@ -3223,6 +3265,11 @@ $(document).ready(function() {
                 success: function (res) {
                     $('#ajaxLoader').hide();
                     if (res.status === 'success') {
+                        var n = parseInt(res.activated, 10);
+                        if (isNaN(n) || n < 1) {
+                            showMessage('error', 'No products were activated. Save again or contact support.');
+                            return;
+                        }
                         showMessage('success', res.message || 'Saved.');
                         $('#subbranchMainCatalogModal').modal('hide');
                         window.location.reload();

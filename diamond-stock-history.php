@@ -228,7 +228,8 @@ if (empty($scope_metal_ids)) {
     $scope_metal_ids = [4];
 }
 
-$inward_where = "s.status = 1 AND s.stock_type IN ('opening', 'purchase')";
+/* Include jobwork diamond transfer balance rows so Add Weight / department transfers appear as inward. */
+$inward_where = "s.status = 1 AND s.stock_type IN ('opening', 'purchase', 'balance')";
 if ($product_id > 0) {
     $inward_where .= " AND s.product_id = $product_id";
 }
@@ -1180,8 +1181,8 @@ html, body{
                                                 <div class="panel-footer-info">
                                                     Showing <?php if ((int) $outward_total <= 0): ?>0 to 0 of 0<?php else: ?><?= $outward_offset + 1 ?> to <?= min($outward_offset + $outward_per_page, $outward_total) ?> of <?= (int) $outward_total ?><?php endif; ?> entries
                                                 </div>
-                                                <div class="panel-footer-total" title="Total net amount">
-                                                    <?= number_format($outward_totals['total_net_amt'] ?? 0, 2) ?>
+                                                <div class="panel-footer-total" title="Total gross weight">
+                                                    <?= number_format($outward_totals['total_gross_wt'] ?? 0, 3) ?>
                                                 </div>
                                                 <div class="pagination-controls">
                                                     <select class="show-all-dropdown" id="outwardPerPageSelect">

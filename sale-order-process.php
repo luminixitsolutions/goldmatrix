@@ -74,6 +74,35 @@ $per_page = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 25;
 $per_page = max(10, min(100, $per_page));
 $offset = ($page - 1) * $per_page;
 
+require_once __DIR__ . '/includes/session_login_type.php';
+require_once __DIR__ . '/includes/user_management_schema.php';
+
+$sop_is_admin_view = function_exists('auragold_session_is_admin_login_type') && auragold_session_is_admin_login_type();
+
+$sop_owner_scope_sql = static function (string $alias) use ($sop_is_admin_view): string {
+    if ($sop_is_admin_view) {
+        return '';
+    }
+    $clauses = [];
+    $user_id = (int) ($_SESSION['Admin']['id'] ?? $_SESSION['user_id'] ?? 0);
+    if ($user_id > 0) {
+        $clauses[] = $alias . '.created_by = ' . $user_id;
+    }
+    if (function_exists('auragold_logged_in_sales_person_match_candidates')) {
+        foreach (auragold_logged_in_sales_person_match_candidates() as $cand) {
+            $esc_sp = esc($cand);
+            if ($esc_sp !== '') {
+                $clauses[] = "TRIM(IFNULL(" . $alias . ".sales_person, '')) = '" . $esc_sp . "'";
+            }
+        }
+    }
+    if ($clauses === []) {
+        return '';
+    }
+
+    return ' AND (' . implode(' OR ', $clauses) . ')';
+};
+
 // Build WHERE clause
 $where = "1=1";
 if (!empty($from_date)) $where .= " AND so.order_date >= '$from_date'";
@@ -116,6 +145,7 @@ if (!empty($selected_source_list) && $has_sale_order_source_col) {
 if (!empty($search)) {
     $where .= " AND (so.order_no LIKE '%$search%' OR so.customer_name LIKE '%$search%' OR soi.product_name LIKE '%$search%' OR soi.design_no LIKE '%$search%' OR soi.barcode LIKE '%$search%')";
 }
+$where .= $sop_owner_scope_sql('so');
 
 // Get sale order items with order and product data
 $items_query = "
@@ -144,8 +174,8 @@ $items_query = "
         p.article,
         pc.sku_code as rfid_code
         " . ($has_so_item_images_col ? ", soi.images" : "") . "
-    FROM tbl_sale_order_items soi
-    INNER JOIN tbl_sale_orders so ON soi.order_id = so.id
+    FROM tbl_sale_orders so
+    LEFT JOIN tbl_sale_order_items soi ON soi.order_id = so.id
     LEFT JOIN tbl_products p ON soi.product_id = p.id
     LEFT JOIN tbl_product_characteristics pc ON soi.product_characteristic_id = pc.id
     WHERE $where
@@ -224,6 +254,7 @@ if ($repair_filters_compatible) {
     if (!empty($search)) {
         $where_repair .= " AND (ro.order_no LIKE '%$search%' OR ro.customer_name LIKE '%$search%' OR roi.product_name LIKE '%$search%' OR roi.design_no LIKE '%$search%' OR roi.barcode LIKE '%$search%')";
     }
+    $where_repair .= $sop_owner_scope_sql('ro');
 
     $repair_items_query = "
         SELECT 
@@ -251,8 +282,8 @@ if ($repair_filters_compatible) {
             p.article,
             pc.sku_code as rfid_code
             " . ($has_roi_item_images_col ? ", roi.images" : "") . "
-        FROM tbl_repair_order_items roi
-        INNER JOIN tbl_repair_orders ro ON roi.order_id = ro.id
+        FROM tbl_repair_orders ro
+        LEFT JOIN tbl_repair_order_items roi ON roi.order_id = ro.id
         LEFT JOIN tbl_products p ON roi.product_id = p.id
         LEFT JOIN tbl_product_characteristics pc ON roi.product_characteristic_id = pc.id
         WHERE $where_repair

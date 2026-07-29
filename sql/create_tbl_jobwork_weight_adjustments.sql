@@ -7,7 +7,10 @@ CREATE TABLE IF NOT EXISTS `tbl_jobwork_weight_adjustments` (
   `remark` varchar(500) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `created_by_user_id` int(11) DEFAULT NULL,
+  `source_department_id` int(11) DEFAULT NULL,
+  `source_user_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `jobwork_order_id` (`jobwork_order_id`),
-  KEY `adjustment_type` (`adjustment_type`)
+  KEY `adjustment_type` (`adjustment_type`),
+  KEY `source_department_id` (`source_department_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

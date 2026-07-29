@@ -3,6 +3,40 @@
 ?>
 <script>
 (function () {
+    window.jwqIsReduceWeightMode = function () {
+        var strip = document.getElementById('jwqWeightAdjustStrip');
+        var modeHid = document.getElementById('jwqWeightAdjustMode');
+        if (!strip || strip.style.display === 'none' || strip.getAttribute('aria-hidden') === 'true') {
+            return false;
+        }
+        return !!(modeHid && modeHid.value === 'reduce');
+    };
+
+    window.jwqToggleJwqTransferFields = function (showTransfer) {
+        var toBlock = document.querySelector('#jwqModalOverlay .jwq-to-block');
+        var arrows = document.querySelector('#jwqModalOverlay .jwq-arrows');
+        var toDept = document.getElementById('jwqToDept');
+        var mainSave = document.getElementById('jwqBtnSave');
+        if (toBlock) {
+            toBlock.style.display = showTransfer ? '' : 'none';
+        }
+        if (arrows) {
+            arrows.style.display = showTransfer ? '' : 'none';
+        }
+        if (toDept) {
+            if (showTransfer) {
+                toDept.setAttribute('required', 'required');
+            } else {
+                toDept.removeAttribute('required');
+            }
+        }
+        /* Keep the main Save visible in Reduce Weight mode too: line weights (Total Wt / Diamond Wt)
+           and diamond issues are committed only by the main Save, not the strip Save. */
+        if (mainSave) {
+            mainSave.style.display = '';
+        }
+    };
+
     window.jwqToggleWeightStrip = function (show, weightMode) {
         var strip = document.getElementById('jwqWeightAdjustStrip');
         if (!strip) {
@@ -28,12 +62,18 @@
             if (remark) {
                 remark.value = '';
             }
+            if (typeof window.jwqToggleJwqTransferFields === 'function') {
+                window.jwqToggleJwqTransferFields(wm !== 'reduce');
+            }
             try {
                 strip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } catch (e1) {}
         } else {
             strip.style.display = 'none';
             strip.setAttribute('aria-hidden', 'true');
+            if (typeof window.jwqToggleJwqTransferFields === 'function') {
+                window.jwqToggleJwqTransferFields(true);
+            }
         }
     };
 
@@ -114,9 +154,17 @@
                 var hidMode = document.getElementById('jwqWeightAdjustMode');
                 var wEl = document.getElementById('jwqWeightAdjustGrams');
                 var rEl = document.getElementById('jwqWeightAdjustRemark');
+                var fromDeptEl = document.getElementById('jwqFromDept');
+                var fromUserEl = document.getElementById('jwqFromUser');
+                var toDeptEl = document.getElementById('jwqToDept');
+                var toUserEl = document.getElementById('jwqToUser');
                 var id = hidId ? parseInt(hidId.value || '0', 10) : 0;
                 var mode = (hidMode && hidMode.value === 'add') ? 'add' : 'reduce';
                 var w = wEl ? parseFloat(String(wEl.value || '').replace(/,/g, '')) : NaN;
+                var fromDeptId = fromDeptEl ? parseInt(fromDeptEl.value || '0', 10) : 0;
+                var fromUserId = fromUserEl ? parseInt(fromUserEl.value || '0', 10) : 0;
+                var toDeptId = toDeptEl ? parseInt(toDeptEl.value || '0', 10) : 0;
+                var toUserId = toUserEl ? parseInt(toUserEl.value || '0', 10) : 0;
                 if (id < 1) {
                     alert('Invalid job work order.');
                     return;
@@ -125,11 +173,29 @@
                     alert('Enter a valid weight greater than zero.');
                     return;
                 }
+                if (mode === 'add' && fromDeptId < 1) {
+                    alert('Please select From Dept.');
+                    if (fromDeptEl) fromDeptEl.focus();
+                    return;
+                }
+                if (mode === 'add' && toDeptId < 1) {
+                    alert('Please select To Dept.');
+                    if (toDeptEl) toDeptEl.focus();
+                    return;
+                }
+                if (mode === 'add' && fromDeptId === toDeptId && fromUserId === toUserId) {
+                    alert('From and To department/user cannot be the same.');
+                    return;
+                }
                 var fd = new FormData();
                 fd.append('jobwork_order_id', String(id));
                 fd.append('adjustment_type', mode);
                 fd.append('weight_grams', String(w));
                 fd.append('remark', rEl ? String(rEl.value || '').trim() : '');
+                if (fromDeptId > 0) fd.append('from_dept_id', String(fromDeptId));
+                if (fromUserId > 0) fd.append('from_user_id', String(fromUserId));
+                if (toDeptId > 0) fd.append('to_dept_id', String(toDeptId));
+                if (toUserId > 0) fd.append('to_user_id', String(toUserId));
                 saveBtn.disabled = true;
                 fetch('ajax/mp-save-jobwork-weight-adjustment.php', { method: 'POST', body: fd, credentials: 'same-origin' })
                     .then(function (r) { return r.json(); })

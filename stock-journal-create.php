@@ -144,6 +144,7 @@ if ($edit_item_id > 0) {
 
 // Product opening voucher: load stock details from product characteristic (opening qty/weight) and existing stock journal
 $product_opening_item = null;
+$sj_product_opening_line = null;
 $sj_context_metal_id = 0;
 $voucher_type_param = isset($_GET['voucher']) ? trim($_GET['voucher']) : '';
 $characteristic_id_param = isset($_GET['characteristic_id']) ? (int)$_GET['characteristic_id'] : 0;
@@ -162,10 +163,22 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
     }
     $pc = getRecord("
         SELECT pc.id,
+               pc.product_id,
                pc.metal_id,
+               pc.barcode_prefix,
+               pc.barcode_digits,
+               pc.diamond_category,
+               pc.opening_purity,
+               pc.opening_weight,
+               pc.rate,
+               pc.carat,
+               pc.sku_code,
+               pc.barcode,
                COALESCE(pc.opening_qty, 0) as total_quantity,
                COALESCE(pc.opening_weight, 0) as total_gross_weight,
                p.name as product_name,
+               p.article as product_article,
+               p.category_id,
                m.display_name as metal_display_name
         FROM tbl_product_characteristics pc
         LEFT JOIN tbl_products p ON pc.product_id = p.id
@@ -188,6 +201,24 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
             'existing_used_quantity' => 0,
             'existing_used_gross_weight' => 0,
         ];
+        $sj_product_opening_line = [
+            'id' => (int) ($pc['product_id'] ?? $product_id_param),
+            'name' => (string) ($pc['product_name'] ?? ''),
+            'article' => (string) ($pc['product_article'] ?? ''),
+            'category_id' => $pc['category_id'] ?? null,
+            'characteristic_id' => (int) $pc['id'],
+            'sku_code' => (string) ($pc['sku_code'] ?? ''),
+            'barcode' => (string) ($pc['barcode'] ?? ''),
+            'carat' => $pc['carat'] ?? null,
+            'opening_purity' => (float) ($pc['opening_purity'] ?? 1),
+            'opening_weight' => (float) ($pc['opening_weight'] ?? 0),
+            'rate' => (float) ($pc['rate'] ?? 0),
+            'diamond_category' => (string) ($pc['diamond_category'] ?? ''),
+            'barcode_prefix' => (string) ($pc['barcode_prefix'] ?? ''),
+            'barcode_digits' => (int) ($pc['barcode_digits'] ?? 0) > 0 ? (int) $pc['barcode_digits'] : 5,
+            'metal_name' => (string) ($pc['metal_display_name'] ?? ''),
+            'metal_id' => (int) ($pc['metal_id'] ?? 0),
+        ];
         $sj_used = getRecord("
             SELECT COALESCE(SUM(sj.quantity), 0) as used_qty, COALESCE(SUM(sj.gross_weight), 0) as used_gross_wt
             FROM tbl_stock_journal sj
@@ -200,6 +231,31 @@ if ($voucher_type_param === 'product_opening' && $characteristic_id_param > 0 &&
             $product_opening_item['existing_used_gross_weight'] = (float)($sj_used['used_gross_wt'] ?? 0);
         }
     }
+}
+
+// Resolve active metal tab (product opening metal_id may not match deduped branch metal list ids)
+$sj_active_tab_metal_id = $sj_context_metal_id;
+if ($sj_active_tab_metal_id > 0) {
+    $sj_metal_ids_in_tabs = array_map(function ($m) {
+        return (int) ($m['id'] ?? 0);
+    }, $metals);
+    if (!in_array($sj_active_tab_metal_id, $sj_metal_ids_in_tabs, true)) {
+        $sj_match_name = '';
+        if (!empty($sj_product_opening_line['metal_name'])) {
+            $sj_match_name = trim((string) $sj_product_opening_line['metal_name']);
+        }
+        foreach ($metals as $_sm) {
+            if ($sj_match_name !== '' && strcasecmp(trim((string) ($_sm['display_name'] ?? '')), $sj_match_name) === 0) {
+                $sj_active_tab_metal_id = (int) $_sm['id'];
+                break;
+            }
+        }
+        if (!in_array($sj_active_tab_metal_id, $sj_metal_ids_in_tabs, true) && !empty($metals)) {
+            $sj_active_tab_metal_id = (int) ($metals[0]['id'] ?? 0);
+        }
+    }
+} elseif (!empty($metals)) {
+    $sj_active_tab_metal_id = (int) ($metals[0]['id'] ?? 0);
 }
 
 // Add Product / extra grid rows: hide for single-product gold-style opening; keep for Diamond & Stones (multi-line, one barcode group).
@@ -1681,9 +1737,10 @@ text-transform: uppercase;
         padding: 0.5rem 0.4rem;
         vertical-align: middle;
     }
-    #productListTablePage thead tr:nth-child(2) th[data-column]:not([data-column="actions"]),
-    #productListTable thead tr:nth-child(2) th[data-column]:not([data-column="actions"]),
-    #productSelectionModal #productListTable thead tr:nth-child(2) th[data-column]:not([data-column="actions"]) {
+    /* net-amt-tax / reverse excluded: they must stay position:sticky (right-pinned) like their body cells. */
+    #productListTablePage thead tr:nth-child(2) th[data-column]:not([data-column="actions"]):not([data-column="net-amt-tax"]):not([data-column="reverse"]),
+    #productListTable thead tr:nth-child(2) th[data-column]:not([data-column="actions"]):not([data-column="net-amt-tax"]):not([data-column="reverse"]),
+    #productSelectionModal #productListTable thead tr:nth-child(2) th[data-column]:not([data-column="actions"]):not([data-column="net-amt-tax"]):not([data-column="reverse"]) {
         position: relative;
         box-sizing: border-box;
     }
@@ -1732,8 +1789,8 @@ text-transform: uppercase;
     #productListTablePage th[data-column="actions"],
     #productListTable td[data-column="actions"],
     #productListTablePage td[data-column="actions"] {
-        position: sticky;
-        right: 0;
+        position: sticky !important;
+        right: 0 !important;
         width: var(--sj-sticky-actions-w);
         min-width: var(--sj-sticky-actions-w);
         max-width: var(--sj-sticky-actions-w);
@@ -1757,8 +1814,8 @@ text-transform: uppercase;
     #productListTablePage th[data-column="images"],
     #productListTable td[data-column="images"],
     #productListTablePage td[data-column="images"] {
-        position: sticky;
-        right: var(--sj-sticky-actions-w);
+        position: sticky !important;
+        right: var(--sj-sticky-actions-w) !important;
         width: var(--sj-sticky-images-w);
         min-width: var(--sj-sticky-images-w);
         max-width: var(--sj-sticky-images-w);
@@ -1782,8 +1839,8 @@ text-transform: uppercase;
     #productListTablePage th[data-column="reverse"],
     #productListTable td[data-column="reverse"],
     #productListTablePage td[data-column="reverse"] {
-        position: sticky;
-        right: calc(var(--sj-sticky-actions-w) + var(--sj-sticky-images-w));
+        position: sticky !important;
+        right: calc(var(--sj-sticky-actions-w) + var(--sj-sticky-images-w)) !important;
         width: var(--sj-sticky-reverse-w);
         min-width: var(--sj-sticky-reverse-w);
         max-width: var(--sj-sticky-reverse-w);
@@ -1807,12 +1864,12 @@ text-transform: uppercase;
     #productListTablePage th[data-column="net-amt-tax"],
     #productListTable td[data-column="net-amt-tax"],
     #productListTablePage td[data-column="net-amt-tax"] {
-        position: sticky;
+        position: sticky !important;
         right: calc(
             var(--sj-sticky-actions-w) +
             var(--sj-sticky-images-w) +
             var(--sj-sticky-reverse-w)
-        );
+        ) !important;
         width: var(--sj-sticky-netamt-w);
         min-width: var(--sj-sticky-netamt-w);
         max-width: var(--sj-sticky-netamt-w);
@@ -2873,8 +2930,8 @@ text-transform: uppercase;
                                         <?php 
                                         $first_metal = true;
                                         foreach($metals as $metal): 
-                                            if ($sj_context_metal_id > 0) {
-                                                $tab_class = ((int) $metal['id'] === $sj_context_metal_id) ? 'active' : '';
+                                            if ($sj_active_tab_metal_id > 0) {
+                                                $tab_class = ((int) $metal['id'] === $sj_active_tab_metal_id) ? 'active' : '';
                                             } else {
                                                 $tab_class = $first_metal ? 'active' : '';
                                             }
@@ -5490,6 +5547,15 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
     // Product opening single product: voucher=product_opening + characteristic_id + product_id -> product field readonly, no Add Product button
     window.PRODUCT_OPENING_SINGLE_PRODUCT = <?php echo !empty($product_opening_single_product) ? 'true' : 'false'; ?>;
     window.PRODUCT_OPENING_ALLOW_MULTI_ROWS = <?php echo !empty($product_opening_is_diamond_or_stones) ? 'true' : 'false'; ?>;
+    window.SJ_PRODUCT_OPENING_LINE = <?php echo !empty($sj_product_opening_line) ? json_encode($sj_product_opening_line, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : 'null'; ?>;
+    window.SJ_CONTEXT_METAL_ID = <?php echo (int) ($sj_active_tab_metal_id ?? $sj_context_metal_id ?? 0); ?>;
+
+    function sjGetProductOpeningLineTemplate() {
+        if (window.SJ_PRODUCT_OPENING_LINE && typeof window.SJ_PRODUCT_OPENING_LINE === 'object') {
+            return window.SJ_PRODUCT_OPENING_LINE;
+        }
+        return null;
+    }
 
     function sjProductOpeningLockProductField() {
         return window.PRODUCT_OPENING_SINGLE_PRODUCT && !window.PRODUCT_OPENING_ALLOW_MULTI_ROWS;
@@ -5524,6 +5590,45 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             }
             return '<div class="sj-excel-kv py-1 border-bottom border-light" style="font-size:0.72rem;line-height:1.25;text-align:left;"><span class="text-secondary">' + escapeHtml(String(x.h)) + ':</span> ' + escapeHtml(String(x.v != null ? x.v : '')) + '</div>';
         }).join('');
+    }
+
+    function sjResolveCaratIdFromExcel(karatVal, serverCaratId) {
+        if (serverCaratId != null && String(serverCaratId).trim() !== '') {
+            return String(serverCaratId).trim();
+        }
+        if (karatVal == null || String(karatVal).trim() === '') return '';
+        var raw = String(karatVal).trim();
+        if (typeof carats === 'undefined' || !Array.isArray(carats)) return raw;
+        for (var i = 0; i < carats.length; i++) {
+            if (String(carats[i].id) === raw) return String(carats[i].id);
+        }
+        var rawLower = raw.toLowerCase();
+        for (var j = 0; j < carats.length; j++) {
+            var nm = String(carats[j].name || '').trim();
+            if (nm === raw || nm.toLowerCase() === rawLower) return String(carats[j].id);
+        }
+        var num = parseFloat(raw.replace(/[^0-9.]/g, ''));
+        if (!isNaN(num)) {
+            for (var k = 0; k < carats.length; k++) {
+                var nameNum = parseFloat(String(carats[k].name || '').replace(/[^0-9.]/g, ''));
+                if (!isNaN(nameNum) && Math.abs(nameNum - num) < 0.001) return String(carats[k].id);
+            }
+        }
+        return raw;
+    }
+
+    function sjCaratDisplayName(caratIdOrName) {
+        if (caratIdOrName == null || String(caratIdOrName).trim() === '') return '';
+        var raw = String(caratIdOrName).trim();
+        if (typeof carats === 'undefined' || !Array.isArray(carats)) return raw;
+        var byId = carats.find(function(c) { return c.id == raw || String(c.id) === raw; });
+        if (byId) return byId.name || raw;
+        var rawLower = raw.toLowerCase();
+        var byName = carats.find(function(c) {
+            var nm = String(c.name || '').trim();
+            return nm === raw || nm.toLowerCase() === rawLower;
+        });
+        return byName ? (byName.name || raw) : raw;
     }
 
     function mapSjExcelProductToModalRow(p) {
@@ -5587,7 +5692,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             metal_id: p.metal_id,
             metal_name: p.metal_name,
             voucher_type: (p.voucher_type != null && String(p.voucher_type).trim() !== '') ? String(p.voucher_type).trim() : ((typeof window.SJ_DEFAULT_VOUCHER_TYPE === 'string' && window.SJ_DEFAULT_VOUCHER_TYPE) ? window.SJ_DEFAULT_VOUCHER_TYPE : ''),
-            carat_id: (p.karat != null && String(p.karat).trim() !== '') ? String(p.karat).trim() : '',
+            carat_id: sjResolveCaratIdFromExcel(p.karat, p.carat_id),
             location_id: (p.location != null && String(p.location).trim() !== '') ? String(p.location).trim() : '',
             excelTempImagePaths: tpaths,
             excel_extra_columns: Array.isArray(p.excel_extra_columns) ? p.excel_extra_columns : [],
@@ -6671,6 +6776,58 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
     }
     window.sjUpdateMetalTabsLockFromProductList = sjUpdateMetalTabsLockFromProductList;
 
+    /** Activate product-opening metal tab and load the template row if the grid is still empty. */
+    function sjActivateProductOpeningMetalTab() {
+        var ctxMid = (typeof window.SJ_CONTEXT_METAL_ID !== 'undefined') ? parseInt(window.SJ_CONTEXT_METAL_ID, 10) : 0;
+        var tab = null;
+        if (ctxMid > 0) {
+            tab = document.querySelector('.product-category-tabs .category-tab-btn[data-metal-id="' + String(ctxMid) + '"]');
+        }
+        if (!tab) {
+            var tpl = (typeof sjGetProductOpeningLineTemplate === 'function') ? sjGetProductOpeningLineTemplate() : null;
+            if (tpl && tpl.metal_id) {
+                tab = document.querySelector('.product-category-tabs .category-tab-btn[data-metal-id="' + String(tpl.metal_id) + '"]');
+            }
+            if (!tab && tpl && tpl.metal_name) {
+                document.querySelectorAll('.product-category-tabs .category-tab-btn').forEach(function(btn) {
+                    if (tab) return;
+                    var mn = (btn.getAttribute('data-metal-name') || '').trim().toLowerCase();
+                    if (mn && mn === String(tpl.metal_name).trim().toLowerCase()) tab = btn;
+                });
+            }
+        }
+        if (!tab) {
+            tab = document.querySelector('.product-category-tabs .category-tab-btn');
+        }
+        if (!tab) return null;
+        document.querySelectorAll('.category-tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        tab.classList.add('active');
+        currentMetalId = tab.getAttribute('data-metal-id');
+        window.sjCurrentMetalId = currentMetalId;
+        currentMetalName = tab.getAttribute('data-metal-name') || '';
+        if (typeof applyProductModalColumnVisibilityForTab === 'function') {
+            applyProductModalColumnVisibilityForTab(currentMetalId || '');
+        }
+        return tab;
+    }
+
+    function sjEnsureProductOpeningGridLoaded() {
+        try {
+            var p = new URLSearchParams(window.location.search);
+            if ((p.get('voucher') || '') !== 'product_opening' || !p.get('characteristic_id')) return;
+            var tbody = document.getElementById('productListBodyPage');
+            if (!tbody || tbody.querySelector('tr.product-row')) return;
+            if (/Loading products/i.test(tbody.textContent || '')) return;
+            var tab = sjActivateProductOpeningMetalTab();
+            var mid = (tab && tab.getAttribute('data-metal-id')) || currentMetalId || window.sjCurrentMetalId || window.SJ_CONTEXT_METAL_ID;
+            if (mid && typeof loadProducts === 'function') {
+                loadProducts(mid, '', tab || null);
+            }
+        } catch (e) {
+            console.warn('sjEnsureProductOpeningGridLoaded:', e);
+        }
+    }
+
     // Initialize category tabs (main card + modal share .category-tab-btn; bind once)
     function initCategoryTabs() {
         if (window._sjCategoryTabsInited) return;
@@ -6716,8 +6873,12 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             });
         });
         
-        // Set initial metal (first active tab in document — main card tabs come first)
-        const firstTab = document.querySelector('.category-tab-btn.active');
+        // Set initial metal (main card tabs only — modal duplicates must not steal .active)
+        let firstTab = document.querySelector('.product-category-tabs .category-tab-btn.active')
+            || document.querySelector('.product-category-tabs .category-tab-btn');
+        if (firstTab && !document.querySelector('.product-category-tabs .category-tab-btn.active')) {
+            firstTab.classList.add('active');
+        }
         if (firstTab) {
             currentMetalId = firstTab.getAttribute('data-metal-id');
             window.sjCurrentMetalId = currentMetalId;
@@ -6734,7 +6895,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 window.auragoldSyncProductModalExtraFields(currentMetalName);
             }
             if (typeof sjUpdateExcelSampleDownloadHref === 'function') {
-                sjUpdateExcelSampleDownloadHref(currentMetalId || <?php echo (int) $sj_context_metal_id; ?>);
+                sjUpdateExcelSampleDownloadHref(currentMetalId || <?php echo (int) $sj_active_tab_metal_id; ?>);
             }
         }
         sjUpdateMetalTabsLockFromProductList();
@@ -6749,6 +6910,14 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             tbody.querySelectorAll('tr.product-row').forEach(function(row) { row.style.display = ''; });
             var onlyEmpty = tbody.querySelector('tr:not(.product-row)');
             if (onlyEmpty) onlyEmpty.remove();
+            return;
+        }
+        var uPoVoucher = (typeof window !== 'undefined' && window.location && window.location.search) ? (new URLSearchParams(window.location.search).get('voucher')) : null;
+        var uPoChar = (typeof window !== 'undefined' && window.location && window.location.search) ? (new URLSearchParams(window.location.search).get('characteristic_id')) : null;
+        if ((uPoVoucher || '') === 'product_opening' && uPoChar && parseInt(uPoChar, 10) > 0) {
+            tbody.querySelectorAll('tr.product-row').forEach(function(row) { row.style.display = ''; });
+            var onlyEmptyPo = tbody.querySelector('tr:not(.product-row)');
+            if (onlyEmptyPo && tbody.querySelectorAll('tr.product-row').length > 0) onlyEmptyPo.remove();
             return;
         }
         const allRows = tbody.querySelectorAll('tr.product-row');
@@ -6949,6 +7118,16 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             if (pr !== '') {
                 var dg = parseInt(rows[i].getAttribute('data-barcode-digits'), 10) || 5;
                 return { prefix: pr, digits: dg };
+            }
+        }
+        if (typeof sjGetProductOpeningLineTemplate === 'function') {
+            var poLine = sjGetProductOpeningLineTemplate();
+            if (poLine) {
+                var poPr = (poLine.barcode_prefix != null ? String(poLine.barcode_prefix).trim() : '');
+                if (poPr !== '') {
+                    var poDg = parseInt(poLine.barcode_digits, 10);
+                    return { prefix: poPr, digits: (!poDg || poDg < 1) ? 5 : poDg };
+                }
             }
         }
         return { prefix: '', digits: 0 };
@@ -7284,8 +7463,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
-            <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
+                        <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;">${buildSJTaxTypeSelectHtml()}</select></td>
@@ -7423,6 +7602,19 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         // Calculate initial values
         calculateModalRowNetWeight(row);
         
+        // Product opening (Diamond & Stones): pre-fill product + barcode rules from URL context
+        if (typeof sjGetProductOpeningLineTemplate === 'function') {
+            var poCtx = sjGetProductOpeningLineTemplate();
+            if (poCtx && typeof populateRowWithProduct === 'function') {
+                try {
+                    var uPo = new URLSearchParams(window.location.search);
+                    if ((uPo.get('voucher') || '') === 'product_opening' && uPo.get('characteristic_id')) {
+                        populateRowWithProduct(row, poCtx);
+                    }
+                } catch (ePo) {}
+            }
+        }
+        
         // Do not focus Product Selection (modal) Gross Wt - focus goes to Product List Gross Wt after ADD (Shift + A) only
         
         function updateRowSelection(row, isSelected) {
@@ -7447,6 +7639,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         } else {
             getNextBarcodeFromServer(fetchPrefix, fetchDigits).then(function(uniqueBarcode) {
                 finishAddEmptyProductRow(uniqueBarcode || '', bcRules.prefix, attrDigits);
+            }).catch(function() {
+                finishAddEmptyProductRow('', bcRules.prefix, attrDigits);
             });
         }
     }
@@ -7791,6 +7985,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         if (voucher === 'product_opening' && characteristicId > 0) {
             ajaxUrl = 'ajax/get-products-by-characteristic-id.php';
             ajaxData = { characteristic_id: characteristicId };
+            var urlProductId = urlParams.get('product_id') ? parseInt(urlParams.get('product_id'), 10) : 0;
+            if (urlProductId > 0) ajaxData.product_id = urlProductId;
         }
         // Purchase invoice: load products from purchase invoice item
         else if (itemId > 0) {
@@ -7800,12 +7996,19 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         
         // Use jQuery if available, otherwise use fetch
         if (typeof jQuery !== 'undefined' && jQuery.ajax) {
-            jQuery.ajax({
-            url: ajaxUrl,
-            type: 'GET',
-            data: ajaxData,
-            dataType: 'json',
-            success: function(response) {
+            var sjPoRenderLoadedProducts = function(response) {
+                if (window.__sjForceLoadProductsResponse) {
+                    response = window.__sjForceLoadProductsResponse;
+                    window.__sjForceLoadProductsResponse = null;
+                }
+                if ((!response || !response.success || !response.products || !response.products.length)
+                    && voucher === 'product_opening' && characteristicId > 0
+                    && typeof sjGetProductOpeningLineTemplate === 'function') {
+                    var poTpl = sjGetProductOpeningLineTemplate();
+                    if (poTpl) {
+                        response = { success: true, products: [poTpl] };
+                    }
+                }
                 if (response.success && response.products.length > 0) {
                     let html = '';
                     response.products.forEach(function(product) {
@@ -7889,8 +8092,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                                 <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
-                                <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
+                                            <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
                                 <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
                                 <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;">${buildSJTaxTypeSelectHtml()}</select></td>
@@ -7938,7 +8141,15 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         var need = (itemId > 0) || (voucher === 'product_opening' && characteristicId > 0);
                         if (!need) return;
                         var mid = String(response.products[0].metal_id);
-                        var tab = document.querySelector('.category-tab-btn[data-metal-id="' + mid.replace(/"/g, '\\"') + '"]');
+                        var tab = document.querySelector('.product-category-tabs .category-tab-btn[data-metal-id="' + mid.replace(/"/g, '\\"') + '"]');
+                        if (!tab && response.products[0].metal_name) {
+                            var mnl = String(response.products[0].metal_name).trim().toLowerCase();
+                            document.querySelectorAll('.product-category-tabs .category-tab-btn').forEach(function(b) {
+                                if (tab) return;
+                                var bn = (b.getAttribute('data-metal-name') || '').trim().toLowerCase();
+                                if (bn && bn === mnl) tab = b;
+                            });
+                        }
                         if (!tab) return;
                         if (!tab.classList.contains('active')) {
                             document.querySelectorAll('.category-tab-btn').forEach(function(t) { t.classList.remove('active'); });
@@ -7959,15 +8170,18 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                     tbody.querySelectorAll('.stock-journal-images-cell').forEach(function(cell) { initStockJournalImageCell(cell); });
                     tbody.querySelectorAll('tr.product-row').forEach(function(row) {
                         if (typeof reorderModalRowCellsToMatchHeader === 'function') reorderModalRowCellsToMatchHeader(row);
-                        if (typeof applyProductModalColumnVisibilityForTab === 'function' && (tbody.id === 'productListBody' || tbody.id === 'productListBodyPage' || (tbody && tbody.closest && tbody.closest('#productSelectionModal')))) {
-                            applyProductModalColumnVisibilityForTab(typeof currentMetalId !== 'undefined' ? (currentMetalId || '') : '');
-                        }
                         var pcat = row.querySelector('.product-category-select');
                         if (pcat && typeof populateSelect === 'function' && typeof categories !== 'undefined') {
                             populateSelect(pcat, categories, 'id', 'name', 'Select Category');
                         }
                         if (typeof auragoldPopulateModalSpecSelectsForRow === 'function') auragoldPopulateModalSpecSelectsForRow(row);
                     });
+                    if (typeof applyProductModalColumnVisibilityForTab === 'function') {
+                        applyProductModalColumnVisibilityForTab(typeof currentMetalId !== 'undefined' ? (currentMetalId || '') : '');
+                    }
+                    if (typeof runStockJournalProductRowAlignmentPipeline === 'function') {
+                        runStockJournalProductRowAlignmentPipeline();
+                    }
                     
                     // Populate carat and location dropdowns
                     tbody.querySelectorAll('.carat-select').forEach(function(select) {
@@ -8045,10 +8259,34 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         }
                     }
                 } else {
+                    var poTplEmpty = (voucher === 'product_opening' && characteristicId > 0 && typeof sjGetProductOpeningLineTemplate === 'function')
+                        ? sjGetProductOpeningLineTemplate() : null;
+                    if (poTplEmpty) {
+                        sjPoRenderLoadedProducts({ success: true, products: [poTplEmpty] });
+                        return;
+                    }
                     tbody.innerHTML = '<tr><td colspan="103" class="text-center text-muted py-4">No products found</td></tr>';
                 }
-            },
+            };
+            var poTplImmediate = (voucher === 'product_opening' && characteristicId > 0 && typeof sjGetProductOpeningLineTemplate === 'function')
+                ? sjGetProductOpeningLineTemplate() : null;
+            if (poTplImmediate) {
+                sjPoRenderLoadedProducts({ success: true, products: [poTplImmediate] });
+                return;
+            }
+            jQuery.ajax({
+            url: ajaxUrl,
+            type: 'GET',
+            data: ajaxData,
+            dataType: 'json',
+            success: sjPoRenderLoadedProducts,
             error: function() {
+                var poTplRender = (voucher === 'product_opening' && characteristicId > 0 && typeof sjGetProductOpeningLineTemplate === 'function')
+                    ? sjGetProductOpeningLineTemplate() : null;
+                if (poTplRender) {
+                    sjPoRenderLoadedProducts({ success: true, products: [poTplRender] });
+                    return;
+                }
                 tbody.innerHTML = '<tr><td colspan="103" class="text-center text-danger py-4">Error loading products</td></tr>';
             }
         });
@@ -8059,6 +8297,14 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             fetch(url)
                 .then(response => response.json())
                 .then(data => {
+                    if ((!data || !data.success || !data.products || !data.products.length)
+                        && voucher === 'product_opening' && characteristicId > 0
+                        && typeof sjGetProductOpeningLineTemplate === 'function') {
+                        var poTplFetch = sjGetProductOpeningLineTemplate();
+                        if (poTplFetch) {
+                            data = { success: true, products: [poTplFetch] };
+                        }
+                    }
                     if (data.success && data.products.length > 0) {
                         let html = '';
                         data.products.forEach(function(product) {
@@ -8142,8 +8388,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                                 <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
-                                <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                                <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
+                                            <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
                                 <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
                                 <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;">${buildSJTaxTypeSelectHtml()}</select></td>
@@ -8313,7 +8559,11 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         // Initialize category tabs on page load (sets active metal before column prefs / order load)
         initCategoryTabs();
         if (typeof loadProductModalColumnPreferences === 'function') {
-            loadProductModalColumnPreferences();
+            loadProductModalColumnPreferences(function() {
+                if (typeof sjEnsureProductOpeningGridLoaded === 'function') sjEnsureProductOpeningGridLoaded();
+            });
+        } else if (typeof sjEnsureProductOpeningGridLoaded === 'function') {
+            sjEnsureProductOpeningGridLoaded();
         }
         if (typeof window.runStockJournalColumnDragInit === 'function') {
             window.runStockJournalColumnDragInit();
@@ -8610,6 +8860,9 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 if (typeof applyProductModalColumnVisibilityForTab === 'function') {
                     applyProductModalColumnVisibilityForTab(tabKey);
                 }
+                if (typeof runStockJournalProductRowAlignmentPipeline === 'function') {
+                    runStockJournalProductRowAlignmentPipeline();
+                }
                 if (typeof onLoaded === 'function') onLoaded();
                 if (typeof window.runStockJournalColumnDragInit === 'function') {
                     window.runStockJournalColumnDragInit();
@@ -8639,12 +8892,18 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         if (typeof window.DIAMOND_TAB_VISIBLE_COLUMNS !== 'undefined' && window.DIAMOND_TAB_VISIBLE_COLUMNS && window.DIAMOND_TAB_VISIBLE_COLUMNS.length) {
             window.DIAMOND_TAB_VISIBLE_COLUMNS.forEach(function(col) { diamondVisibleSet[col] = 1; });
         }
-        var saved = window.productModalColumnVisibilityByTab && (window.productModalColumnVisibilityByTab[tk] || window.productModalColumnVisibilityByTab[tabKey]);
-        var prefs = isDiamondFamilyTab
-            ? (saved && Object.keys(saved).length > 0 ? saved : diamondVisibleSet)
-            : ((typeof window.mergeProductModalMetalTabPrefs === 'function')
+        var savedDiamond = window.productModalColumnVisibilityByTab &&
+            (window.productModalColumnVisibilityByTab[tk] || window.productModalColumnVisibilityByTab[tabKey]);
+        var prefs;
+        if (isDiamondFamilyTab) {
+            // Start from diamond defaults, then apply saved overrides (do not replace entire set with sparse saved prefs)
+            prefs = Object.assign({}, diamondVisibleSet, savedDiamond && typeof savedDiamond === 'object' ? savedDiamond : {});
+            Object.keys(STOCK_JOURNAL_FORCED_MODAL_COLUMNS).forEach(function(col) { prefs[col] = 1; });
+        } else {
+            prefs = (typeof window.mergeProductModalMetalTabPrefs === 'function')
                 ? window.mergeProductModalMetalTabPrefs(tk, tabKey)
-                : saved);
+                : savedDiamond;
+        }
         var diamondGroupColumns = (typeof window.getDiamondGroupColumnKeys === 'function')
             ? window.getDiamondGroupColumnKeys()
             : ['pkt-wt', 'pkt-less-wt', 'gross-wt', 'stone-weight', 'less-wt', 'net-wt', 'quantity', 'rate', 'amount'];
@@ -8671,7 +8930,10 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 return false;
             }
             if (isDiamondFamilyTab) {
-                return !!(prefs && prefs[columnName] === 1);
+                if (prefs && Object.prototype.hasOwnProperty.call(prefs, columnName)) {
+                    return prefs[columnName] === 1;
+                }
+                return diamondVisibleSet[columnName] === 1;
             }
             if (prefs && Object.prototype.hasOwnProperty.call(prefs, columnName)) {
                 return prefs[columnName] === 1;
@@ -9297,7 +9559,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                 <td data-column="quantity" style="text-align: right;">
                     <input type="text" class="form-control form-control-sm editable-field" data-field="quantity" value="${parseFloat(modalRowData.quantity || 1).toFixed(2)}" step="0.01" style="text-align: right; border: none; background: transparent; padding: 0.25rem; color: #11294b; width: 80px;">
                 </td>
-                <td data-column="carat" style="text-align: center; color: #11294b;">${escapeHtml(typeof carats !== 'undefined' && modalRowData.carat_id && (carats.find(function(c){ return c.id == modalRowData.carat_id || c.id == String(modalRowData.carat_id); }) || {}).name || modalRowData.carat_id || '')}</td>
+                <td data-column="carat" style="text-align: center; color: #11294b;">${escapeHtml(sjCaratDisplayName(modalRowData.carat_id || modalRowData.karat || ''))}</td>
                 <td data-column="pkt-wt" style="text-align: right; color: #11294b;">${parseFloat(modalRowData.pkt_wt || 0).toFixed(3)}</td>
                 <td data-column="pkt-less-wt" style="text-align: right; color: #11294b;">${parseFloat(modalRowData.pkt_less_wt || 0).toFixed(3)}</td>
                 <td data-column="gross-wt" style="text-align: right;">
@@ -10717,101 +10979,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         return base * (per / 100);
     }
     
-    // Add calculation listeners for modal product rows
-    function addModalRowCalculationListeners(row) {
-        // Helper function to add listeners
-        function addListeners(input, callback) {
-            if (input) {
-                input.addEventListener('input', callback);
-                input.addEventListener('change', callback);
-            }
-        }
-        
-        function addSelectListeners(select, callback) {
-            if (select) {
-                select.addEventListener('change', callback);
-            }
-        }
-        
-        // Get all calculation-related input fields
-        const grossWtInput = row.querySelector('[data-column="gross-wt"] input');
-        const metalWtInputModal = row.querySelector('[data-column="metal-weight"] input');
-        const lessWtInput = row.querySelector('[data-column="less-wt"] input');
-        const purityInput = row.querySelector('[data-column="purity"] input');
-        const wastagePerInput = row.querySelector('[data-column="wastage-per"] input');
-        const rateInput = row.querySelector('[data-column="rate"] input');
-        const amountInput = row.querySelector('[data-column="amount"] input');
-        const netAmtInput = row.querySelector('[data-column="net-amt"] input');
-        
-        // Discount fields
-        const discountTypeSelect = row.querySelector('[data-column="discount-type"] select');
-        const discountPerInput = row.querySelector('[data-column="discount-per"] input');
-        
-        // Making fields
-        const makingTypeSelect = row.querySelector('[data-column="making-type"] select');
-        const makingRateInput = row.querySelector('[data-column="making-rate"] input');
-        const makingDiscountAmtInput = row.querySelector('[data-column="making-discount-amt"] input');
-        
-        // Stone fields
-        const stoneChargeTypeSelect = row.querySelector('[data-column="stone-charge-type"] select');
-        const stoneWeightInput = row.querySelector('[data-column="stone-weight"] input');
-        const stoneRateInput = row.querySelector('[data-column="stone-rate"] input');
-        
-        // Other fields
-        const otherWeightInput = row.querySelector('[data-column="other-weight"] input');
-        const otherRateInput = row.querySelector('[data-column="other-rate"] input');
-        
-        // Diamond amount
-        const diamondAmountInput = row.querySelector('[data-column="diamond-amount"] input');
-        
-        // Add event listeners for all calculation fields
-        addListeners(grossWtInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(metalWtInputModal, function() { calculateModalRowNetWeight(row); });
-        addListeners(lessWtInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(purityInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(wastagePerInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(rateInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(amountInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(netAmtInput, function() { calculateModalRowNetWeight(row); });
-        
-        // Discount listeners
-        addSelectListeners(discountTypeSelect, function() { calculateModalRowNetWeight(row); });
-        addListeners(discountPerInput, function() { calculateModalRowNetWeight(row); });
-        
-        // Making listeners
-        addSelectListeners(makingTypeSelect, function() { calculateModalRowNetWeight(row); });
-        addListeners(makingRateInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(makingDiscountAmtInput, function() { calculateModalRowNetWeight(row); });
-        
-        // Stone listeners
-        addSelectListeners(stoneChargeTypeSelect, function() { calculateModalRowNetWeight(row); });
-        addListeners(stoneWeightInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(stoneRateInput, function() { calculateModalRowNetWeight(row); });
-        
-        // Other listeners
-        addListeners(otherWeightInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(otherRateInput, function() { calculateModalRowNetWeight(row); });
-        
-        // Diamond amount listener
-        addListeners(diamondAmountInput, function() { calculateModalRowNetWeight(row); });
-        
-        const metalRateInput = row.querySelector('[data-column="metal-rate"] input');
-        addListeners(metalRateInput, function() { calculateModalRowNetWeight(row); });
-        const calculationSelectEl = row.querySelector('[data-column="calculation"] select');
-        addSelectListeners(calculationSelectEl, function() { calculateModalRowNetWeight(row); });
-        const quantityInputEl = row.querySelector('[data-column="quantity"] input');
-        addListeners(quantityInputEl, function() { calculateModalRowNetWeight(row); });
-        const caratSelectEl = row.querySelector('[data-column="carat"] select');
-        addSelectListeners(caratSelectEl, function() {
-            if (typeof window.applyDashboardMetalRateFromCaratSelect === 'function') {
-                window.applyDashboardMetalRateFromCaratSelect(row, function() {
-                    calculateModalRowNetWeight(row);
-                });
-            } else {
-                calculateModalRowNetWeight(row);
-            }
-        });
-    }
+    // addModalRowCalculationListeners: product-modal-add-item-common.js (carat ↔ D.Weight sync on Diamond tab)
     
     // Calculate ALL values for modal product rows - COMPREHENSIVE CALCULATION FUNCTION
     // Formulas:
@@ -10969,11 +11137,14 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             metalValue = stoneAmount;
             if (stoneAmountInput) stoneAmountInput.value = stoneAmount.toFixed(2);
         } else if (calculationType === 'Carat X Rate') {
-            if (stoneWeightForCalc > 0) {
-                metalValue = stoneWeightForCalc * goldRate * quantityForCalc;
+            // Carat / Stone Wt. × Rate (Rate column). Do not use Karat dropdown id as a weight.
+            // If no stone carat is entered, fall back to Metal/Rate × Final/Purity/Net wt (gold lines).
+            if (stoneWeightForCalc > 0 && goldRate > 0) {
+                metalValue = stoneWeightForCalc * goldRate;
             } else {
                 const fw = parseFloat(finalWtInput?.value) || purityWt || netWt;
-                metalValue = rateForMetalValue * fw;
+                const rateFallback = rateForMetalValue > 0 ? rateForMetalValue : goldRate;
+                metalValue = rateFallback * fw;
             }
         } else if (calculationType === 'Weight X Rate') {
             const fw = parseFloat(finalWtInput?.value) || purityWt || netWt;
@@ -11105,27 +11276,51 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         // ========== NET AMOUNT ==========
         // Net Amount = Amount + diamond (diamond already in netBasePreDiscount for "On Net Amount" discount base)
         let netAmt = calculatedAmount + diamondAmount;
+        // Stock journal create: Purchase/Sale Amount are user-editable (esp. product opening)
+        var manualSaleAmt = row.getAttribute('data-manual-sale-amount') === '1';
+        var manualPurchaseAmt = row.getAttribute('data-manual-purchase-amount') === '1';
+        var saleFocused = false;
+        var purchaseFocused = false;
+        try {
+            saleFocused = !!(saleAmountInput && document.activeElement === saleAmountInput);
+            purchaseFocused = !!(purchaseAmountInput && document.activeElement === purchaseAmountInput);
+        } catch (eFocus) {}
+        if (manualSaleAmt && saleAmountInput) {
+            netAmt = parseFloat(saleAmountInput.value) || 0;
+            if (netAmt < 0) netAmt = 0;
+            calculatedAmount = Math.max(0, netAmt - diamondAmount);
+            if (amountInput) amountInput.value = calculatedAmount.toFixed(2);
+        }
         
         if (netAmtInput) netAmtInput.value = netAmt.toFixed(2);
         
         // ========== PURCHASE AMOUNT ==========
-        // Purchase Amount = Net Amount (or can be calculated differently)
-        if (purchaseAmountInput) purchaseAmountInput.value = netAmt.toFixed(2);
+        if (purchaseAmountInput && !(manualPurchaseAmt || purchaseFocused)) {
+            purchaseAmountInput.value = netAmt.toFixed(2);
+        }
         
         // ========== SALE AMOUNT ==========
-        // Sale Amount = Net Amount (or can be calculated with markup)
-        if (saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
+        if (saleAmountInput && !(manualSaleAmt || saleFocused)) {
+            saleAmountInput.value = netAmt.toFixed(2);
+        }
         if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
         
         // ========== TAX CALCULATION ==========
-        // 13. Tax = 5% of Net Amount (auto-calculate)
-        const tax = netAmt * 0.05; // 5% tax
+        // Tax = Net Amount × (Tax % / 100) — use Tax % column (default 5)
+        const taxPercentInput = row.querySelector('[data-column="tax-percent"] input');
+        const taxPercent = parseFloat(taxPercentInput && taxPercentInput.value) || 5;
+        const tax = netAmt * (taxPercent / 100);
         if (taxInput) taxInput.value = tax.toFixed(2);
         
         // ========== NET AMOUNT + TAX ==========
-        // 14. Net Amount + Tax = Tax + Net Amount
+        // Net Amount + Tax = Tax + Net Amount
         const netAmtTax = tax + netAmt;
         if (netAmtTaxInput) netAmtTaxInput.value = netAmtTax.toFixed(2);
+    }
+    // Prefer this page's calculator over product-modal-add-item-common.js defaults.
+    window.calculateModalRowNetWeight = calculateModalRowNetWeight;
+    if (typeof window.auragoldApplyManualAmountFieldsEditability === 'function') {
+        window.auragoldApplyManualAmountFieldsEditability();
     }
     
     // Update summary row in table footer (removed - no footer in this design)
@@ -11235,6 +11430,22 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
     function updateSummaryPanel() {
         const tbody = document.getElementById('productTableBody');
         const rows = tbody.querySelectorAll('tr:not(.no-drag)');
+        function plRowCellFloat(row, dataColumn) {
+            var cell = row.querySelector('[data-column="' + dataColumn + '"]');
+            if (!cell) return 0;
+            var inp = cell.querySelector('input');
+            if (inp && inp.value != null && String(inp.value).trim() !== '') {
+                var v = parseFloat(inp.value);
+                if (!isNaN(v)) return v;
+            }
+            var sel = cell.querySelector('select');
+            if (sel && sel.value != null && String(sel.value).trim() !== '') {
+                var vs = parseFloat(sel.value);
+                if (!isNaN(vs)) return vs;
+            }
+            var t = parseFloat(String(cell.textContent || '').replace(/,/g, ''));
+            return isNaN(t) ? 0 : t;
+        }
         
         let totalAmount = 0;
         let totalQuantity = 0;
@@ -11261,15 +11472,17 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         let totalSaleAmount = 0;
         let totalSaleAmountWith = 0;
         let totalReverse = 0;
+        let totalLessWt = 0;
+        let totalPurityDisplay = 0;
         
         rows.forEach(function(row) {
-            const qty = parseFloat(row.querySelector('[data-field="quantity"]')?.value || row.querySelector('[data-column="quantity"]')?.textContent) || 0;
-            const grossWt = parseFloat(row.querySelector('[data-field="gross_wt"]')?.value || row.querySelector('[data-column="gross-wt"]')?.textContent) || 0;
-            const lessWt = parseFloat(row.querySelector('[data-field="less_wt"]')?.value || row.querySelector('[data-column="less-wt"]')?.textContent) || 0;
-            const purity = parseFloat(row.querySelector('[data-field="purity"]')?.value || row.querySelector('[data-column="purity"]')?.textContent) || 0;
-            const finalWt = parseFloat(row.querySelector('[data-field="final_wt"]')?.value || row.querySelector('[data-column="final-wt"]')?.textContent) || 0;
-            const netWt = parseFloat(row.querySelector('[data-column="net-wt"]')?.textContent) || 0;
-            const pureWt = parseFloat(row.querySelector('[data-column="pure-wt"]')?.textContent) || 0;
+            const qty = plRowCellFloat(row, 'quantity');
+            const grossWt = plRowCellFloat(row, 'gross-wt');
+            const lessWt = plRowCellFloat(row, 'less-wt');
+            const purity = plRowCellFloat(row, 'purity');
+            const finalWt = plRowCellFloat(row, 'final-wt');
+            const netWt = plRowCellFloat(row, 'net-wt');
+            const pureWt = plRowCellFloat(row, 'pure-wt');
             const making = parseFloat(row.querySelector('[data-field="making"]')?.value || row.querySelector('[data-column="making"]')?.textContent) || 0;
             const tax = parseFloat(row.querySelector('[data-field="tax"]')?.value || row.querySelector('[data-column="tax"]')?.textContent) || 0;
             // Get values from textContent or input value (handle both cases)
@@ -11299,18 +11512,11 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             
             totalQuantity += qty;
             totalGrossWt += grossWt;
+            totalLessWt += lessWt;
             totalFinalWt += finalWt;
             totalNetWt += netWt;
-            
-            // Update footer totals for less weight and purity (if needed)
-            const footerLessWt = document.getElementById('footerLessWt');
-            if (footerLessWt) {
-                const totalLessWt = Array.from(rows).reduce((sum, r) => {
-                    return sum + (parseFloat(r.querySelector('[data-field="less_wt"]')?.value || 0) || 0);
-                }, 0);
-                footerLessWt.textContent = totalLessWt.toFixed(3);
-            }
-            totalPureWt += parseFloat(pureWt);
+            totalPurityDisplay += purity;
+            totalPureWt += pureWt;
             totalMaking += making;
             totalTax += tax;
             totalAmount += amount;
@@ -11333,6 +11539,11 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             totalReverse += reverse;
         });
         
+        var footerLessWtEl = document.getElementById('footerLessWt');
+        if (footerLessWtEl && rows.length > 0) {
+            footerLessWtEl.textContent = totalLessWt.toFixed(3);
+        }
+        
         // Update grand total footer
         const footer = document.getElementById('productTableFooter');
         if (footer && rows.length > 0) {
@@ -11342,6 +11553,16 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             document.getElementById('footerFinalWt').textContent = totalFinalWt.toFixed(1);
             document.getElementById('footerNetWt').textContent = totalNetWt.toFixed(1);
             document.getElementById('footerPureWt').textContent = totalPureWt.toFixed(3);
+            var footerPurityEl = document.getElementById('footerPurity');
+            if (footerPurityEl) {
+                var effPurity = (totalNetWt > 0.00001) ? (totalPureWt / totalNetWt) : 0;
+                if (effPurity <= 0.00001 && totalPurityDisplay > 0) {
+                    footerPurityEl.textContent = totalPurityDisplay.toFixed(2);
+                } else {
+                    if (effPurity > 1.00001) effPurity = effPurity / 100;
+                    footerPurityEl.textContent = effPurity.toFixed(2);
+                }
+            }
             document.getElementById('footerMaking').textContent = totalMaking;
             document.getElementById('footerTax').textContent = totalTax;
             document.getElementById('footerAmount').textContent = totalAmount.toFixed(2);
@@ -12547,8 +12768,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_rate || 0).toFixed(2)}" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_cost || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.diamond_amount || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
-            <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.purchase_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+            <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.purchase_amount || 0).toFixed(2)}" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
+                        <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount_with || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;">${buildSJTaxTypeSelectHtml(item.tax_type)}</select></td>
@@ -13557,6 +13778,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             'stone-cost': 'Stone Cost',
             'diamond-amount': 'Diamond Amount',
             'purchase-amount': 'Purchase Amount',
+            'sale-percent': 'Sale Percentages',
             'sale-amount': 'Sale Amount',
             'sale-amount-with': 'Sale Amount With',
             'net-amt': 'Net Amt',
@@ -14307,8 +14529,8 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
                         <td data-column="stone-rate"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 100px; font-size: 0.7rem;"></td>
                         <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                         <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
-                        <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.purchase_amount != null && sjItem.purchase_amount !== '' ? sjItem.purchase_amount : 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                        <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                        <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.purchase_amount != null && sjItem.purchase_amount !== '' ? sjItem.purchase_amount : 0).toFixed(2)}" step="0.01" style="width: 130px; font-size: 0.7rem;"></td>
+                                    <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.net_amount || 0).toFixed(2)}" step="0.01" style="width: 110px; font-size: 0.7rem;"></td>
                         <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.sale_amount_with != null && sjItem.sale_amount_with !== '' ? sjItem.sale_amount_with : (sjItem.net_amt_with_tax || 0)).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
                         <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="${parseFloat(sjItem.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                         <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;">${buildSJTaxTypeSelectHtml(sjItem.tax_type)}</select></td>

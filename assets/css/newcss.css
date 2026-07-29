@@ -15,7 +15,7 @@
         --js-fw-nav-active: 600;
         --js-fw-heading: 700;
         /* Main horizontal menu (#auragoldTopNav) — single row, full-width strip */
-        --js-text-topnav: 12px;
+        --js-text-topnav: 11px;
     }
 
     /* Full screen view - Compact */
@@ -303,6 +303,50 @@
         overflow: visible;
         text-overflow: clip;
     }
+    .mega-menu.gst-report-mega-menu {
+        /* GST Reports sits near the right of the top nav — open leftward so it stays on-screen */
+        left: auto !important;
+        right: 0 !important;
+        width: min(1080px, calc(100vw - 24px));
+        max-width: calc(100vw - 24px);
+        padding: 1.1rem 1.15rem !important;
+        overflow: visible;
+    }
+    .mega-menu.gst-report-mega-menu .mega-menu-content {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(200px, 1fr));
+        gap: 1rem 1.25rem;
+        flex-wrap: unset;
+    }
+    .mega-menu.gst-report-mega-menu .mega-menu-column {
+        flex: unset;
+        min-width: 0;
+        max-width: none;
+    }
+    .mega-menu.gst-report-mega-menu .mega-menu-title {
+        white-space: normal;
+        line-height: 1.25;
+        overflow: visible;
+        text-overflow: clip;
+    }
+    .mega-menu.gst-report-mega-menu .mega-menu-list .dropdown-item {
+        font-size: 0.82rem;
+        padding: 0.4rem 0.55rem !important;
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+        line-height: 1.3;
+    }
+    @media (max-width: 1100px) {
+        .mega-menu.gst-report-mega-menu .mega-menu-content {
+            grid-template-columns: repeat(2, minmax(180px, 1fr));
+        }
+    }
+    @media (max-width: 720px) {
+        .mega-menu.gst-report-mega-menu .mega-menu-content {
+            grid-template-columns: 1fr;
+        }
+    }
     .mega-menu-list .mega-menu-subheading {
         list-style: none !important;
         margin: 0.65rem 0 0.35rem !important;
@@ -404,18 +448,18 @@
             width: auto;
             min-width: 0;
             justify-content: center;
-            font-size: 12px !important;
-            padding: 8px 7px !important;
-            gap: 0.35rem;
+            font-size: var(--js-text-topnav, 11px) !important;
+            padding: 8px 6px !important;
+            gap: 0.3rem;
             margin: 0 !important;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.01em;
             white-space: nowrap;
             border-radius: 4px;
         }
         #auragoldTopNav .nav-link i,
         .top-navbar#auragoldTopNav .nav-link i {
             flex-shrink: 0;
-            font-size: 14px !important;
+            font-size: 13px !important;
         }
         .top-navbar .nav {
             padding-left: 0;
@@ -2075,13 +2119,18 @@ text-transform: uppercase;
             box-shadow: none !important;
         }
         .top-navbar#auragoldTopNav .nav-item.mega-menu-item.is-expanded > .mega-menu,
-        .top-navbar#auragoldTopNav .nav-item.mega-menu-item.is-expanded > .inventory-mega-menu {
+        .top-navbar#auragoldTopNav .nav-item.mega-menu-item.is-expanded > .inventory-mega-menu,
+        .top-navbar#auragoldTopNav .nav-item.mega-menu-item.is-expanded > .gst-report-mega-menu {
             padding: 0.65rem 0.5rem !important;
         }
         .top-navbar#auragoldTopNav .nav-item .mega-menu-content {
             flex-direction: column !important;
             flex-wrap: nowrap !important;
             gap: 0.5rem;
+        }
+        .top-navbar#auragoldTopNav .nav-item .gst-report-mega-menu .mega-menu-content {
+            display: flex !important;
+            grid-template-columns: none !important;
         }
         .top-navbar#auragoldTopNav .nav-item .mega-menu-column {
             flex: 1 1 auto !important;
@@ -2688,6 +2737,12 @@ text-transform: uppercase;
             flex-wrap: nowrap !important;
             gap: 0.65rem !important;
             padding: 2px 0 4px 0;
+        }
+
+        body.auragold-menu-vertical #auragoldTopNav .nav-item .gst-report-mega-menu .mega-menu-content {
+            display: flex !important;
+            grid-template-columns: none !important;
+            flex-direction: column !important;
         }
 
         body.auragold-menu-vertical #auragoldTopNav .nav-item .mega-menu-column {

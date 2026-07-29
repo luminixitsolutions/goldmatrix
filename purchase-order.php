@@ -2516,7 +2516,7 @@ text-transform: uppercase;
                                                     ['discount-type','Discount Type'],['discount-per','Discount Per.'],['discount-amount','Discount Amount'],['discount','Discount'],
                                                     ['making-type','Making Type'],['making-rate','Making Rate'],['making-amount','Making Amount'],['making-cost','Making Cost'],['min-price','Minimum Price'],
                                                     ['stone-charge-type','Stone Charge Type'],['stone-weight','Stone Weight'],['stone-rate','Stone Rate'],['stone-amount','Stone Amount'],['stone-cost','Stone Cost'],['diamond-amount','Diamond Amount'],
-                                                    ['purchase-amount','Purchase Amount'],['sale-amount','Sale Amount'],['sale-amount-with','Sale Amount With'],['net-amt','Net Amt'],['tax-type','Tax Type'],['tax-percent','Tax %'],['tax','Tax'],
+                                                    ['purchase-amount','Purchase Amount'],['sale-percent','Sale Percentages'],['sale-amount','Sale Amount'],['sale-amount-with','Sale Amount With'],['net-amt','Net Amt'],['tax-type','Tax Type'],['tax-percent','Tax %'],['tax','Tax'],
                                                     ['other-charge-type','Other Charge Type'],['other-weight','Other Weight'],['other-rate','Other Rate'],['other-info','Other Info'],['other-amount','Other Amount'],
                                                     ['hallmark-amount','Hallmark Amount'],['hallmark-rate','Hallmark Rate'],['net-amt-tax','Net Amt+Tax'],['reverse','Reverse']
                                                 ];
@@ -4870,7 +4870,7 @@ text-transform: uppercase;
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                        <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
 <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount">Tax of net amount</option><option value="no_tax" selected>No tax</option></select></td>
@@ -6362,7 +6362,7 @@ text-transform: uppercase;
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                        <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
 <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount">Tax of net amount</option><option value="no_tax" selected>No tax</option></select></td>
@@ -6835,7 +6835,7 @@ text-transform: uppercase;
                                 <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                 <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                                            <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
                                 <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
                                 <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                 <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount">Tax of net amount</option><option value="no_tax" selected>No tax</option></select></td>
@@ -7018,7 +7018,7 @@ text-transform: uppercase;
                                     <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
                                     <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-                                    <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                                                <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
                                     <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
                                     <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="0.00" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
                                     <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount">Tax of net amount</option><option value="no_tax" selected>No tax</option></select></td>
@@ -7212,7 +7212,7 @@ text-transform: uppercase;
             'discount-group': ['discount-type', 'discount-per', 'discount-amount', 'discount', 'discount-type2', 'discount-per2', 'discount-amount2', 'discounted-amt', 'discounted-per'],
             'making-group': ['making-type', 'making-rate', 'making-discount-amt', 'making-amount', 'making-actual-value', 'making-cost'],
             'price-stone': ['min-price', 'minimum', 'stone-charge-type', 'stone-weight', 'stone-rate', 'stone-amount', 'stone-cost', 'diamond-amount'],
-            'amounts': ['purchase-amount', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'],
+            'amounts': ['purchase-amount', 'sale-percent', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'],
             'other-charge-group': ['other-charge-type', 'other-weight', 'other-rate', 'other-info', 'other-amount'],
             'hallmark': ['hallmark-amount', 'hallmark-rate']
         };
@@ -10972,7 +10972,7 @@ text-transform: uppercase;
             <td data-column="stone-cost"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.stone_cost || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="diamond-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.diamond_amount || 0).toFixed(2)}" step="0.01" style="width: 120px; font-size: 0.7rem;"></td>
             <td data-column="purchase-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.purchase_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
-            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
+                        <td data-column="sale-percent"><input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount"></td>            <td data-column="sale-amount"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 110px; font-size: 0.7rem;"></td>
             <td data-column="sale-amount-with"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.sale_amount_with || 0).toFixed(2)}" step="0.01" readonly style="width: 130px; font-size: 0.7rem;"></td>
             <td data-column="net-amt"><input type="text" class="form-control form-control-sm" value="${parseFloat(item.net_amount || 0).toFixed(2)}" step="0.01" readonly style="width: 100px; font-size: 0.7rem;"></td>
             <td data-column="tax-type"><select class="form-control form-control-sm" style="width: 120px; font-size: 0.7rem;"><option value="tax_on_making">Tax on making</option><option value="tax_of_netamount">Tax of net amount</option><option value="no_tax" selected>No tax</option></select></td>
@@ -11751,7 +11751,7 @@ text-transform: uppercase;
                         'making-type', 'making-rate', 'making-discount-amt', 'making-amount',
                         'making-actual-value', 'making-cost', 'min-price', 'minimum',
                         'stone-charge-type', 'stone-weight', 'stone-rate', 'stone-amount', 'stone-cost',
-                        'diamond-amount', 'purchase-amount', 'sale-amount', 'sale-amount-with',
+                        'diamond-amount', 'purchase-amount', 'sale-percent', 'sale-amount', 'sale-amount-with',
                         'net-amt', 'tax', 'other-charge-type', 'other-weight', 'other-rate',
                         'other-info', 'other-amount', 'hallmark-amount', 'hallmark-rate',
                         'net-amt-tax', 'reverse'];
@@ -11890,6 +11890,7 @@ text-transform: uppercase;
             'stone-cost': 'Stone Cost',
             'diamond-amount': 'Diamond Amount',
             'purchase-amount': 'Purchase Amount',
+            'sale-percent': 'Sale Percentages',
             'sale-amount': 'Sale Amount',
             'sale-amount-with': 'Sale Amount With',
             'net-amt': 'Net Amt',

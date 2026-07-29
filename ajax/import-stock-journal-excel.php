@@ -178,7 +178,7 @@ for ($c = 1; $c <= $highestCol; $c++) {
     $headers[$c] = (string) auragold_sj_excel_ws_cell($sheet, $c, 1)->getValue();
 }
 $map = auragold_sj_excel_map_headers($headers);
-$col = array_merge($map, auragold_sj_excel_map_stock_journals_extended($headers));
+$col = array_merge($map, auragold_sj_excel_map_stock_journals_extended($headers, $metal_id_sample));
 $hasQ = !empty($map['quantity']) || !empty($col['qty_metal']) || !empty($col['qty_line']);
 $hasW = !empty($map['gross_weight']) || !empty($col['gross_diamond']) || !empty($col['weight_metal']);
 if (!$hasQ && !$hasW) {
@@ -376,8 +376,9 @@ for ($r = 2; $r <= $highestRow; $r++) {
         'category' => $sjS($cM, 'category', $sheet, $r),
         'calculation' => $sjS($cM, 'calculation', $sheet, $r),
         'location' => $sjS($cM, 'location', $sheet, $r),
-        'stone_weight' => !empty($cM['stone_weight_carat']) ? $sjF($cM, 'stone_weight_carat', $sheet, $r) : 0.0,
-        'karat' => !empty($cM['karat_carat']) ? $sjS($cM, 'karat_carat', $sheet, $r) : '',
+        'stone_weight' => 0.0,
+        'karat' => '',
+        'carat_id' => '',
         'rate' => $sjF($cM, 'rate', $sheet, $r),
         'amount' => $sjF($cM, 'amount', $sheet, $r),
         'net_amount' => $sjF($cM, 'net_amount', $sheet, $r),
@@ -386,6 +387,24 @@ for ($r = 2; $r <= $highestRow; $r++) {
         'making_amount' => $sjF($cM, 'making_amount', $sheet, $r),
         'pkt_wt' => $sjF($cM, 'pkt_wt', $sheet, $r),
     ];
+    $karatRaw = !empty($cM['karat_carat']) ? $sjS($cM, 'karat_carat', $sheet, $r) : '';
+    $stoneWt = !empty($cM['stone_weight_carat']) ? $sjF($cM, 'stone_weight_carat', $sheet, $r) : 0.0;
+    $stoneRaw = !empty($cM['stone_weight_carat']) ? $sjS($cM, 'stone_weight_carat', $sheet, $r) : '';
+    if ($karatRaw === '' && $stoneRaw !== '' && function_exists('auragold_sj_excel_value_looks_like_karat')
+        && auragold_sj_excel_value_looks_like_karat($stoneRaw)) {
+        $karatRaw = $stoneRaw;
+        $stoneWt = 0.0;
+    } elseif ($karatRaw !== '' && $stoneRaw === '' && function_exists('auragold_sj_excel_value_looks_like_karat')
+        && !auragold_sj_excel_value_looks_like_karat($karatRaw) && is_numeric($karatRaw)) {
+        $stoneWt = (float) $karatRaw;
+        $karatRaw = '';
+    }
+    $karatResolved = function_exists('auragold_sj_excel_resolve_carat_id')
+        ? auragold_sj_excel_resolve_carat_id($conn, $karatRaw)
+        : ['karat' => $karatRaw, 'carat_id' => ''];
+    $row['stone_weight'] = $stoneWt;
+    $row['karat'] = $karatResolved['karat'];
+    $row['carat_id'] = $karatResolved['carat_id'];
     $row['pkt_less_wt'] = $sjF($cM, 'pkt_less_wt', $sheet, $r);
     $row['gold_loss_1'] = $sjF($cM, 'gold_loss_1', $sheet, $r);
     $row['gold_loss_2'] = $sjF($cM, 'gold_loss_2', $sheet, $r);
@@ -671,7 +690,7 @@ if (!empty($preview_only)) {
         } else {
             $p['barcode'] = '';
         }
-        $metal_id = (int) ($pc['metal_id'] ?? 0);
+        $metal_id = $metal_id_sample > 0 ? $metal_id_sample : (int) ($pc['metal_id'] ?? 0);
         $metal_name = '';
         if ($metal_id > 0) {
             $mi = getRecord("SELECT display_name, system_name FROM tbl_metal WHERE id = $metal_id LIMIT 1");

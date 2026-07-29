@@ -249,6 +249,130 @@ if ($type === 'jobwork_order') {
     exit;
 }
 
+// Payment Voucher: delete voucher, items, and ledger rows (Cash/Bank + party).
+if ($type === 'payment_voucher') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $voucher = getRecord("SELECT id, customer_id, customer_name FROM tbl_payment_vouchers WHERE id = $id");
+    if (!$voucher) {
+        echo json_encode(['status' => 'error', 'message' => 'Payment voucher not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        $customer_id = (int) ($voucher['customer_id'] ?? 0);
+        $customer_name = mysqli_real_escape_string($conn, $voucher['customer_name'] ?? '');
+        if (!mysqli_query($conn, "
+            DELETE FROM tbl_customer_ledger
+            WHERE transaction_type = 'payment_voucher' AND transaction_id = $id AND status = 1
+        ")) {
+            throw new Exception('Ledger delete failed: ' . mysqli_error($conn));
+        }
+        $t_ojb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_old_jewelry_scrap_invoices'");
+        if ($t_ojb && mysqli_num_rows($t_ojb) > 0) {
+            mysqli_free_result($t_ojb);
+            mysqli_query($conn, "DELETE FROM tbl_old_jewelry_scrap_invoices WHERE comment LIKE '%[[PV_LINK_ID:" . (int) $id . "]]%'");
+        } elseif ($t_ojb) {
+            mysqli_free_result($t_ojb);
+        }
+        mysqli_query($conn, "DELETE FROM tbl_payment_voucher_items WHERE voucher_id = $id");
+        if (!mysqli_query($conn, "DELETE FROM tbl_payment_vouchers WHERE id = $id")) {
+            throw new Exception('Failed to delete payment voucher');
+        }
+        $has_balance_table = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_customer_balance'");
+        if ($has_balance_table && mysqli_num_rows($has_balance_table) > 0) {
+            mysqli_free_result($has_balance_table);
+            $last = null;
+            if ($customer_id > 0) {
+                $last = getRecord("SELECT balance_amount, balance_gold, balance_silver FROM tbl_customer_ledger WHERE customer_id = $customer_id AND status = 1 ORDER BY transaction_date DESC, id DESC LIMIT 1");
+            }
+            if (!$last && $customer_name !== '') {
+                $last = getRecord("SELECT balance_amount, balance_gold, balance_silver FROM tbl_customer_ledger WHERE customer_name = '$customer_name' AND status = 1 ORDER BY transaction_date DESC, id DESC LIMIT 1");
+            }
+            if ($last) {
+                $amt = (float) ($last['balance_amount'] ?? 0);
+                $gold = (float) ($last['balance_gold'] ?? 0);
+                $silver = (float) ($last['balance_silver'] ?? 0);
+                @mysqli_query($conn, "INSERT INTO tbl_customer_balance (customer_id, customer_name, balance_amount, balance_gold, balance_silver, last_updated)
+                    VALUES ($customer_id, '$customer_name', $amt, $gold, $silver, NOW())
+                    ON DUPLICATE KEY UPDATE balance_amount = $amt, balance_gold = $gold, balance_silver = $silver, last_updated = NOW()");
+            }
+        } elseif ($has_balance_table) {
+            mysqli_free_result($has_balance_table);
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Payment voucher deleted successfully']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// Receipt Voucher: delete voucher, items, and ledger rows (Cash/Bank + party).
+if ($type === 'receipt_voucher') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $voucher = getRecord("SELECT id, customer_id, customer_name FROM tbl_receipt_vouchers WHERE id = $id");
+    if (!$voucher) {
+        echo json_encode(['status' => 'error', 'message' => 'Receipt voucher not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        $customer_id = (int) ($voucher['customer_id'] ?? 0);
+        $customer_name = mysqli_real_escape_string($conn, $voucher['customer_name'] ?? '');
+        if (!mysqli_query($conn, "
+            DELETE FROM tbl_customer_ledger
+            WHERE transaction_type = 'receipt_voucher' AND transaction_id = $id AND status = 1
+        ")) {
+            throw new Exception('Ledger delete failed: ' . mysqli_error($conn));
+        }
+        $t_ojb = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_old_jewelry_scrap_invoices'");
+        if ($t_ojb && mysqli_num_rows($t_ojb) > 0) {
+            mysqli_free_result($t_ojb);
+            mysqli_query($conn, "DELETE FROM tbl_old_jewelry_scrap_invoices WHERE comment LIKE '%[[RV_LINK_ID:" . (int) $id . "]]%'");
+        } elseif ($t_ojb) {
+            mysqli_free_result($t_ojb);
+        }
+        mysqli_query($conn, "DELETE FROM tbl_receipt_voucher_items WHERE voucher_id = $id");
+        if (!mysqli_query($conn, "DELETE FROM tbl_receipt_vouchers WHERE id = $id")) {
+            throw new Exception('Failed to delete receipt voucher');
+        }
+        $has_balance_table = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_customer_balance'");
+        if ($has_balance_table && mysqli_num_rows($has_balance_table) > 0) {
+            mysqli_free_result($has_balance_table);
+            $last = null;
+            if ($customer_id > 0) {
+                $last = getRecord("SELECT balance_amount, balance_gold, balance_silver FROM tbl_customer_ledger WHERE customer_id = $customer_id AND status = 1 ORDER BY transaction_date DESC, id DESC LIMIT 1");
+            }
+            if (!$last && $customer_name !== '') {
+                $last = getRecord("SELECT balance_amount, balance_gold, balance_silver FROM tbl_customer_ledger WHERE customer_name = '$customer_name' AND status = 1 ORDER BY transaction_date DESC, id DESC LIMIT 1");
+            }
+            if ($last) {
+                $amt = (float) ($last['balance_amount'] ?? 0);
+                $gold = (float) ($last['balance_gold'] ?? 0);
+                $silver = (float) ($last['balance_silver'] ?? 0);
+                @mysqli_query($conn, "INSERT INTO tbl_customer_balance (customer_id, customer_name, balance_amount, balance_gold, balance_silver, last_updated)
+                    VALUES ($customer_id, '$customer_name', $amt, $gold, $silver, NOW())
+                    ON DUPLICATE KEY UPDATE balance_amount = $amt, balance_gold = $gold, balance_silver = $silver, last_updated = NOW()");
+            }
+        } elseif ($has_balance_table) {
+            mysqli_free_result($has_balance_table);
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Receipt voucher deleted successfully']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
 $allowed_types = [
     'purchase_invoice' => 'tbl_purchase_invoices',
     'sale_invoice' => 'tbl_sale_invoices',

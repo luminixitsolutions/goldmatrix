@@ -15,6 +15,8 @@ require_once dirname(__DIR__) . '/includes/auragold_seed_main_branch_tbl_users.p
 require_once dirname(__DIR__) . '/includes/branch_portal_folder_provision.php';
 require_once dirname(__DIR__) . '/includes/auragold_seed_branch_metal_and_customer_types.php';
 require_once dirname(__DIR__) . '/includes/branch_tbl_branches_ip_subdomain.php';
+require_once dirname(__DIR__) . '/includes/branch_profile_schema.php';
+require_once dirname(__DIR__) . '/includes/branch_panel_password.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -105,6 +107,9 @@ try {
 if (!empty($conn_master) && function_exists('auragold_ensure_branches_ip_subdomain_columns_on_registry')) {
     auragold_ensure_branches_ip_subdomain_columns_on_registry($conn_master);
 }
+if (!empty($conn_master)) {
+    auragold_ensure_tbl_branches_panel_password($conn_master);
+}
 
 $branch_name = isset($_REQUEST['branch_name']) ? trim((string) $_REQUEST['branch_name']) : '';
 if ($branch_name === '') {
@@ -137,12 +142,39 @@ unset($__host);
 
 $country_id_req = isset($_REQUEST['country_id']) ? (int) $_REQUEST['country_id'] : 0;
 $state_id_req   = isset($_REQUEST['state_id']) ? (int) $_REQUEST['state_id'] : 0;
+$city_id_req    = isset($_REQUEST['city_id']) ? (int) $_REQUEST['city_id'] : 0;
+$phone_country_code = isset($_REQUEST['profile_phone_country_code'])
+    ? trim((string) $_REQUEST['profile_phone_country_code'])
+    : '';
 
 $country = '';
 $state   = '';
+$city    = '';
 
 if (!empty($conn)) {
     auragold_bootstrap_location_data($conn);
+}
+
+if ($phone_country_code === '') {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Country code is required.']);
+    exit;
+}
+if (strlen($phone_country_code) > 10 || !preg_match('/^\d{1,10}$/', $phone_country_code)) {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Invalid country code.']);
+    exit;
+}
+
+if ($country_id_req <= 0) {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Country is required.']);
+    exit;
+}
+if ($state_id_req <= 0) {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'State is required.']);
+    exit;
+}
+if ($city_id_req <= 0) {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'City is required.']);
+    exit;
 }
 
 if ($country_id_req > 0 && $conn) {
@@ -151,9 +183,8 @@ if ($country_id_req > 0 && $conn) {
         $country = trim((string) $cr['name']);
     }
 }
-
-if ($state_id_req > 0 && $country_id_req <= 0) {
-    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Select a country before selecting a state.']);
+if ($country === '') {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Selected country is invalid.']);
     exit;
 }
 
@@ -161,12 +192,32 @@ if ($state_id_req > 0 && $conn) {
     $sr = getRecord("SELECT id, name, country_id FROM tbl_states WHERE id = $state_id_req AND status = 1 LIMIT 1");
     if ($sr && isset($sr['name'])) {
         $stCid = (int) ($sr['country_id'] ?? 0);
-        if ($country_id_req > 0 && $stCid !== $country_id_req) {
+        if ($stCid !== $country_id_req) {
             echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Selected state does not belong to the selected country.']);
             exit;
         }
         $state = trim((string) $sr['name']);
     }
+}
+if ($state === '') {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Selected state is invalid.']);
+    exit;
+}
+
+if ($city_id_req > 0 && $conn) {
+    $cir = getRecord("SELECT id, name, state_id FROM tbl_cities WHERE id = $city_id_req AND status = 1 LIMIT 1");
+    if ($cir && isset($cir['name'])) {
+        $ciSid = (int) ($cir['state_id'] ?? 0);
+        if ($ciSid !== $state_id_req) {
+            echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Selected city does not belong to the selected state.']);
+            exit;
+        }
+        $city = trim((string) $cir['name']);
+    }
+}
+if ($city === '') {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Selected city is invalid.']);
+    exit;
 }
 $active = isset($_REQUEST['active']) ? (string) $_REQUEST['active'] : '0';
 $status = ($active === '1' || $active === 'true' || $active === 'on') ? 1 : 0;
@@ -209,6 +260,10 @@ $code_sql     = $code !== null ? "'" . mysqli_real_escape_string($conn_master, $
 $db_name_sql  = "'" . mysqli_real_escape_string($conn_master, $db_name_req) . "'";
 $db_users_sql = "'" . mysqli_real_escape_string($conn_master, $db_users_req) . "'";
 $db_pass_sql  = "'" . mysqli_real_escape_string($conn_master, $db_pass_req) . "'";
+
+if (!empty($conn_master) && function_exists('auragold_ensure_tbl_branches_profile_columns')) {
+    auragold_ensure_tbl_branches_profile_columns($conn_master);
+}
 
 $cols = ['name', 'code', 'db_name', 'db_users', 'db_password', 'main_branch_id', 'status', 'created_at'];
 $vals = ["'$name_esc'", $code_sql, $db_name_sql, $db_users_sql, $db_pass_sql, (int) $main_branch_id, (int) $status, 'NOW()'];
@@ -257,6 +312,30 @@ if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'subdomain_ur
     $cols[] = 'subdomain_url';
     $vals[] = $subdomain_url !== '' ? "'$subdomain_esc'" : 'NULL';
 }
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'profile_country_id')) {
+    $cols[] = 'profile_country_id';
+    $vals[] = (string) (int) $country_id_req;
+}
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'profile_state_id')) {
+    $cols[] = 'profile_state_id';
+    $vals[] = (string) (int) $state_id_req;
+}
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'profile_city_id')) {
+    $cols[] = 'profile_city_id';
+    $vals[] = (string) (int) $city_id_req;
+}
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'profile_phone_country_code')) {
+    $cols[] = 'profile_phone_country_code';
+    $vals[] = "'" . mysqli_real_escape_string($conn_master, $phone_country_code) . "'";
+}
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'location_area') && $city !== '') {
+    $cols[] = 'location_area';
+    $vals[] = "'" . mysqli_real_escape_string($conn_master, $city) . "'";
+}
+if (auragold_branch_table_has_column($conn_master, 'tbl_branches', 'panel_password_hash')) {
+    $cols[] = 'panel_password_hash';
+    $vals[] = "'" . mysqli_real_escape_string($conn_master, auragold_branch_panel_password_default_hash()) . "'";
+}
 
 $sql = 'INSERT INTO tbl_branches (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $vals) . ')';
 
@@ -268,7 +347,7 @@ if (!mysqli_query($conn_master, $sql)) {
 $newId = (int) mysqli_insert_id($conn_master);
 
 $provisionOpts = [
-    'omit_master_table_names' => ['tbl_users'],
+    'omit_master_table_names' => ['tbl_users', 'tbl_tax_master', 'tbl_carat'],
 ];
 
 $dbProv                  = ['ok' => true, 'skipped' => true, 'message' => ''];

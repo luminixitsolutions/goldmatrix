@@ -194,16 +194,19 @@ foreach ($barcodes as $i => $barcode) {
 
 $items = [];
 if ($is_82x38_2box) {
+    /* 82×38 two-box sticker: always fill both boxes.
+     * - 1 barcode  → same code on left (box1) and right (box2)
+     * - 2+ barcodes → pair sequentially; odd leftover duplicates onto box2
+     */
     $pair_count = (int) ceil(count($barcode_items) / 2);
     for ($p = 0; $p < $pair_count; $p++) {
         $first = $barcode_items[$p * 2];
-        $second = isset($barcode_items[$p * 2 + 1]) ? $barcode_items[$p * 2 + 1] : null;
+        $second = isset($barcode_items[$p * 2 + 1]) ? $barcode_items[$p * 2 + 1] : $first;
         for ($c = 0; $c < $print_copies; $c++) {
-            $sticker = ['box1' => $first];
-            if ($second !== null) {
-                $sticker['box2'] = $second;
-            }
-            $items[] = $sticker;
+            $items[] = [
+                'box1' => $first,
+                'box2' => $second,
+            ];
         }
     }
 } elseif ($is_120x50_double_barcode) {
@@ -571,6 +574,61 @@ if (!empty($_GET['debug_qr_layout']) || !empty($_GET['debug_barcode_layout'])) {
             padding: 0 !important;
             margin: 0 !important;
             line-height: 1 !important;
+        }
+        .design-field.design-strip-line,
+        .sticker-strip-line {
+            white-space: normal;
+            word-break: normal;
+            background: transparent !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        .design-field.design-white-strip {
+            white-space: normal;
+            word-break: normal;
+            outline: none !important;
+            box-shadow: none !important;
+            background: #fff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        .sticker-fixed-half-strip,
+        .sticker-fixed-white-strip {
+            position: absolute;
+            margin: 0;
+            padding: 0;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            background: #fff !important;
+            background-color: #fff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            z-index: 4;
+            overflow: hidden;
+        }
+        .sticker-fixed-half-strip .design-field,
+        .sticker-fixed-half-strip .design-field--half-strip {
+            background: transparent !important;
+            background-color: transparent !important;
+            max-width: 100%;
+            overflow: hidden;
+            line-height: 1 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            z-index: 5;
+        }
+        @media print {
+            .design-field.design-white-strip,
+            .sticker-fixed-white-strip,
+            .sticker-fixed-half-strip {
+                outline: none !important;
+                box-shadow: none !important;
+                background: #fff !important;
+                background-color: #fff !important;
+            }
         }
         .barcode-product-name, .barcode-price, .barcode-text { margin: 0; padding: 0; }
 

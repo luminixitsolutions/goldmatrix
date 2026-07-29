@@ -229,6 +229,156 @@ if ($diamond_chk && mysqli_num_rows($diamond_chk) > 0) {
             }
         }
     }
+    /* Diamond material issues: outward row for source dept + inward row for destination dept. */
+    $di_cols = [];
+    $di_cols_q = @mysqli_query($conn, 'SHOW COLUMNS FROM `' . $diamond_issue_tbl . '`');
+    if ($di_cols_q) {
+        while ($dc = mysqli_fetch_assoc($di_cols_q)) {
+            $di_cols[(string) ($dc['Field'] ?? '')] = true;
+        }
+        mysqli_free_result($di_cols_q);
+    }
+    $di_w_expr = !empty($di_cols['weight_out']) ? 'COALESCE(di.weight_out, di.weight, 0)' : 'COALESCE(di.weight, 0)';
+    $di_q_expr = !empty($di_cols['qty_out']) ? 'COALESCE(di.qty_out, di.qty, 0)' : 'COALESCE(di.qty, 0)';
+    $di_add_dept_expr = !empty($di_cols['added_by_dept_id']) ? 'di.added_by_dept_id' : 'NULL';
+    $di_add_user_expr = !empty($di_cols['added_by_user_id']) ? 'di.added_by_user_id' : 'NULL';
+    $di_sql = 'SELECT di.id AS issue_id, di.jobwork_order_id, di.barcode, di.product_name, di.diamond_category,
+        ' . $di_w_expr . ' AS issue_weight,
+        ' . $di_q_expr . ' AS issue_qty,
+        di.from_dept_id, di.to_dept_id, di.from_user_id, di.to_user_id,
+        ' . $di_add_dept_expr . ' AS added_by_dept_id, ' . $di_add_user_expr . ' AS added_by_user_id, di.created_at,
+        j.jobwork_queue_no, j.jobwork_no, j.sale_order_id, j.sale_order_no, j.status AS jwo_status,
+        fd.dept_name AS from_dept_name, fu.name AS from_user_name,
+        td.dept_name AS to_dept_name, tu.name AS to_user_name,
+        ad.dept_name AS added_dept_name, au.name AS added_user_name
+        FROM `' . $diamond_issue_tbl . '` di
+        INNER JOIN tbl_jobwork_orders j ON j.id = di.jobwork_order_id
+        LEFT JOIN tbl_departments fd ON fd.id = di.from_dept_id
+        LEFT JOIN tbl_customers fu ON fu.id = di.from_user_id
+        LEFT JOIN tbl_departments td ON td.id = di.to_dept_id
+        LEFT JOIN tbl_customers tu ON tu.id = di.to_user_id
+        LEFT JOIN tbl_departments ad ON ad.id = ' . $di_add_dept_expr . '
+        LEFT JOIN tbl_customers au ON au.id = ' . $di_add_user_expr . '
+        ORDER BY di.created_at DESC, di.id DESC
+        LIMIT 500';
+    $di_list = function_exists('getList') ? @getList($di_sql) : null;
+    if (!is_array($di_list)) {
+        $di_list = [];
+    }
+    foreach ($di_list as $dr) {
+        $dw = (float) ($dr['issue_weight'] ?? 0);
+        if (!is_finite($dw) || $dw <= 0.00005) {
+            continue;
+        }
+        $dJwoId = (int) ($dr['jobwork_order_id'] ?? 0);
+        $dQn = trim((string) ($dr['jobwork_queue_no'] ?? ''));
+        if ($dQn === '') {
+            $dQn = 'JWQ-' . $dJwoId;
+        }
+        $dProduct = trim((string) ($dr['product_name'] ?? ''));
+        if ($dProduct === '') {
+            $dProduct = trim((string) ($dr['diamond_category'] ?? 'Diamond'));
+        }
+        $dTag = trim((string) ($dr['barcode'] ?? ''));
+        if ($dTag === '') {
+            $dTag = '—';
+        }
+        $dCa = $dr['created_at'] ?? null;
+        $dQty = (float) ($dr['issue_qty'] ?? 0);
+        $dWtDisp = mp_mfg_fmt_wt($dw);
+        /* Source dept: modal From Dept saved on the issue row, else the dept whose panel added the stock. */
+        $dFromDept = (int) ($dr['from_dept_id'] ?? 0);
+        $dFromUser = (int) ($dr['from_user_id'] ?? 0);
+        $dFromDeptName = trim((string) ($dr['from_dept_name'] ?? ''));
+        $dFromUserName = trim((string) ($dr['from_user_name'] ?? ''));
+        if ($dFromDept < 1) {
+            $dFromDept = (int) ($dr['added_by_dept_id'] ?? 0);
+            $dFromUser = (int) ($dr['added_by_user_id'] ?? 0);
+            $dFromDeptName = trim((string) ($dr['added_dept_name'] ?? ''));
+            $dFromUserName = trim((string) ($dr['added_user_name'] ?? ''));
+        }
+        $dToDept = (int) ($dr['to_dept_id'] ?? 0);
+        $dToUser = (int) ($dr['to_user_id'] ?? 0);
+        $dToDeptName = trim((string) ($dr['to_dept_name'] ?? ''));
+        $dToUserName = trim((string) ($dr['to_user_name'] ?? ''));
+
+        $dCommon = [
+            '_sort' => mp_mfg_sort_ts($dCa),
+            'row_kind' => 'diamond_issue',
+            'source_id' => (int) ($dr['issue_id'] ?? 0),
+            'adjustment_id' => 0,
+            'jobwork_order_id' => $dJwoId,
+            'jobwork_queue_no_attr' => $dQn,
+            'jobwork_no' => trim((string) ($dr['jobwork_no'] ?? '')),
+            'sale_order_id' => (int) ($dr['sale_order_id'] ?? 0),
+            'sale_order_no' => trim((string) ($dr['sale_order_no'] ?? '')),
+            'first_product' => $dProduct,
+            'manufacturing_seconds' => 0,
+            'queue_no' => $dQn,
+            'product_name' => $dProduct,
+            'active' => isset($dr['jwo_status']) && $dr['jwo_status'] !== '' ? (string) $dr['jwo_status'] : '—',
+            'image_urls' => '—',
+            'against_queue' => $dQn,
+            'against_invoice' => trim((string) ($dr['sale_order_no'] ?? '')) !== '' ? trim((string) $dr['sale_order_no']) : '—',
+            'metal' => 'Diamond',
+            'description' => $dProduct,
+            'dust_wastage_wt' => '—',
+            'loss_wt' => '—',
+            'profit_wt' => '—',
+            'tag_no' => $dTag,
+            'total_wt' => $dWtDisp,
+            'metal_wt' => '—',
+            'diamond_wt' => $dWtDisp,
+            'purity_wt' => '—',
+            'carat_name' => '—',
+            'total_quantity' => $dQty > 0.00005 ? mp_mfg_fmt_wt($dQty) : '—',
+            'date_time' => mp_mfg_dt($dCa),
+            'branch_name' => '—',
+            'design_no' => '—',
+            'status' => isset($dr['jwo_status']) && $dr['jwo_status'] !== '' ? (string) $dr['jwo_status'] : '—',
+            'balance_wt' => '—',
+            'weight_event' => 'diamond_issue',
+            'flow_source' => 'diamond_issue',
+        ];
+        $dFlow = mp_mfg_flow_stage($dFromDeptName, $dFromUserName) . ' ==> ' . mp_mfg_flow_stage($dToDeptName, $dToUserName);
+
+        if ($dFromDept > 0) {
+            $dCommentOut = 'Outward · Diamond · ' . $dTag . ' · to ' . ($dToDeptName !== '' ? $dToDeptName : ('Dept #' . $dToDept));
+            if ($dToUserName !== '') {
+                $dCommentOut .= ' · ' . $dToUserName;
+            }
+            $rows[] = array_merge($dCommon, [
+                'department_id' => $dFromDept,
+                'department_user_id' => $dFromUser,
+                'comment' => $dCommentOut,
+                'department_name' => $dFromDeptName !== '' ? $dFromDeptName : '—',
+                'user_name' => $dFromUserName !== '' ? $dFromUserName : '—',
+                'issue_wt' => $dWtDisp,
+                'receive_wt' => '—',
+                'activity_side' => 'out',
+                'stock_flow_type' => 'outward',
+                'department_flow' => $dFlow . ' · Out',
+            ]);
+        }
+        if ($dToDept > 0) {
+            $dCommentIn = 'Inward · Diamond · ' . $dTag . ' · from ' . ($dFromDeptName !== '' ? $dFromDeptName : ($dFromDept > 0 ? ('Dept #' . $dFromDept) : '—'));
+            if ($dFromUserName !== '') {
+                $dCommentIn .= ' · ' . $dFromUserName;
+            }
+            $rows[] = array_merge($dCommon, [
+                'department_id' => $dToDept,
+                'department_user_id' => $dToUser,
+                'comment' => $dCommentIn,
+                'department_name' => $dToDeptName !== '' ? $dToDeptName : '—',
+                'user_name' => $dToUserName !== '' ? $dToUserName : '—',
+                'issue_wt' => '—',
+                'receive_wt' => $dWtDisp,
+                'activity_side' => 'in',
+                'stock_flow_type' => 'inward',
+                'department_flow' => $dFlow . ' · In',
+            ]);
+        }
+    }
 } elseif ($diamond_chk) {
     mysqli_free_result($diamond_chk);
 }

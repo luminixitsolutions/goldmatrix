@@ -67,7 +67,7 @@ try {
                     $d = 'Cash';
                 }
                 if ($d !== '') {
-                    $party_against_parts[] = $d . '(' . number_format($a, 2) . 'Dr)';
+                    $party_against_parts[] = $d . '(' . number_format($a, 2) . 'Cr)';
                 }
             }
         }
@@ -564,7 +564,10 @@ try {
     // Metal exchange: post weight on Credit side (gold / silver), same balance math as before
     $ledger_metal_gold = ($total_gold_from_items > 0) ? $total_gold_from_items : $total_gold;
     $ledger_metal_silver = ($total_silver_from_items > 0) ? $total_silver_from_items : $total_silver;
-    $new_balance_amt = $prev_amt - $total_amount;
+    // Payment Voucher: money on party Debit side; metal exchange on Credit gold/silver columns.
+    // Cash/Bank lines below use Credit (money out).
+    // balance_amount follows CL = opening + Dr − Cr → Debit increases running balance.
+    $new_balance_amt = $prev_amt + $total_amount;
     $new_balance_gold = $prev_gold + $ledger_metal_gold;
     $new_balance_silver = $prev_silver + $ledger_metal_silver;
     $new_balance_gold_pure = $prev_gold_pure + $total_gold_pure;
@@ -593,8 +596,6 @@ try {
     $gold_pure_cols = $has_gold_pure_cols ? ", debit_gold_pure, credit_gold_pure, balance_gold_pure" : "";
     $gold_pure_vals = $has_gold_pure_cols ? ", 0, " . (float)$total_gold_pure . ", " . (float)$new_balance_gold_pure : "";
 
-    // Payment Voucher: money on party Credit side; metal exchange on Credit gold/silver columns (report matches receipt-style).
-    // Cash/Bank lines below use Debit for the payment amount.
     $desc_esc_led = mysqli_real_escape_string($conn, $desc);
     $ledger_sql = "
         INSERT INTO tbl_customer_ledger (
@@ -612,8 +613,8 @@ try {
             $voucher_id,
             '$voucher_no',
             '$voucher_date',
-            0,
             $total_amount,
+            0,
             0,
             " . (float)$ledger_metal_gold . ",
             0,
@@ -634,7 +635,7 @@ try {
         throw new Exception('Customer ledger entry failed: ' . mysqli_error($conn));
     }
 
-    // Cash / Bank / etc.: debit payment method (money out — user/report convention)
+    // Cash / Bank / etc.: credit payment method (money out)
     $ledger_has_against = $ledger_has_against_cols;
     $against_inv_esc = mysqli_real_escape_string($conn, $ref_no !== '' ? $ref_no : $voucher_no);
     $voucher_no_db = mysqli_real_escape_string($conn, $voucher_no);
@@ -667,7 +668,7 @@ try {
             ");
             $cash_prev_balance = (float)($cash_balance_record['balance_amount'] ?? 0);
             $cash_new_balance = $cash_prev_balance - $line_amt;
-            $sl_ledger = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt, $line_amt));
+            $sl_ledger = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt, $line_amt, 'Dr'));
             $cash_desc_esc = mysqli_real_escape_string($conn, "Payment to {$customer_name} (Payment Voucher {$voucher_no})");
 
             if ($ledger_has_against) {
@@ -685,8 +686,8 @@ try {
                         $voucher_id,
                         '$voucher_no_db',
                         '$voucher_date_db',
-                        $line_amt,
                         0,
+                        $line_amt,
                         $cash_new_balance,
                         0,
                         0,
@@ -713,8 +714,8 @@ try {
                         $voucher_id,
                         '$voucher_no_db',
                         '$voucher_date_db',
-                        $line_amt,
                         0,
+                        $line_amt,
                         $cash_new_balance,
                         0,
                         0,

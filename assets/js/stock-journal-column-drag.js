@@ -373,9 +373,12 @@
         }
 
         function getAnchorTh() {
+            // Anchor is used with headerRow1.insertBefore(): it must be a row-1 cell.
+            // anchorColumnKey (e.g. net-amt-tax) may only exist in row 2; fall back to
+            // the locked group header (net-reverse) in row 1 in that case.
             if (anchorColumnKey) {
                 var esc = String(anchorColumnKey).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-                var a = table.querySelector('thead th[data-column="' + esc + '"]');
+                var a = headerRow1.querySelector('th[data-column="' + esc + '"]');
                 if (a) return a;
             }
             return headerRow1.querySelector('th[data-group-locked]') || null;
@@ -411,12 +414,22 @@
             });
             var anchorTh = getAnchorTh();
             groupOrder.forEach(function (gk) {
-                if (groupMap[gk] && anchorTh) headerRow1.insertBefore(groupMap[gk], anchorTh);
-                else if (groupMap[gk]) headerRow1.appendChild(groupMap[gk]);
+                var gh = groupMap[gk];
+                if (!gh) return;
+                // Never insertBefore a node that is not a child of headerRow1, and never
+                // insert a group before itself (locked net-reverse is often the anchor).
+                if (anchorTh && anchorTh.parentNode === headerRow1 && gh !== anchorTh) {
+                    headerRow1.insertBefore(gh, anchorTh);
+                } else if (gh.parentNode !== headerRow1 || !anchorTh) {
+                    headerRow1.appendChild(gh);
+                }
             });
             Object.keys(groupMap).forEach(function (gk) {
-                if (groupOrder.indexOf(gk) === -1 && groupMap[gk] && anchorTh) {
-                    headerRow1.insertBefore(groupMap[gk], anchorTh);
+                if (groupOrder.indexOf(gk) !== -1) return;
+                var gh = groupMap[gk];
+                if (!gh) return;
+                if (anchorTh && anchorTh.parentNode === headerRow1 && gh !== anchorTh) {
+                    headerRow1.insertBefore(gh, anchorTh);
                 }
             });
             if (syncGlobalLayout) {

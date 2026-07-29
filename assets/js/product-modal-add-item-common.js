@@ -9,7 +9,7 @@
 
     // ========== CONSTANTS ==========
     /** Canonical DOM order for Product Selection modal (must match thead row 2 + checkbox + actions). */
-    const DIAMOND_TAB_VISIBLE_COLUMNS = ['checkbox','id','rfid','voucher-type','photo','barcode','design-no','huid','item-code','category','product-category','calculation','product','location','pkt-wt','pkt-less-wt','gross-wt','stone-weight','less-wt','net-wt','quantity','rate','fc-amount','diamond-line-metal-value','rapnet-valuation','setting-charge','stone-amount','mark-up-amount','mark-up-per','amount','metal-qty','metal-weight','carat','purity','purity-wt','gold-loss1','gold-loss2','metal-loss-value','wastage-per','wastage-wt','metal-rate','metal-value','metal-cost','requested-purity','requested','final-wt','alloy-wt','platinum-weight','platinum-karat','platinum-purity','platinum-purity-wt','platinum-rate','platinum-wastage-per','platinum-wastage-wt','platinum-amount','discount-type','discount-per','discount-amount','discount','making-type','making-rate','making-discount-amt','making-amount','making-actual-value','making-cost','min-price','minimum','stone-charge-type','stone-rate','stone-cost','diamond-amount','purchase-amount','sale-amount','sale-amount-with','net-amt','tax-type','tax-percent','tax','other-charge-type','other-weight','other-rate','other-info','other-amount','certificate-amount','certificate-no','certificate-link','video-link','cut','color','seive-size','size','shape','clarity','unit-price','hallmark-amount','hallmark-rate','net-amt-tax','reverse','images','actions'];
+    const DIAMOND_TAB_VISIBLE_COLUMNS = ['checkbox','id','rfid','voucher-type','photo','barcode','design-no','huid','item-code','category','product-category','calculation','product','location','pkt-wt','pkt-less-wt','gross-wt','stone-weight','less-wt','net-wt','quantity','rate','fc-amount','diamond-line-metal-value','rapnet-valuation','setting-charge','stone-amount','mark-up-amount','mark-up-per','amount','metal-qty','metal-weight','carat','purity','purity-wt','gold-loss1','gold-loss2','metal-loss-value','wastage-per','wastage-wt','metal-rate','metal-value','metal-cost','requested-purity','requested','final-wt','alloy-wt','platinum-weight','platinum-karat','platinum-purity','platinum-purity-wt','platinum-rate','platinum-wastage-per','platinum-wastage-wt','platinum-amount','discount-type','discount-per','discount-amount','discount','making-type','making-rate','making-discount-amt','making-amount','making-actual-value','making-cost','min-price','minimum','stone-charge-type','stone-rate','stone-cost','diamond-amount','purchase-amount','sale-percent','sale-amount','sale-amount-with','net-amt','tax-type','tax-percent','tax','other-charge-type','other-weight','other-rate','other-info','other-amount','certificate-amount','certificate-no','certificate-link','video-link','cut','color','seive-size','size','shape','clarity','unit-price','hallmark-amount','hallmark-rate','net-amt-tax','reverse','images','actions'];
     /** Default column order for non–Diamond & Stones (Gold/Silver/…) metal tab — includes Stock Journal right side (net-amt-tax, reverse, images, actions). */
     const METAL_GROUP_VISIBLE_COLUMNS = [
         'checkbox',
@@ -90,7 +90,7 @@
         { dataColumn: 'reverse', label: 'Reverse' }
     ];
     const DIAMOND_TAB_HEADER_LABELS = {
-        'checkbox': 'Active', 'id': 'Id', 'rfid': 'RFIDCode', 'voucher-type': 'Style', 'photo': 'Photo', 'barcode': 'Barcode No.', 'design-no': 'Design No', 'huid': 'HUID No.', 'item-code': 'Item Code', 'location': 'Location', 'category': 'Diamond Category', 'product-category': 'Product category', 'calculation': 'Calculation Type', 'product': 'Product', 'quantity': 'Quantity', 'metal-qty': 'Metal Qty', 'carat': 'Carat', 'pkt-wt': 'Pkt. Wt.', 'pkt-less-wt': 'PKt. Less Wt.', 'gross-wt': 'Gross Wt.', 'less-wt': 'D.Weight', 'fc-amount': 'FC Amount', 'diamond-line-metal-value': 'Metal Value', 'rapnet-valuation': 'RapNet Valuation', 'mark-up-amount': 'Mark Up Amount', 'mark-up-per': 'Mark Up %', 'gold-loss1': 'Loss Wt.', 'gold-loss2': 'Loss Wt. Per', 'metal-loss-value': 'Loss Value', 'setting-charge': 'Setting Charge', 'net-wt': 'Net Wt.', 'stone-weight': 'Carat', 'metal-weight': 'Gold Wt', 'purity': 'Purity %', 'purity-wt': 'Purity Wt', 'wastage-per': 'Wastage Per', 'wastage-wt': 'Wastage Wt', 'metal-rate': 'Metal Rate', 'final-wt': 'Final Wt.', 'rate': 'Rate', 'metal-value': 'Gold Amount', 'amount': 'Amount', 'platinum-weight': 'Weight', 'platinum-karat': 'Karat', 'platinum-purity': 'Purity %', 'platinum-purity-wt': 'Purity Wt', 'platinum-rate': 'Rate', 'platinum-wastage-per': 'Wastage Per', 'platinum-wastage-wt': 'Wastage Wt', 'platinum-amount': 'Amount', 'certificate-amount': 'Certificate Amount', 'certificate-no': 'Certificate No.', 'certificate-link': 'Certificate Link', 'video-link': 'Video Link', 'seive-size': 'SeiveSize', 'unit-price': 'Unit Price', 'metal-group': 'Metal (group)', 'discount-type': 'Discount (group) - Type', 'discount-per': 'Discount (group) - Per.', 'discount-amount': 'Disc. base (for %)', 'discount': 'Discount (group)', 'making-type': 'Making (group) - Type', 'making-rate': 'Making (group) - Rate', 'making-amount': 'Making (group) - Amount', 'making-actual-value': 'Making (group) - Actual Value', 'min-price': 'Minimum Price', 'minimum': 'Minimum Price Code', 'stone-charge-type': 'Type', 'stone-rate': 'Rate', 'stone-amount': 'Setting Charge Amount', 'diamond-amount': 'Amount', 'purchase-amount': 'Purchase Amount', 'sale-amount': 'Sale Amount', 'sale-amount-with': 'Sale Amount With Tax', 'net-amt': 'Net Amt', 'tax-type': 'Tax', 'tax-percent': 'Tax %', 'tax': 'Tax', 'other-charge-type': 'Other Charge Type', 'other-weight': 'Other Weight', 'other-rate': 'Other Rate', 'other-info': 'Other Info', 'other-amount': 'Other Amount', 'hallmark-amount': 'Hallmark Amount', 'hallmark-rate': 'HallMark Rate', 'net-amt-tax': 'Net Amt+Tax', 'reverse': 'Reverse', 'actions': 'action', 'cut': 'Cut', 'color': 'Color', 'size': 'Size', 'shape': 'Shape', 'clarity': 'Clarity'
+        'checkbox': 'Active', 'id': 'Id', 'rfid': 'RFIDCode', 'voucher-type': 'Style', 'photo': 'Photo', 'barcode': 'Barcode No.', 'design-no': 'Design No', 'huid': 'HUID No.', 'item-code': 'Item Code', 'location': 'Location', 'category': 'Diamond Category', 'product-category': 'Product category', 'calculation': 'Calculation Type', 'product': 'Product', 'quantity': 'Quantity', 'metal-qty': 'Metal Qty', 'carat': 'Carat', 'pkt-wt': 'Pkt. Wt.', 'pkt-less-wt': 'PKt. Less Wt.', 'gross-wt': 'Gross Wt.', 'less-wt': 'D.Weight', 'fc-amount': 'FC Amount', 'diamond-line-metal-value': 'Metal Value', 'rapnet-valuation': 'RapNet Valuation', 'mark-up-amount': 'Mark Up Amount', 'mark-up-per': 'Mark Up %', 'gold-loss1': 'Loss Wt.', 'gold-loss2': 'Loss Wt. Per', 'metal-loss-value': 'Loss Value', 'setting-charge': 'Setting Charge', 'net-wt': 'Net Wt.', 'stone-weight': 'Carat', 'metal-weight': 'Gold Wt', 'purity': 'Purity %', 'purity-wt': 'Purity Wt', 'wastage-per': 'Wastage Per', 'wastage-wt': 'Wastage Wt', 'metal-rate': 'Metal Rate', 'final-wt': 'Final Wt.', 'rate': 'Rate', 'metal-value': 'Gold Amount', 'amount': 'Amount', 'platinum-weight': 'Weight', 'platinum-karat': 'Karat', 'platinum-purity': 'Purity %', 'platinum-purity-wt': 'Purity Wt', 'platinum-rate': 'Rate', 'platinum-wastage-per': 'Wastage Per', 'platinum-wastage-wt': 'Wastage Wt', 'platinum-amount': 'Amount', 'certificate-amount': 'Certificate Amount', 'certificate-no': 'Certificate No.', 'certificate-link': 'Certificate Link', 'video-link': 'Video Link', 'seive-size': 'SeiveSize', 'unit-price': 'Unit Price', 'metal-group': 'Metal (group)', 'discount-type': 'Discount (group) - Type', 'discount-per': 'Discount (group) - Per.', 'discount-amount': 'Disc. base (for %)', 'discount': 'Discount (group)', 'making-type': 'Making (group) - Type', 'making-rate': 'Making (group) - Rate', 'making-amount': 'Making (group) - Amount', 'making-actual-value': 'Making (group) - Actual Value', 'min-price': 'Minimum Price', 'minimum': 'Minimum Price Code', 'stone-charge-type': 'Type', 'stone-rate': 'Rate', 'stone-amount': 'Setting Charge Amount', 'diamond-amount': 'Amount', 'purchase-amount': 'Purchase Amount', 'sale-percent': 'Sale Percentages', 'sale-amount': 'Sale Amount', 'sale-amount-with': 'Sale Amount With Tax', 'net-amt': 'Net Amt', 'tax-type': 'Tax', 'tax-percent': 'Tax %', 'tax': 'Tax', 'other-charge-type': 'Other Charge Type', 'other-weight': 'Other Weight', 'other-rate': 'Other Rate', 'other-info': 'Other Info', 'other-amount': 'Other Amount', 'hallmark-amount': 'Hallmark Amount', 'hallmark-rate': 'HallMark Rate', 'net-amt-tax': 'Net Amt+Tax', 'reverse': 'Reverse', 'actions': 'action', 'cut': 'Cut', 'color': 'Color', 'size': 'Size', 'shape': 'Shape', 'clarity': 'Clarity'
     };
     const DIAMOND_CATEGORY_OPTIONS = [
         { value: 'Diamonds', name: 'Diamonds' },
@@ -183,10 +183,123 @@
     }
     window.isGoldOrSilverMetalTab = isGoldOrSilverMetalTab;
 
+    /** Imitation / Watches and Other / Services: purchase & sale amounts are typed (not metal-calc only). */
+    function auragoldIsImitationOrOtherMetalTab() {
+        var n = (getActiveProductModalMetalName() || '').toLowerCase().trim();
+        if (!n) return false;
+        if (n.indexOf('imitation') !== -1 || n.indexOf('watch') !== -1) return true;
+        if (n.indexOf('other') !== -1 || n.indexOf('service') !== -1) return true;
+        return false;
+    }
+    window.auragoldIsImitationOrOtherMetalTab = auragoldIsImitationOrOtherMetalTab;
+
+    /** Stock Journal create / add-items pages. */
+    function auragoldIsStockJournalContext() {
+        if (window.isStockJournalPage === true) return true;
+        if (typeof window.PRODUCT_MODAL_COLUMNS_PAGE === 'string' && /stock-journal/i.test(window.PRODUCT_MODAL_COLUMNS_PAGE)) return true;
+        try {
+            return !!(window.location && /stock-journal/i.test(String(window.location.pathname || '')));
+        } catch (e) { return false; }
+    }
+    window.auragoldIsStockJournalContext = auragoldIsStockJournalContext;
+
+    /** Product Opening voucher (stock journal URL or SJ defaults). */
+    function auragoldIsProductOpeningContext() {
+        if (window.PRODUCT_OPENING_SINGLE_PRODUCT === true) return true;
+        if (typeof window.SJ_DEFAULT_VOUCHER_TYPE === 'string' && window.SJ_DEFAULT_VOUCHER_TYPE === 'product_opening') return true;
+        try {
+            var p = new URLSearchParams(window.location.search || '');
+            return p.get('voucher') === 'product_opening';
+        } catch (e) { return false; }
+    }
+    window.auragoldIsProductOpeningContext = auragoldIsProductOpeningContext;
+
+    /** Pages/tabs where Purchase Amount & Sale Amount are user-typed. */
+    function auragoldAllowManualPurchaseSaleAmounts() {
+        return auragoldIsImitationOrOtherMetalTab()
+            || auragoldIsProductOpeningContext()
+            || auragoldIsStockJournalContext();
+    }
+    window.auragoldAllowManualPurchaseSaleAmounts = auragoldAllowManualPurchaseSaleAmounts;
+
+    /** Parse "10", "10%", etc. to numeric percent. */
+    function auragoldParsePercentInput(val) {
+        if (val == null) return 0;
+        var s = String(val).trim().replace(/%/g, '');
+        if (!s) return 0;
+        var n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+    }
+    window.auragoldParsePercentInput = auragoldParsePercentInput;
+
+    /** Sale Amount = Purchase Amount + (Purchase Amount × Sale % / 100). */
+    function auragoldApplySalePercentFromPurchase(row) {
+        if (!row || !auragoldAllowManualPurchaseSaleAmounts()) return false;
+        var salePercentInput = row.querySelector('[data-column="sale-percent"] input');
+        var purchaseAmountInput = row.querySelector('[data-column="purchase-amount"] input');
+        var saleAmountInput = row.querySelector('[data-column="sale-amount"] input');
+        if (!salePercentInput || !purchaseAmountInput || !saleAmountInput) return false;
+        var pct = auragoldParsePercentInput(salePercentInput.value);
+        if (pct <= 0) return false;
+        if (row.getAttribute('data-manual-sale-amount') === '1') return false;
+        if (auragoldIsInputActivelyEdited(saleAmountInput)) return false;
+        var purchaseAmt = parseFloat(purchaseAmountInput.value) || 0;
+        if (purchaseAmt <= 0) return false;
+        var saleAmt = purchaseAmt + (purchaseAmt * (pct / 100));
+        saleAmountInput.value = saleAmt.toFixed(2);
+        return true;
+    }
+    window.auragoldApplySalePercentFromPurchase = auragoldApplySalePercentFromPurchase;
+
+    function auragoldSetAmountInputEditable(input, editable) {
+        if (!input) return;
+        if (editable) {
+            input.readOnly = false;
+            input.removeAttribute('readonly');
+            if (input.style) {
+                if (input.style.background === 'rgb(241, 245, 249)' || input.style.background === '#f1f5f9') {
+                    input.style.background = '';
+                }
+                if (input.style.cursor === 'not-allowed') input.style.cursor = '';
+            }
+        } else {
+            input.readOnly = true;
+            input.setAttribute('readonly', 'readonly');
+        }
+    }
+
+    /** Unlock Purchase/Sale Amount for Product Opening, Stock Journal, Imitation/Other; keep PI sale fields editable. */
+    function auragoldApplyManualAmountFieldsEditability(root) {
+        var scope = root;
+        if (!scope || !scope.querySelectorAll) {
+            scope = document.getElementById('productSelectionModal')
+                || document.getElementById('productListTablePage')
+                || document;
+        }
+        var manualAmt = auragoldAllowManualPurchaseSaleAmounts();
+        var purchaseInvoice = auragoldIsPurchaseInvoiceContext();
+        var unlockPurchase = manualAmt;
+        var unlockSale = manualAmt || purchaseInvoice;
+        scope.querySelectorAll('[data-column="purchase-amount"] input').forEach(function(inp) {
+            auragoldSetAmountInputEditable(inp, unlockPurchase);
+        });
+        scope.querySelectorAll('[data-column="sale-percent"] input').forEach(function(inp) {
+            auragoldSetAmountInputEditable(inp, manualAmt);
+        });
+        scope.querySelectorAll('[data-column="sale-amount"] input').forEach(function(inp) {
+            auragoldSetAmountInputEditable(inp, unlockSale);
+        });
+    }
+    window.auragoldApplyManualAmountFieldsEditability = auragoldApplyManualAmountFieldsEditability;
+
     function syncModalGroupSingleItemCheckboxForActiveTab() {
         var wrap = document.getElementById('modalGroupSingleItemWrap');
-        if (!wrap) return;
-        wrap.style.display = isGoldOrSilverMetalTab() ? '' : 'none';
+        if (wrap) {
+            wrap.style.display = isGoldOrSilverMetalTab() ? '' : 'none';
+        }
+        if (typeof auragoldApplyManualAmountFieldsEditability === 'function') {
+            auragoldApplyManualAmountFieldsEditability();
+        }
     }
     window.syncModalGroupSingleItemCheckboxForActiveTab = syncModalGroupSingleItemCheckboxForActiveTab;
 
@@ -596,8 +709,12 @@
         function shouldSyncDiamondCaratAndDWt() {
             try {
                 var cat = row.querySelector('[data-column="category"] select');
-                if (!cat) return false;
-                return isAnyDiamondTabCategory((cat.value || '').trim());
+                if (cat) {
+                    var cv = (cat.value || '').trim();
+                    if (cv && isAnyDiamondTabCategory(cv)) return true;
+                }
+                if (typeof isDiamondTabActive === 'function' && isDiamondTabActive()) return true;
+                return false;
             } catch (e) { return false; }
         }
         function isJewelleryCategoryRow() {
@@ -640,21 +757,31 @@
             } catch (e) {}
         }
 
-        addListeners(grossWtInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(lessWtInput, function() { syncDiamondCaratAndLessWt('less-wt'); calculateModalRowNetWeight(row); if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone(); });
-        addListeners(purityInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(wastagePerInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(rateInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(metalRateInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(metalWeightInput, function() { calculateModalRowNetWeight(row); });
-        addSelectListeners(calculationSelect, function() { calculateModalRowNetWeight(row); });
+        function clearImitationManualAmountFlags() {
+            if (!row) return;
+            row.removeAttribute('data-manual-sale-amount');
+            row.removeAttribute('data-manual-purchase-amount');
+        }
+        function calcAfterClearingImitationManualAmounts() {
+            clearImitationManualAmountFlags();
+            calculateModalRowNetWeight(row);
+        }
+
+        addListeners(grossWtInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(lessWtInput, function() { syncDiamondCaratAndLessWt('less-wt'); calcAfterClearingImitationManualAmounts(); if (typeof updateJewelleryDiamondCaratFromDiamondAndGemstone === 'function') updateJewelleryDiamondCaratFromDiamondAndGemstone(); });
+        addListeners(purityInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(wastagePerInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(rateInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(metalRateInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(metalWeightInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addSelectListeners(calculationSelect, function() { calcAfterClearingImitationManualAmounts(); });
         addListeners(amountInput, function() { calculateModalRowNetWeight(row); });
         addListeners(netAmtInput, function() { calculateModalRowNetWeight(row); });
         addSelectListeners(discountTypeSelect, function() { calculateModalRowNetWeight(row); });
         addListeners(discountPerInput, function() { calculateModalRowNetWeight(row); });
-        addSelectListeners(makingTypeSelect, function() { calculateModalRowNetWeight(row); });
-        addListeners(makingRateInput, function() { calculateModalRowNetWeight(row); });
-        addListeners(makingDiscountAmtInput, function() { calculateModalRowNetWeight(row); });
+        addSelectListeners(makingTypeSelect, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(makingRateInput, function() { calcAfterClearingImitationManualAmounts(); });
+        addListeners(makingDiscountAmtInput, function() { calcAfterClearingImitationManualAmounts(); });
         addListeners(quantityInput, function() { calculateModalRowNetWeight(row); });
         const settingChargeInput = row.querySelector('[data-column="setting-charge"] input');
         addListeners(settingChargeInput, function() { calculateModalRowNetWeight(row); });
@@ -709,7 +836,36 @@
             }
             addListeners(row.querySelector('[data-column="sale-amount"] input'), piSaleAmountFieldsChanged);
             addListeners(row.querySelector('[data-column="sale-amount-with"] input'), piSaleAmountFieldsChanged);
+        } else {
+            var saleAmtInp = row.querySelector('[data-column="sale-amount"] input');
+            var purchaseAmtInp = row.querySelector('[data-column="purchase-amount"] input');
+            var salePercentInp = row.querySelector('[data-column="sale-percent"] input');
+            if (salePercentInp && !salePercentInp._auragoldImitationSalePercentBound) {
+                salePercentInp._auragoldImitationSalePercentBound = true;
+                addListeners(salePercentInp, function() {
+                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
+                    row.removeAttribute('data-manual-sale-amount');
+                    calculateModalRowNetWeight(row);
+                });
+            }
+            if (saleAmtInp && !saleAmtInp._auragoldImitationSaleBound) {
+                saleAmtInp._auragoldImitationSaleBound = true;
+                addListeners(saleAmtInp, function() {
+                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
+                    row.setAttribute('data-manual-sale-amount', '1');
+                    calculateModalRowNetWeight(row);
+                });
+            }
+            if (purchaseAmtInp && !purchaseAmtInp._auragoldImitationPurchaseBound) {
+                purchaseAmtInp._auragoldImitationPurchaseBound = true;
+                addListeners(purchaseAmtInp, function() {
+                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
+                    row.setAttribute('data-manual-purchase-amount', '1');
+                    calculateModalRowNetWeight(row);
+                });
+            }
         }
+        auragoldApplyManualAmountFieldsEditability(row);
         if (typeof applyCalculationSelectOptionsForRow === 'function') applyCalculationSelectOptionsForRow(calculationSelect, row, typeof isDiamondTabActive === 'function' && isDiamondTabActive());
         if (typeof window.ensureProductRowViewIcon === 'function') {
             window.ensureProductRowViewIcon(row);
@@ -1008,6 +1164,15 @@
     }
     window.auragoldIsPurchaseInvoiceContext = auragoldIsPurchaseInvoiceContext;
 
+    /** True when the user is actively typing in this input — do not overwrite their value mid-edit. */
+    function auragoldIsInputActivelyEdited(el) {
+        try {
+            return !!(el && typeof document !== 'undefined' && document.activeElement === el);
+        } catch (e) {
+            return false;
+        }
+    }
+
     // Calculate ALL values for modal product rows - COMPREHENSIVE CALCULATION
     function calculateModalRowNetWeight(row) {
         if (row && row.jquery) row = row[0];
@@ -1124,7 +1289,8 @@
         }
         if (netWtInput) netWtInput.value = parseFloat(netWt.toFixed(3)).toString();
         var baseGoldWt = netWt > 0.00001 ? netWt : (metalWtForCalc > 0 ? metalWtForCalc : 0);
-        if (!isDiamondOrGemStone && isJewelleryDiamondCategory(catVal) && netWt > 0 && metalWeightInput) {
+        var metalWeightEditing = auragoldIsInputActivelyEdited(metalWeightInput);
+        if (!isDiamondOrGemStone && isJewelleryDiamondCategory(catVal) && netWt > 0 && metalWeightInput && !metalWeightEditing) {
             metalWeightInput.value = parseFloat(netWt.toFixed(3)).toString();
             baseGoldWt = netWt;
         }
@@ -1138,7 +1304,10 @@
             wastageWt = baseGoldWt * (wastagePer / 100);
             if (wastageWtInput) wastageWtInput.value = wastageWt.toFixed(3);
             var metalWithWastage = baseGoldWt + wastageWt;
-            if (metalWeightInput) metalWeightInput.value = parseFloat(metalWithWastage.toFixed(3)).toString();
+            // Keep Weight editable: do not force "0" (or recalculated wt) while the user is clearing/typing
+            if (metalWeightInput && !metalWeightEditing) {
+                metalWeightInput.value = parseFloat(metalWithWastage.toFixed(3)).toString();
+            }
             purityWt = metalWithWastage * purityMult;
             if (purityWtInput) purityWtInput.value = purityWt.toFixed(3);
             finalWt = purityWt;
@@ -1280,13 +1449,26 @@
         let calculatedAmount = metalValue + makingAmount + (calculationType === 'Stone Charge' ? 0 : stoneAmount) + otherAmount;
         if (calculatedAmount < 0) calculatedAmount = 0;
         let netAmt = calculatedAmount + diamondAmount;
+        var isManualAmtCtx = auragoldAllowManualPurchaseSaleAmounts();
+        var manualSaleAmt = isManualAmtCtx && row.getAttribute('data-manual-sale-amount') === '1';
+        var manualPurchaseAmt = isManualAmtCtx && row.getAttribute('data-manual-purchase-amount') === '1';
+        if (manualSaleAmt && saleAmountInput) {
+            netAmt = parseFloat(saleAmountInput.value) || 0;
+            if (netAmt < 0) netAmt = 0;
+            calculatedAmount = Math.max(0, netAmt - diamondAmount);
+        }
         // Jewellery row: Amount column shows diamond_amount only (Diamond group sum), not total
         if (amountInput) amountInput.value = (categoryId === 'Jewellery' && diamondAmount > 0) ? diamondAmount.toFixed(2) : calculatedAmount.toFixed(2);
         if (netAmtInput) netAmtInput.value = netAmt.toFixed(2);
-        if (purchaseAmountInput) purchaseAmountInput.value = netAmt.toFixed(2);
+        if (purchaseAmountInput && !manualPurchaseAmt && !auragoldIsInputActivelyEdited(purchaseAmountInput)) {
+            purchaseAmountInput.value = netAmt.toFixed(2);
+        }
+        var salePercentApplied = auragoldApplySalePercentFromPurchase(row);
         var isPurchasePiCtx = auragoldIsPurchaseInvoiceContext();
         if (!isPurchasePiCtx) {
-            if (saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
+            if (saleAmountInput && !manualSaleAmt && !salePercentApplied && !auragoldIsInputActivelyEdited(saleAmountInput)) {
+                saleAmountInput.value = netAmt.toFixed(2);
+            }
             if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
         }
         const taxTypeSelect = row.querySelector('[data-column="tax-type"] select');
@@ -1364,8 +1546,13 @@
             // amount/ net amounts update (same as main flow)
             if (amountInput) amountInput.value = (categoryId === 'Jewellery' && diamondAmount > 0) ? diamondAmount.toFixed(2) : amountBase2.toFixed(2);
             if (netAmtInput) netAmtInput.value = netAmt.toFixed(2);
-            if (purchaseAmountInput) purchaseAmountInput.value = netAmt.toFixed(2);
-            if (!isPurchasePiCtx && saleAmountInput) saleAmountInput.value = netAmt.toFixed(2);
+            if (purchaseAmountInput && !manualPurchaseAmt && !auragoldIsInputActivelyEdited(purchaseAmountInput)) {
+                purchaseAmountInput.value = netAmt.toFixed(2);
+            }
+            salePercentApplied = auragoldApplySalePercentFromPurchase(row);
+            if (!isPurchasePiCtx && saleAmountInput && !manualSaleAmt && !salePercentApplied && !auragoldIsInputActivelyEdited(saleAmountInput)) {
+                saleAmountInput.value = netAmt.toFixed(2);
+            }
 
             // Disc. base: 0 for Fix or 0% ; show base only when % discount Per. > 0
             if (discountAmountInput) {
@@ -1539,7 +1726,9 @@
             const wastageWtFieldPl = row.querySelector('[data-column="wastage-wt"] input');
             if (wastageWtFieldPl) wastageWtFieldPl.value = wastageWtPl.toFixed(3);
             var metalWithWastagePl = baseGoldWtPl + wastageWtPl;
-            if (metalWeightInputPl) metalWeightInputPl.value = metalWithWastagePl.toFixed(3);
+            if (metalWeightInputPl && !auragoldIsInputActivelyEdited(metalWeightInputPl)) {
+                metalWeightInputPl.value = metalWithWastagePl.toFixed(3);
+            }
             pureWt = metalWithWastagePl * purityDecimal;
             calculatedFinalWt = pureWt;
         } else {
@@ -1801,6 +1990,7 @@
             net_amt: getValue('net-amt', true),
             net_amt_tax: getValue('net-amt-tax', true),
             purchase_amount: getValue('purchase-amount', true),
+            sale_percent: getValue('sale-percent', true),
             sale_amount: getValue('sale-amount', true),
             sale_amount_with: getValue('sale-amount-with', true),
             reverse: getValue('reverse', true),
@@ -1962,6 +2152,7 @@
                 return amt || net || 0;
             })(),
             purchase_amount: parseFloat(item.purchase_amount) || 0,
+            sale_percent: parseFloat(item.sale_percent) || 0,
             sale_amount: parseFloat(item.sale_amount) || 0,
             sale_amount_with: parseFloat(item.sale_amount_with) || 0,
             reverse: parseFloat(item.reverse) || 0,
@@ -2039,6 +2230,7 @@
             pkt_weight: parseFloat(d.pkt_wt) || 0,
             pkt_less_weight: parseFloat(d.pkt_less_wt) || 0,
             purchase_amount: parseFloat(d.purchase_amount) || 0,
+            sale_percent: parseFloat(d.sale_percent) || 0,
             sale_amount: parseFloat(d.sale_amount) || 0,
             sale_amount_with: parseFloat(d.sale_amount_with) || 0,
             reverse: parseFloat(d.reverse) || 0,
@@ -2084,7 +2276,7 @@
         'making-group': ['making-type', 'making-rate', 'making-discount-amt', 'making-amount', 'making-actual-value', 'making-cost'],
         'minimum-group': ['min-price', 'minimum'],
         'stone-group': ['stone-charge-type', 'stone-rate', 'stone-cost', 'diamond-amount'],
-        'amounts': ['purchase-amount', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'],
+        'amounts': ['purchase-amount', 'sale-percent', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'],
         'other-charge-group': ['other-charge-type', 'other-weight', 'other-rate', 'other-info', 'other-amount'],
         'cert-spec-group': ['certificate-amount', 'certificate-no', 'certificate-link', 'video-link', 'cut', 'color', 'seive-size', 'size', 'shape', 'clarity', 'unit-price'],
         /* Separate groups: Hallmark must stay before Net Amt+Tax / Reverse (enforced when reordering columns in stock-journal-column-drag.js). */
@@ -2201,10 +2393,31 @@
         });
         var seen = {};
         order.forEach(function(k) {
-            if (map[k]) {
-                row.appendChild(map[k]);
-                seen[k] = true;
+            if (!map[k]) {
+                var td = document.createElement('td');
+                td.setAttribute('data-column', k);
+                if (k === 'checkbox') {
+                    td.style.textAlign = 'center';
+                    td.style.background = '#fff';
+                    td.innerHTML = '<input type="checkbox" class="product-checkbox">';
+                } else if (k === 'actions') {
+                    td.style.textAlign = 'center';
+                } else if (k === 'photo') {
+                    td.className = 'product-row-photo';
+                    td.style.textAlign = 'center';
+                    td.style.verticalAlign = 'middle';
+                    td.innerHTML = '<span class="product-photo-placeholder text-muted" style="font-size:0.65rem;">—</span>';
+                } else if (k === 'sale-percent') {
+                    td.innerHTML = '<input type="text" class="form-control form-control-sm" value="0" step="0.01" style="width: 80px; font-size: 0.7rem;" placeholder="%" title="Sale % on Purchase Amount">';
+                } else if (k === 'id') {
+                    td.textContent = '';
+                } else {
+                    td.innerHTML = '<input type="text" class="form-control form-control-sm" value="" style="width:80px;font-size:0.7rem;">';
+                }
+                map[k] = td;
             }
+            row.appendChild(map[k]);
+            seen[k] = true;
         });
         Object.keys(map).forEach(function(k) {
             if (!seen[k] && map[k] && map[k].parentNode === row) {
@@ -4123,6 +4336,7 @@
         setModalCellValue(row, 'net-amt', md.net_amt, true);
         setModalCellValue(row, 'net-amt-tax', md.net_amt_tax, true);
         setModalCellValue(row, 'purchase-amount', md.purchase_amount, true);
+        setModalCellValue(row, 'sale-percent', md.sale_percent, true);
         setModalCellValue(row, 'sale-amount', md.sale_amount, true);
         setModalCellValue(row, 'sale-amount-with', md.sale_amount_with, true);
         setModalCellValue(row, 'reverse', md.reverse, true);
@@ -4165,4 +4379,31 @@
     }
     window.applyModalRowDataToSelectionRow = applyModalRowDataToSelectionRow;
     window.setModalCellValue = setModalCellValue;
+
+    // Keep Purchase/Sale Amount editable state in sync when metal tabs change
+    if (typeof document !== 'undefined' && !window._auragoldImitationAmountTabBound) {
+        window._auragoldImitationAmountTabBound = true;
+        document.addEventListener('click', function(e) {
+            var btn = e.target && e.target.closest ? e.target.closest('.category-tab-btn') : null;
+            if (!btn) return;
+            setTimeout(function() {
+                if (typeof auragoldApplyManualAmountFieldsEditability === 'function') {
+                    auragoldApplyManualAmountFieldsEditability();
+                }
+            }, 0);
+        }, true);
+        function auragoldInitManualAmountFieldsEditability() {
+            if (typeof auragoldApplyManualAmountFieldsEditability === 'function') {
+                auragoldApplyManualAmountFieldsEditability();
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', auragoldInitManualAmountFieldsEditability);
+        } else {
+            setTimeout(auragoldInitManualAmountFieldsEditability, 0);
+        }
+        // Product opening rows are often filled async after load
+        setTimeout(auragoldInitManualAmountFieldsEditability, 500);
+        setTimeout(auragoldInitManualAmountFieldsEditability, 1500);
+    }
 })(typeof window !== 'undefined' ? window : this);

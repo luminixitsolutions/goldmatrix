@@ -33,9 +33,15 @@ $sp_scheme_sub = [
 
 require_once __DIR__ . '/includes/auragold_salesperson_performance_data.php';
 
-$default_range_label = '01-04-2025 - 31-03-2026';
+$default_range_label = '';
 if (!empty($_GET['sp_from']) && !empty($_GET['sp_to'])) {
     $default_range_label = trim((string) $_GET['sp_from']) . ' - ' . trim((string) $_GET['sp_to']);
+} else {
+    $todaySp = new DateTimeImmutable('today');
+    $ySp     = (int) $todaySp->format('Y');
+    $mSp     = (int) $todaySp->format('n');
+    $fyStart = $mSp >= 4 ? $ySp : ($ySp - 1);
+    $default_range_label = sprintf('01-04-%d - 31-03-%d', $fyStart, $fyStart + 1);
 }
 $sp_range = auragold_sale_analysis_parse_range($default_range_label);
 $default_range = $sp_range['label'];
@@ -260,6 +266,118 @@ $DASHBOARD_EXTRA_CSS = <<<'HTML'
         font-size: 13px;
     }
     .sp-export-menu a:hover { background: #fffbf0; color: var(--sp-gold-dark); }
+    .sp-qty-link {
+        color: #2563eb;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        font-weight: 600;
+    }
+    .sp-qty-link:hover { color: #1d4ed8; }
+    .sp-detail-modal {
+        --sp-navy: #11294b;
+        --sp-navy-deep: #0c1f38;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+        outline: 0;
+        z-index: 1050;
+    }
+    .sp-detail-modal.show {
+        display: flex !important;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 88px 16px 32px;
+    }
+    .sp-detail-modal .modal-dialog {
+        margin: 0 auto;
+        max-width: 960px;
+        width: 100%;
+        max-height: calc(100vh - 120px);
+    }
+    .sp-detail-modal .modal-content {
+        border: 1px solid rgba(201, 162, 39, 0.35);
+        border-radius: 10px;
+        overflow: hidden;
+        max-height: calc(100vh - 120px);
+        display: flex;
+        flex-direction: column;
+    }
+    .sp-detail-modal .modal-body {
+        overflow-y: auto;
+        flex: 1 1 auto;
+    }
+    body.sp-modal-open { overflow: hidden; }
+    #spModalBackdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        z-index: 1040;
+    }
+    .sp-detail-modal .modal-header {
+        background: #11294b !important;
+        color: #ffffff !important;
+        border-bottom: 2px solid #8b6914;
+        padding: 14px 18px;
+        flex-shrink: 0;
+    }
+    .sp-detail-modal .modal-title {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #ffffff !important;
+    }
+    .sp-detail-modal .modal-sub {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.92) !important;
+        margin-top: 2px;
+    }
+    .sp-detail-modal .close {
+        color: #fff !important;
+        opacity: 0.95;
+        text-shadow: none;
+        position: relative;
+        z-index: 2;
+    }
+    .sp-detail-table {
+        font-size: 12px;
+        margin-bottom: 0;
+        width: 100%;
+        table-layout: auto;
+    }
+    .sp-detail-modal .sp-detail-table thead th {
+        background: #11294b !important;
+        font-weight: 700;
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff;
+        white-space: nowrap;
+        border-color: rgba(255, 255, 255, 0.15) !important;
+        border-bottom: 2px solid #8b6914 !important;
+        padding: 8px 10px;
+        vertical-align: middle;
+        text-align: left;
+    }
+    .sp-detail-modal .sp-detail-table thead th.sp-num {
+        text-align: right;
+    }
+    .sp-detail-modal .sp-detail-table tbody td {
+        vertical-align: middle;
+        color: #1e293b;
+        padding: 7px 10px;
+        border-color: #eef0f3;
+    }
+    .sp-detail-modal .sp-detail-table tbody tr:nth-child(even) td {
+        background: #fafbfc;
+    }
+    .sp-detail-modal .sp-detail-table .sp-num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+    .sp-detail-doc-link { color: #2563eb; font-weight: 600; text-decoration: none; }
+    .sp-detail-doc-link:hover { text-decoration: underline; color: #1d4ed8; }
 </style>
 HTML;
 
@@ -343,9 +461,22 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                     </tr>
                     <?php else: ?>
                     <?php foreach ($sp_rows as $row): ?>
+                    <?php
+                    $bills_val = (string) ($row['bills'] ?? '0');
+                    $bills_clickable = is_numeric($bills_val) && (int) $bills_val > 0;
+                    ?>
                     <tr>
                         <td class="sp-td-name" data-sp-fixed="1" data-sp-role="name"><?php echo htmlspecialchars($row['name']); ?></td>
-                        <td class="sp-num" data-sp-fixed="1" data-sp-role="bills"><?php echo htmlspecialchars($row['bills']); ?></td>
+                        <td class="sp-num<?php echo $bills_clickable ? ' sp-qty-link' : ''; ?>"
+                            data-sp-fixed="1"
+                            data-sp-role="bills"
+                            <?php if ($bills_clickable): ?>
+                            data-sp-salesperson="<?php echo htmlspecialchars($row['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                            data-sp-bills="<?php echo htmlspecialchars($bills_val, ENT_QUOTES, 'UTF-8'); ?>"
+                            title="Click to view bills"
+                            role="button"
+                            tabindex="0"
+                            <?php endif; ?>><?php echo htmlspecialchars($bills_val); ?></td>
                         <?php foreach ($sp_groups as $slug => $_g): ?>
                             <?php
                             $gdata = isset($row[$slug]) && is_array($row[$slug]) ? $row[$slug] : [];
@@ -383,6 +514,40 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
         </div>
     </div>
 </div>
+
+<div class="modal fade sp-detail-modal" id="spBillsDetailModal" tabindex="-1" role="dialog" aria-labelledby="spBillsDetailModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-0" id="spBillsDetailModalTitle">Bills</h5>
+                    <div class="modal-sub" id="spBillsDetailModalSub"></div>
+                </div>
+                <button type="button" class="close sp-modal-close" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body p-0">
+                <div id="spBillsDetailLoading" class="text-muted py-4 text-center" style="display:none;">Loading…</div>
+                <div id="spBillsDetailError" class="alert alert-warning m-3 py-2" style="display:none;"></div>
+                <div class="table-responsive" id="spBillsDetailWrap" style="display:none;">
+                    <table class="table table-sm table-bordered table-hover sp-detail-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Doc No</th>
+                                <th>Date</th>
+                                <th>Party</th>
+                                <th class="sp-num">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="spBillsDetailBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="spModalBackdrop" style="display:none;" aria-hidden="true"></div>
+
 <script>
 (function () {
     var inp = document.getElementById('spDateRange');
@@ -408,6 +573,162 @@ document.addEventListener('DOMContentLoaded', function () {
     if (window.AuragoldSalespersonColReorder) {
         AuragoldSalespersonColReorder.init('#spMainTable', { storageKey: 'auragold_sp_perf_columns' });
     }
+
+    var dateRangeDef = <?php echo json_encode($default_range, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var modal = document.getElementById('spBillsDetailModal');
+    var backdrop = document.getElementById('spModalBackdrop');
+    var titleEl = document.getElementById('spBillsDetailModalTitle');
+    var subEl = document.getElementById('spBillsDetailModalSub');
+    var loadEl = document.getElementById('spBillsDetailLoading');
+    var errEl = document.getElementById('spBillsDetailError');
+    var wrapEl = document.getElementById('spBillsDetailWrap');
+    var bodyEl = document.getElementById('spBillsDetailBody');
+    var tableEl = document.getElementById('spMainTable');
+
+    function spCurrentDateRange() {
+        var inp = document.getElementById('spDateRange');
+        var v = (inp && inp.value) ? String(inp.value).trim() : dateRangeDef;
+        var parts = v.split(/\s+\-\s+/);
+        if (parts.length === 2) {
+            return { from: parts[0].trim(), to: parts[1].trim(), label: v };
+        }
+        return { from: '', to: '', label: v };
+    }
+
+    function spEscHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function spShowModal() {
+        if (!modal || !backdrop) {
+            return;
+        }
+        modal.classList.add('show');
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-modal', 'true');
+        modal.removeAttribute('aria-hidden');
+        backdrop.style.display = 'block';
+        document.body.classList.add('modal-open', 'sp-modal-open');
+    }
+
+    function spHideModal() {
+        if (!modal || !backdrop) {
+            return;
+        }
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+        modal.removeAttribute('aria-modal');
+        modal.setAttribute('aria-hidden', 'true');
+        backdrop.style.display = 'none';
+        document.body.classList.remove('modal-open', 'sp-modal-open');
+    }
+
+    function spRenderBillsDetail(res) {
+        loadEl.style.display = 'none';
+        if (!res || !res.ok) {
+            errEl.textContent = (res && res.message) ? res.message : 'Could not load bills.';
+            errEl.style.display = 'block';
+            return;
+        }
+        var rows = res.rows || [];
+        subEl.textContent = (res.salesperson || '') + ' · ' + (res.date_range || '');
+        if (rows.length === 0) {
+            errEl.textContent = 'No bills found for this sales person.';
+            errEl.style.display = 'block';
+            return;
+        }
+        var html = '';
+        rows.forEach(function (r) {
+            var docCell = r.url
+                ? '<a href="' + spEscHtml(r.url) + '" class="sp-detail-doc-link" target="_blank" rel="noopener">' + spEscHtml(r.doc_no || '—') + '</a>'
+                : spEscHtml(r.doc_no || '—');
+            html += '<tr>'
+                + '<td>' + spEscHtml(r.doc_type || '') + '</td>'
+                + '<td>' + docCell + '</td>'
+                + '<td>' + spEscHtml(r.date || '') + '</td>'
+                + '<td>' + spEscHtml(r.party || '') + '</td>'
+                + '<td class="sp-num">' + spEscHtml(r.amount || '') + '</td>'
+                + '</tr>';
+        });
+        bodyEl.innerHTML = html;
+        wrapEl.style.display = 'block';
+    }
+
+    function spOpenBillsDetail(salesperson, billsLabel) {
+        var dr = spCurrentDateRange();
+        titleEl.textContent = 'Bills (' + billsLabel + ')';
+        subEl.textContent = '';
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+        wrapEl.style.display = 'none';
+        bodyEl.innerHTML = '';
+        loadEl.style.display = 'block';
+        spShowModal();
+
+        var url = 'ajax/salesperson-performance-bills-detail.php?salesperson='
+            + encodeURIComponent(salesperson)
+            + '&from=' + encodeURIComponent(dr.from)
+            + '&to=' + encodeURIComponent(dr.to);
+
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(spRenderBillsDetail)
+            .catch(function () {
+                loadEl.style.display = 'none';
+                errEl.textContent = 'Request failed. Please try again.';
+                errEl.style.display = 'block';
+            });
+    }
+
+    function spOnBillsCellActivate(el) {
+        if (!el || !el.classList || !el.classList.contains('sp-qty-link')) {
+            return;
+        }
+        var salesperson = el.getAttribute('data-sp-salesperson') || '';
+        var billsLabel = el.getAttribute('data-sp-bills') || el.textContent.trim();
+        if (!salesperson) {
+            return;
+        }
+        spOpenBillsDetail(salesperson, billsLabel);
+    }
+
+    if (tableEl) {
+        tableEl.addEventListener('click', function (ev) {
+            var t = ev.target;
+            if (!t || t.getAttribute('data-sp-role') !== 'bills' || !t.classList.contains('sp-qty-link')) {
+                return;
+            }
+            ev.preventDefault();
+            spOnBillsCellActivate(t);
+        });
+        tableEl.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Enter' && ev.key !== ' ') {
+                return;
+            }
+            var t = ev.target;
+            if (!t || t.getAttribute('data-sp-role') !== 'bills' || !t.classList.contains('sp-qty-link')) {
+                return;
+            }
+            ev.preventDefault();
+            spOnBillsCellActivate(t);
+        });
+    }
+
+    document.querySelectorAll('.sp-modal-close').forEach(function (btn) {
+        btn.addEventListener('click', spHideModal);
+    });
+    if (backdrop) {
+        backdrop.addEventListener('click', spHideModal);
+    }
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+            spHideModal();
+        }
+    });
 });
 </script>
 <?php

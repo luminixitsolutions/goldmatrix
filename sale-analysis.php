@@ -84,7 +84,7 @@ if (isset($conn) && $conn instanceof mysqli) {
 $row_count = count($sa_rows);
 $sa_show_from = $row_count > 0 ? 1 : 0;
 
-$DASHBOARD_PAGE_TITLE = 'Sale Analysis';
+$DASHBOARD_PAGE_TITLE = 'Sale Reports';
 $DASHBOARD_EXTRA_CSS = <<<'HTML'
 <style>
     .sa-wrap {
@@ -263,7 +263,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
 ?>
 <div class="sa-wrap">
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
-        <h1 class="sa-page-title mb-0">Sale Analysis</h1>
+        <h1 class="sa-page-title mb-0">Sale Reports</h1>
         <div class="sa-toolbar d-flex flex-wrap align-items-center gap-2">
             <div class="input-group input-group-sm" style="width: auto;">
                 <span class="input-group-text bg-white border-end-0"><i class="feather icon-calendar" style="color:#a67c1a;"></i></span>
@@ -276,7 +276,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                 </button>
             </div>
             <button type="button" class="btn btn-sa-outline" id="saRefresh" title="Refresh"><i class="feather icon-refresh-cw"></i></button>
-            <details class="sa-export-dd" data-fs-root="#saMainTable" data-fs-file="sale-analysis" data-fs-title="Sale Analysis">
+            <details class="sa-export-dd" data-fs-root="#saMainTable" data-fs-file="sale-analysis" data-fs-title="Sale Reports">
                 <summary class="btn btn-sa-primary">Export <i class="feather icon-chevron-down" style="font-size:14px;vertical-align:middle;"></i></summary>
                 <div class="sa-export-menu">
                     <a href="#" class="fs-export-xls">Excel</a>
@@ -287,7 +287,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
     </div>
 
     <nav class="sa-subnav" aria-label="Financial statement analysis">
-        <a href="sale-analysis.php" class="sa-subnav-active">Sale Analysis</a>
+        <a href="sale-analysis.php" class="sa-subnav-active">Sale Reports</a>
         <a href="gold-silver-financial-analysis.php">Gold Silver Analysis</a>
         <a href="diamond-stone-financial-analysis.php">Diamond &amp; Stone Analysis</a>
         <a href="salesperson-performance.php">Salesperson Performance</a>

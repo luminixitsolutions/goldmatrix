@@ -5,6 +5,14 @@ require_once __DIR__ . '/includes/auragold_sidebar_nav_permissions.php';
 require_once __DIR__ . '/includes/auragold_mobile_menu_settings.php';
 require_once __DIR__ . '/includes/auragold_user_menu_preferences.php';
 require_once __DIR__ . '/includes/auragold_employee_management_menu.php';
+require_once __DIR__ . '/includes/auragold_gst_reports_catalog.php';
+require_once __DIR__ . '/includes/branch_profile_schema.php';
+if (is_file(__DIR__ . '/includes/auragold_api_shop_connection.php')) {
+    require_once __DIR__ . '/includes/auragold_api_shop_connection.php';
+}
+if (is_file(__DIR__ . '/includes/auragold_access_token.php')) {
+    require_once __DIR__ . '/includes/auragold_access_token.php';
+}
 if (!defined('AURAGOLD_DASHBOARD_SHELL')) {
     require_once __DIR__ . '/includes/brand_page_loader.php';
     if (auragold_brand_page_loader_should_show()) {
@@ -132,16 +140,18 @@ $auragold_report_pages = [
     'kyc-report.php',
     'reward-point-report.php',
 ];
+$auragold_gst_report_pages = [
+    'gst-reports.php',
+    'gst-report.php',
+];
 $auragold_employee_management_pages = [
     'employee-dashboard.php',
-    'employee-documents.php',
     'employee-attendance.php',
-    'employee-leave-management.php',
-    'employee-salary-payroll.php',
-    'employee-tasks.php',
-    'employee-performance.php',
+    'employee-advance.php',
+    'employee-advance-request.php',
+    'employee-incentive.php',
     'employee-reports.php',
-    'employee-settings.php',
+    'employee-salary-payroll.php',
 ];
 $auragold_settings_pages = [
     'set-software.php',
@@ -152,6 +162,8 @@ $auragold_settings_pages = [
     'ewaybill-api-settings.php',
     'ewaybill-authentication.php',
     'user-management.php',
+    'department-management.php',
+    'designation-management.php',
     'masters.php',
     'role-management.php',
     'permission-management.php',
@@ -168,8 +180,49 @@ $auragold_orders_nav_active = in_array($auragold_nav_basename, $auragold_orders_
 $auragold_manufacturer_nav_active = in_array($auragold_nav_basename, $auragold_manufacturer_pages, true);
 $auragold_financial_statement_nav_active = in_array($auragold_nav_basename, $auragold_financial_statement_pages, true);
 $auragold_report_nav_active = in_array($auragold_nav_basename, $auragold_report_pages, true);
+$auragold_gst_report_nav_active = in_array($auragold_nav_basename, $auragold_gst_report_pages, true);
 $auragold_employee_management_nav_active = in_array($auragold_nav_basename, $auragold_employee_management_pages, true);
 $auragold_settings_nav_active = in_array($auragold_nav_basename, $auragold_settings_pages, true);
+
+/**
+ * External CRM (opens in new tab): https://crm.goldmatrixsoft.com/{login shop email}/{shop access token}
+ */
+$auragold_crm_external_url = 'https://crm.goldmatrixsoft.com/';
+$auragold_crm_shop_email = '';
+$auragold_crm_access_token = '';
+if (function_exists('auragold_bootstrap_session_shop_access_token')) {
+    $auragold_crm_access_token = auragold_bootstrap_session_shop_access_token();
+}
+if ($auragold_crm_access_token === '') {
+    $auragold_crm_access_token = trim((string) ($_SESSION['shop_access_token'] ?? $_SESSION['Admin']['shop_access_token'] ?? ''));
+}
+if ($auragold_crm_access_token === '' && function_exists('auragold_bootstrap_session_access_token')) {
+    $auragold_crm_access_token = auragold_bootstrap_session_access_token();
+}
+if ($auragold_crm_access_token === '') {
+    $auragold_crm_access_token = trim((string) ($_SESSION['Admin']['access_token'] ?? $_SESSION['access_token'] ?? ''));
+}
+$auragold_crm_bid = 0;
+if (function_exists('auragold_my_profile_target_branch_id')) {
+    $auragold_crm_bid = (int) auragold_my_profile_target_branch_id();
+}
+if ($auragold_crm_bid <= 0) {
+    $auragold_crm_bid = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
+}
+if ($auragold_crm_bid > 0 && function_exists('getRecordMaster')) {
+    $auragold_crm_br = @getRecordMaster('SELECT email FROM tbl_branches WHERE id = ' . $auragold_crm_bid . ' LIMIT 1');
+    if (is_array($auragold_crm_br)) {
+        $auragold_crm_shop_email = trim((string) ($auragold_crm_br['email'] ?? ''));
+    }
+}
+if ($auragold_crm_shop_email === '') {
+    $auragold_crm_shop_email = trim((string) ($_SESSION['Admin']['EmailId'] ?? $_SESSION['Admin']['email'] ?? ''));
+}
+if ($auragold_crm_shop_email !== '' && $auragold_crm_access_token !== '') {
+    $auragold_crm_external_url = 'https://crm.goldmatrixsoft.com/'
+        . rawurlencode($auragold_crm_shop_email) . '/'
+        . rawurlencode($auragold_crm_access_token);
+}
 
 /** Top-left mark: working-branch shop logo (my-profile / tbl_branches.logo_path). Top-right avatar: user photo, else shop logo, else default. */
 $auragold_header_avatar_src    = 'assets/img/avatars/1.png';
@@ -455,6 +508,7 @@ if ($auragold_dropdown_branch_title === '') {
                                     </li>
                                     <li><a class="dropdown-item" href="my-profile.php"><i class="feather icon-user"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.my_profile'), ENT_QUOTES, 'UTF-8') : 'My Profile'; ?></a></li>
                                     <li><a class="dropdown-item" href="change-password.php"><i class="feather icon-lock"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.change_password'), ENT_QUOTES, 'UTF-8') : 'Change Password'; ?></a></li>
+                                    <li><a class="dropdown-item" href="branches.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.branch'), ENT_QUOTES, 'UTF-8') : 'Branch'; ?></a></li>
                                     <!-- <li><a class="dropdown-item" href="#"><i class="feather icon-settings"></i> Account Settings</a></li> -->
                                     <li><a class="dropdown-item" href="#"><i class="feather icon-bell"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.notifications'), ENT_QUOTES, 'UTF-8') : 'Notifications'; ?></a></li>
                                     <!-- <li class="dropdown-divider"></li>
@@ -673,8 +727,8 @@ if ($auragold_dropdown_branch_title === '') {
                                         <?php if (auragold_nav_show_php_href('fund-flow.php')): ?><li><a class="dropdown-item" href="fund-flow.php"><i class="feather icon-refresh-ccw"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.fund_flow'), ENT_QUOTES, 'UTF-8') : 'Fund Flow'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('chart-of-account.php')): ?><li><a class="dropdown-item" href="chart-of-account.php"><i class="feather icon-grid"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.chart_of_account'), ENT_QUOTES, 'UTF-8') : 'Chart Of Account'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('tax-return.php')): ?><li><a class="dropdown-item" href="tax-return.php"><i class="feather icon-percent"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.tax_return'), ENT_QUOTES, 'UTF-8') : 'Tax Return'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('sale-analysis.php')): ?><li><a class="dropdown-item" href="sale-analysis.php"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.sale_analysis'), ENT_QUOTES, 'UTF-8') : 'Sale Analysis'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('purchase-financial-analysis.php')): ?><li><a class="dropdown-item" href="purchase-financial-analysis.php"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.purchase_analysis'), ENT_QUOTES, 'UTF-8') : 'Purchase Analysis'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_show_php_href('sale-analysis.php')): ?><li><a class="dropdown-item" href="sale-analysis.php"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.sale_analysis'), ENT_QUOTES, 'UTF-8') : 'Sale Reports'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_show_php_href('purchase-financial-analysis.php')): ?><li><a class="dropdown-item" href="purchase-financial-analysis.php"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.purchase_analysis'), ENT_QUOTES, 'UTF-8') : 'Purchase Reports'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('trial-balance-detailed-report.php')): ?><li><a class="dropdown-item" href="trial-balance-detailed-report.php"><i class="feather icon-file-text"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('fs.trial_balance_detailed'), ENT_QUOTES, 'UTF-8') : 'Trial Balance Detailed Report'; ?></a></li><?php endif; ?>
                                     </ul>
                             </li>
@@ -695,8 +749,27 @@ if ($auragold_dropdown_branch_title === '') {
                                     </ul>
                             </li>
                             <?php endif; ?>
+                            <?php if (auragold_nav_module_has_visible_link('gst_report')): ?>
+                            <li class="nav-item" data-mm-module="gst_report">
+                                    <a class="nav-link<?php echo $auragold_gst_report_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-percent"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.gst_report'), ENT_QUOTES, 'UTF-8') : 'GST Reports'; ?></a>
+                                    <ul class="dropdown-menu gst-report-submenu">
+                                        <?php
+                                        $auragold_gst_catalog = auragold_gst_reports_catalog();
+                                        $auragold_gst_current_type = isset($_GET['type']) ? (string) $_GET['type'] : '';
+                                        foreach ($auragold_gst_catalog as $gstItem):
+                                            if (!auragold_nav_can_page_keys('gst_report', $gstItem['key'])) {
+                                                continue;
+                                            }
+                                            $gstHref = auragold_gst_report_href($gstItem['key']);
+                                            $gstActive = ($auragold_nav_basename === 'gst-report.php' && $auragold_gst_current_type === $gstItem['key']);
+                                        ?>
+                                        <li><a class="dropdown-item<?php echo $gstActive ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($gstHref, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather <?php echo htmlspecialchars($gstItem['icon'], ENT_QUOTES, 'UTF-8'); ?>"></i> <?php echo htmlspecialchars($gstItem['label'], ENT_QUOTES, 'UTF-8'); ?></a></li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                            </li>
+                            <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('employee_management')): ?>
-                            <!-- <li class="nav-item" data-mm-module="employee_management">
+                             <li class="nav-item" data-mm-module="employee_management">
                                     <a class="nav-link<?php echo $auragold_employee_management_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-users"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.employee_management'), ENT_QUOTES, 'UTF-8') : 'Employee Management'; ?></a>
                                     <ul class="dropdown-menu employee-management-submenu">
                                         <?php foreach (auragold_employee_management_menu_items() as $emNavItem):
@@ -716,29 +789,24 @@ if ($auragold_dropdown_branch_title === '') {
                                         <li><a class="dropdown-item<?php echo $emNavActive ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($emNavFile, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather <?php echo $emNavIcon; ?>"></i> <?php echo $emNavLabel; ?></a></li>
                                         <?php endforeach; ?>
                                     </ul>
-                            </li> -->
+                            </li> 
                             <?php endif; ?>
                             <?php if (auragold_nav_module_has_visible_link('settings') || auragold_nav_administration_dropdown_visible($auragold_nav_admin_role)): ?>
                             <li class="nav-item" data-mm-module="settings">
                                     <a class="nav-link<?php echo $auragold_settings_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-settings"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.settings'), ENT_QUOTES, 'UTF-8') : 'Settings'; ?></a>
                                     <ul class="dropdown-menu settings-submenu">
                                         <?php if (auragold_nav_show_php_href('set-software.php')): ?><li><a class="dropdown-item" href="set-software.php"><i class="feather icon-monitor"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('set.set_software'), ENT_QUOTES, 'UTF-8') : 'Set Software'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('language-settings.php')): ?><li><a class="dropdown-item" href="language-settings.php"><i class="feather icon-globe"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('set.language'), ENT_QUOTES, 'UTF-8') : 'Language'; ?></a></li><?php endif; ?>
-                                       
                                         <?php if (auragold_nav_show_php_href('voucher-type.php')): ?><li><a class="dropdown-item" href="voucher-type.php"><i class="feather icon-percent"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('set.voucher_type'), ENT_QUOTES, 'UTF-8') : 'Voucher Type'; ?></a></li><?php endif; ?>
                                         <!-- <?php if (auragold_nav_show_php_href('invoice-print-settings.php')): ?><li><a class="dropdown-item" href="invoice-print-settings.php"><i class="feather icon-printer"></i> Invoice print settings</a></li><?php endif; ?> -->
                                         <?php
+                                        /* Language & Masters live in Set Software sidebar — omit from top Settings menu */
                                         $auragold_settings_config_links = auragold_nav_show_php_href('set-software.php')
-                                            || auragold_nav_show_php_href('language-settings.php')
                                             || auragold_nav_show_php_href('voucher-type.php');
                                         if (auragold_nav_administration_dropdown_visible($auragold_nav_admin_role)):
                                         ?>
                                         <?php if ($auragold_settings_config_links): ?><li class="dropdown-divider" role="separator"></li><?php endif; ?>
                                         <?php if ($auragold_nav_admin_role && auragold_nav_show_php_href('user-management.php')): ?>
                                         <li><a class="dropdown-item" href="user-management.php"><i class="feather icon-users"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.user_management'), ENT_QUOTES, 'UTF-8') : 'User Management'; ?></a></li>
-                                        <?php endif; ?>
-                                        <?php if ($auragold_nav_admin_role && auragold_nav_show_php_href('masters.php')): ?>
-                                        <li><a class="dropdown-item" href="masters.php"><i class="feather icon-folder"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.masters'), ENT_QUOTES, 'UTF-8') : 'Masters'; ?></a></li>
                                         <?php endif; ?>
                                         <!-- <?php if ($auragold_nav_admin_role && auragold_nav_show_php_href('role-management.php')): ?>
                                         <li><a class="dropdown-item" href="role-management.php"><i class="feather icon-shield"></i> Role Management</a></li>
@@ -752,8 +820,8 @@ if ($auragold_dropdown_branch_title === '') {
                                         <?php if ($auragold_nav_admin_role && auragold_nav_show_php_href('blocklist-management.php')): ?>
                                         <li><a class="dropdown-item" href="blocklist-management.php"><i class="feather icon-slash"></i> Blocklist</a></li>
                                         <?php endif; ?> -->
-                                        <?php if (auragold_nav_can_page_keys('administration', 'activity_log')): ?><li data-mm-page="administration.activity_log"><a class="dropdown-item" href="#"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.activity_log'), ENT_QUOTES, 'UTF-8') : 'Activity Log'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('crm.php')): ?><li><a class="dropdown-item" href="crm.php"><i class="feather icon-sidebar"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.crm'), ENT_QUOTES, 'UTF-8') : 'CRM'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_can_page_keys('administration', 'activity_log')): ?><li data-mm-page="administration.activity_log"><a class="dropdown-item" href="activity-log.php"><i class="feather icon-search"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.activity_log'), ENT_QUOTES, 'UTF-8') : 'Activity Log'; ?></a></li><?php endif; ?>
+                                        <?php if (auragold_nav_show_php_href('crm.php')): ?><li><a class="dropdown-item" href="<?php echo htmlspecialchars($auragold_crm_external_url, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"><i class="feather icon-sidebar"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('adm.crm'), ENT_QUOTES, 'UTF-8') : 'CRM'; ?></a></li><?php endif; ?>
                                         <?php endif; ?>
                                     </ul>
                             </li>
