@@ -3381,6 +3381,10 @@ text-transform: uppercase;
                                                     <label for="modal-col-purchase-amount">Purchase Amount</label>
                                                 </div>
                                                 <div class="table-settings-item">
+                                                    <input type="checkbox" id="modal-col-sale-percent" data-column="sale-percent" checked>
+                                                    <label for="modal-col-sale-percent">Sale Percentages</label>
+                                                </div>
+                                                <div class="table-settings-item">
                                                     <input type="checkbox" id="modal-col-sale-amount" data-column="sale-amount" checked>
                                                     <label for="modal-col-sale-amount">Sale Amount</label>
                                                 </div>
@@ -3512,7 +3516,7 @@ text-transform: uppercase;
                                                     <th colspan="6" data-group="making-group" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Making (group)</span></th>
                                                     <th colspan="2" data-group="minimum-group" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Minimum</span></th>
                                                     <th colspan="4" data-group="stone-group" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Stone group</span></th>
-                                                    <th colspan="7" data-group="amounts" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Amounts</span></th>
+                                                    <th colspan="8" data-group="amounts" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Amounts</span></th>
                                                     <th colspan="5" data-group="other-charge-group" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Other Charge (group)</span></th>
                                                     <th colspan="11" data-group="cert-spec-group" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Certificate &amp; spec</span></th>
                                                     <th colspan="2" data-group="hallmark" class="product-modal-group-header-th" style="text-align: center;"><span class="product-modal-group-drag-handle" title="Drag to move this entire column group"><?php echo $sj_drag_icons; ?></span><span class="product-modal-group-label">Hallmark</span></th>
@@ -3592,6 +3596,7 @@ text-transform: uppercase;
                                                     <th data-column="stone-cost" style="min-width: 100px;"><?php echo $sj_col_drag; ?>Stone Cost</th>
                                                     <th data-column="diamond-amount" style="min-width: 120px;"><?php echo $sj_col_drag; ?>Diamond Amount</th>
                                                     <th data-column="purchase-amount" style="min-width: 130px;"><?php echo $sj_col_drag; ?>Purchase Amount</th>
+                                                    <th data-column="sale-percent" style="min-width: 100px;"><?php echo $sj_col_drag; ?>Sale Percentages</th>
                                                     <th data-column="sale-amount" style="min-width: 110px;"><?php echo $sj_col_drag; ?>Sale Amount</th>
                                                     <th data-column="sale-amount-with" style="min-width: 130px;"><?php echo $sj_col_drag; ?>Sale Amount Wi...</th>
                                                     <th data-column="net-amt" style="min-width: 100px;"><?php echo $sj_col_drag; ?>Net Amt</th>
@@ -3622,7 +3627,7 @@ text-transform: uppercase;
                                             </thead>
                                             <tbody id="productListBodyPage">
                                                 <tr>
-                                                    <td colspan="102" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td>
+                                                    <td colspan="103" class="text-center text-muted py-4">Click "Add Product" button to add products for billing...</td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -3853,6 +3858,9 @@ text-transform: uppercase;
                                                     </th>
                                                     <th data-column="purchase-amount">
                                                         Purchase Amount
+                                                    </th>
+                                                    <th data-column="sale-percent">
+                                                        Sale Percentages
                                                     </th>
                                                     <th data-column="sale-amount">
                                                         Sale Amount
@@ -5811,6 +5819,7 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
     $(document).ready(function() {
         $(document).on('click', '.add-product-icon', function(e) {
             e.stopPropagation();
+            e.preventDefault();
             $('#productCreationModal').modal('show');
             // Initialize column dropdown when modal opens
             setTimeout(function() {
@@ -8899,6 +8908,9 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
             // Start from diamond defaults, then apply saved overrides (do not replace entire set with sparse saved prefs)
             prefs = Object.assign({}, diamondVisibleSet, savedDiamond && typeof savedDiamond === 'object' ? savedDiamond : {});
             Object.keys(STOCK_JOURNAL_FORCED_MODAL_COLUMNS).forEach(function(col) { prefs[col] = 1; });
+            if (typeof window.auragoldProductModalApplyAlwaysVisibleAmountColumns === 'function') {
+                prefs = window.auragoldProductModalApplyAlwaysVisibleAmountColumns(prefs);
+            }
         } else {
             prefs = (typeof window.mergeProductModalMetalTabPrefs === 'function')
                 ? window.mergeProductModalMetalTabPrefs(tk, tabKey)
@@ -11300,10 +11312,17 @@ include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php';
         }
         
         // ========== SALE AMOUNT ==========
-        if (saleAmountInput && !(manualSaleAmt || saleFocused)) {
+        var salePercentApplied = false;
+        if (typeof window.auragoldApplySalePercentFromPurchase === 'function') {
+            salePercentApplied = window.auragoldApplySalePercentFromPurchase(row);
+        }
+        if (saleAmountInput && !(manualSaleAmt || saleFocused) && !salePercentApplied) {
             saleAmountInput.value = netAmt.toFixed(2);
         }
-        if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
+        if (saleAmountWithInput) {
+            var saleAmtForWith = saleAmountInput ? (parseFloat(saleAmountInput.value) || 0) : netAmt;
+            saleAmountWithInput.value = saleAmtForWith.toFixed(2);
+        }
         
         // ========== TAX CALCULATION ==========
         // Tax = Net Amount × (Tax % / 100) — use Tax % column (default 5)

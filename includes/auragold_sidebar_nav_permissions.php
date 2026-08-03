@@ -24,8 +24,10 @@ function auragold_nav_basename_permission_map()
         'dashboard.php'                 => ['dashboards', 'gold_rates'],
         'dashboard-stock.php'           => ['dashboards', 'stock_dash'],
         'product-opening.php'           => ['utilities', 'product_opening'],
-        'assign-inventory-to-sales-team.php' => ['utilities', 'assign_inventory_sales_team'],
-        'assign-inventory-items.php'    => ['utilities', 'assign_inventory_items'],
+        'assign-inventory-to-sales-team.php' => ['employee_management', 'assign_inventory_sales_team'],
+        'assign-inventory.php'              => ['employee_management', 'assign_inventory'],
+        'unassign-inventory.php'            => ['employee_management', 'unassign_inventory'],
+        'assign-inventory-items.php'    => ['employee_management', 'assign_inventory_items'],
         'account-ledger.php'            => ['utilities', 'account_ledger'],
         'metal-to-amount.php'            => ['utilities', 'metal_to_amount'],
         'amount-to-metal.php'           => ['utilities', 'amount_to_metal'],
@@ -93,6 +95,7 @@ function auragold_nav_basename_permission_map()
         'chart-of-account.php'          => ['financial_statement', 'chart_of_account'],
         'tax-return.php'                => ['financial_statement', 'tax_return'],
         'sale-analysis.php'             => ['financial_statement', 'sale_analysis'],
+        'vendor-report.php'             => ['financial_statement', 'sale_analysis'],
         'purchase-financial-analysis.php' => ['financial_statement', 'purchase_financial_analysis'],
         'trial-balance-detailed-report.php' => ['financial_statement', 'trial_balance_detailed_report'],
         'transaction-report.php'        => ['report', 'transaction_report'],
@@ -204,8 +207,21 @@ function auragold_nav_show_php_href($href)
     if ($row === null) {
         return true;
     }
+    if (auragold_nav_can_view_page($pair[0], $row)) {
+        return true;
+    }
+    // Inventory assign pages moved Opening → Employee Management; honor legacy utilities grants.
+    $legacyUtil = [
+        'assign-inventory-to-sales-team.php' => 'assign_inventory_sales_team',
+        'assign-inventory.php' => 'assign_inventory',
+        'unassign-inventory.php' => 'unassign_inventory',
+        'assign-inventory-items.php' => 'assign_inventory_items',
+    ];
+    if (isset($legacyUtil[$bn]) && auragold_nav_can_page_keys('utilities', $legacyUtil[$bn])) {
+        return true;
+    }
 
-    return auragold_nav_can_view_page($pair[0], $row);
+    return false;
 }
 
 /**

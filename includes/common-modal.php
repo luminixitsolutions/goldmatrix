@@ -79,6 +79,44 @@ require_once __DIR__ . '/auragold_product_add_form_shared_data.php';
                 #productCreationModal .modal-body .card-box label { color: #1e293b !important; }
                 #productCreationModal .modal-body .form-group label { color: #1e293b !important; }
                 #productCreationModal .modal-body .tax-table-wrapper .sec-title { color: #1e293b !important; }
+                #productCreationModal .form-row-custom.form-row-4 {
+                    grid-template-columns: repeat(4, 1fr);
+                }
+                #productCreationModal .select-with-add-btn {
+                    display: flex;
+                    align-items: stretch;
+                    gap: 6px;
+                }
+                #productCreationModal .select-with-add-btn select.form-control {
+                    flex: 1;
+                    min-width: 0;
+                }
+                #productCreationModal .select-with-add-btn .po-field-add-btn {
+                    flex: 0 0 32px;
+                    width: 32px;
+                    min-width: 32px;
+                    height: 32px;
+                    padding: 0;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 6px;
+                    background: #fff;
+                    color: #11294b;
+                    line-height: 1;
+                    cursor: pointer;
+                }
+                #productCreationModal .select-with-add-btn .po-field-add-btn:hover {
+                    border-color: #11294b;
+                    background: #f8fafc;
+                }
+                #customerCreationModal.modal {
+                    z-index: 10900 !important;
+                }
+                body.modal-open:has(#productCreationModal.show):has(#customerCreationModal.show) .modal-backdrop:last-of-type {
+                    z-index: 10850 !important;
+                }
             </style>
             <div class="modal-header" style="background: #11294b; color: #fff; border: none; padding: 1rem 1.5rem;">
                 <h5 class="modal-title" id="productCreationModalLabel">Add Product</h5>
@@ -100,10 +138,28 @@ require_once __DIR__ . '/auragold_product_add_form_shared_data.php';
                                 </div>
                                 <p class="sec-title">Product Details</p>
                                 
-                                <div class="form-row-custom">
+                                <div class="form-row-custom form-row-4">
                                     <div class="form-group">
                                         <label>Name *</label>
                                         <input name="name" id="productName" class="form-control" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Vendor Name</label>
+                                        <div class="select-with-add-btn">
+                                            <select name="vendor_id" id="productVendor" class="form-control">
+                                                <option value="">Select Vendor</option>
+                                                <?php
+                                                if (!empty($vendors) && is_array($vendors)) {
+                                                    foreach ($vendors as $vendor) {
+                                                        echo '<option value="' . (int) $vendor['id'] . '">' . htmlspecialchars($vendor['name']) . '</option>';
+                                                    }
+                                                }
+                                                ?>
+                                            </select>
+                                            <button type="button" class="po-field-add-btn cm-add-vendor" title="Add Vendor" aria-label="Add Vendor">
+                                                <i class="feather icon-plus"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="form-group">
                                         <label>Article</label>
@@ -127,7 +183,7 @@ require_once __DIR__ . '/auragold_product_add_form_shared_data.php';
                                                 }
                                                 ?>
                                             </select>
-                                            <i class="feather icon-plus add-icon" title="Add Category"></i>
+                                            <i class="feather icon-plus add-icon add-product-category-icon" title="Add Category"></i>
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -1000,4 +1056,5 @@ body.modal-open:has(#scrapPaymentModal.show) .modal-backdrop {
     }
 })();
 </script>
+<script src="assets/js/product-creation-vendor.js?v=<?php echo @filemtime(__DIR__ . '/../assets/js/product-creation-vendor.js'); ?>"></script>
 <script src="js/customer-ledger-address.js"></script>

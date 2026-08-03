@@ -148,6 +148,7 @@ if (!function_exists('auragold_insert_pdc_clearance_ledger_row')) {
         $new_balance = $prev_balance + $debit - $credit;
 
         $marker = auragold_pdc_clearance_sync_marker();
+        // Keep marker first so remove-by-LIKE stays reliable; append human text for Account Ledger.
         $desc = $marker . '|cheque_entry=' . $cheque_entry_id;
         if ($desc_extra !== '') {
             $desc .= '|' . $desc_extra;
@@ -212,6 +213,9 @@ if (!function_exists('auragold_insert_pdc_clearance_ledger_row')) {
 
 if (!function_exists('auragold_sync_cheque_entry_clearance')) {
     /**
+     * When status = Cleared: debit/credit PDC ledger and post the matching bank ledger row
+     * so Account Ledger (e.g. BOI) shows the clearance.
+     *
      * @return array{ok:bool,message:string,clearance_no?:string}
      */
     function auragold_sync_cheque_entry_clearance($conn, int $branch_id, int $cheque_entry_id, int $user_id = 0): array
@@ -227,7 +231,8 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
             require_once __DIR__ . '/auragold_voucher_cheque_entry_sync.php';
         }
 
-        $entry = auragold_get_cheque_entry_by_id($conn, $cheque_entry_id, $branch_id);
+        // Load by id only — do not fail when session/settings branch differs from row.branch_id.
+        $entry = auragold_get_cheque_entry_by_id($conn, $cheque_entry_id, 0);
         if (!$entry) {
             return ['ok' => false, 'message' => 'Cheque entry not found.'];
         }
@@ -254,7 +259,14 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
             return ['ok' => false, 'message' => 'Account Ledger is required to clear this cheque.'];
         }
 
+        // Prefer the cheque row's branch so Account Ledger branch filter includes the bank line.
+        $post_branch_id = (int) ($entry['branch_id'] ?? 0);
+        if ($post_branch_id <= 0) {
+            $post_branch_id = $branch_id > 0 ? $branch_id : 0;
+        }
+
         $pdc_no = trim((string) ($entry['pdc_no'] ?? ''));
+        $cheque_no = trim((string) ($entry['cheque_no'] ?? ''));
         $direction = auragold_cheque_entry_clearance_direction((string) ($entry['pdc_voucher_type'] ?? ''));
         $pdc_ledger = auragold_pdc_system_ledger_name($direction);
 
@@ -267,6 +279,25 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
         } else {
             $ts = strtotime($clearance_date);
             $clearance_date = $ts ? date('Y-m-d', $ts) : date('Y-m-d');
+        }
+
+        // Persist cleared date when user left it blank (so list + ledger dates stay consistent).
+        $bcd_raw = trim((string) ($entry['bounced_cleared_date'] ?? ''));
+        if ($bcd_raw === '' || $bcd_raw === '0000-00-00') {
+            @mysqli_query(
+                $conn,
+                'UPDATE `tbl_cheque_entry` SET bounced_cleared_date = \''
+                . mysqli_real_escape_string($conn, $clearance_date)
+                . '\', updated_at = NOW() WHERE id = ' . (int) $cheque_entry_id
+            );
+        }
+
+        if (!function_exists('auragold_ensure_payment_mode_ledger')) {
+            require_once __DIR__ . '/auragold_ensure_payment_mode_ledger.php';
+        }
+        $ensured = auragold_ensure_payment_mode_ledger($conn, $bank_name, 'bank', $post_branch_id);
+        if (!empty($ensured['ok']) && trim((string) ($ensured['name'] ?? '')) !== '') {
+            $bank_name = trim((string) $ensured['name']);
         }
 
         auragold_remove_cheque_entry_clearance_ledger($conn, $cheque_entry_id);
@@ -288,6 +319,20 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
         $against_bank = auragold_pdc_clearance_against_bank_label($bank_name, $amount, $direction);
         $against_pdc_on_bank = auragold_pdc_clearance_against_pdc_ledger_label($pdc_ledger, $amount, $direction);
 
+        $label_bits = [];
+        if ($pdc_no !== '') {
+            $label_bits[] = $pdc_no;
+        }
+        if ($cheque_no !== '') {
+            $label_bits[] = 'Chq ' . $cheque_no;
+        }
+        if ($party !== '') {
+            $label_bits[] = $party;
+        }
+        $human = 'PDC Clearance ' . $clearance_no
+            . ($label_bits !== [] ? ' (' . implode(' / ', $label_bits) . ')' : '')
+            . ' — ' . $bank_name;
+
         $pdc_res = auragold_insert_pdc_clearance_ledger_row(
             $conn,
             $cheque_entry_id,
@@ -297,10 +342,10 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
             $pdc_debit,
             $pdc_credit,
             $against_bank,
-            $pdc_no,
-            $branch_id,
+            $pdc_no !== '' ? $pdc_no : $clearance_no,
+            $post_branch_id,
             $user_id,
-            'pdc_ledger'
+            'pdc_ledger|' . $human
         );
         if (empty($pdc_res['ok'])) {
             return $pdc_res;
@@ -315,10 +360,10 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
             $bank_debit,
             $bank_credit,
             $against_pdc_on_bank,
-            $pdc_no,
-            $branch_id,
+            $pdc_no !== '' ? $pdc_no : $clearance_no,
+            $post_branch_id,
             $user_id,
-            'bank_ledger'
+            'bank_ledger|' . $human
         );
         if (empty($bank_res['ok'])) {
             auragold_remove_cheque_entry_clearance_ledger($conn, $cheque_entry_id);
@@ -328,7 +373,7 @@ if (!function_exists('auragold_sync_cheque_entry_clearance')) {
 
         return [
             'ok' => true,
-            'message' => 'PDC clearance posted.',
+            'message' => 'PDC clearance posted to ' . $bank_name . '.',
             'clearance_no' => $clearance_no,
         ];
     }

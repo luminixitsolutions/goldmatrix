@@ -1646,6 +1646,7 @@ if (!empty($conn_master) && $aits_default_branch_id > 0) {
         var br = aitsBranchId();
         if (br <= 0) {
             alert('Select a branch before saving.');
+            btn.disabled = false;
             return;
         }
         fetch(aitsSaveAssignUrl(), {
@@ -1660,15 +1661,24 @@ if (!empty($conn_master) && $aits_default_branch_id > 0) {
             .then(function (j) {
                 if (!j || !j.success) {
                     alert((j && j.message) ? j.message : 'Save failed.');
+                    btn.disabled = false;
                     return;
                 }
                 var n = j.saved_count != null ? j.saved_count : assigned.length;
                 alert('Saved. ' + n + ' barcode(s) assigned to ' + sp + '.');
+                // Reload this page after save so grids reflect saved assignments.
+                var next = 'assign-inventory-to-sales-team.php';
+                try {
+                    var u = new URL(next, window.location.href);
+                    if (sp) u.searchParams.set('sales_person', sp);
+                    if (br > 0) u.searchParams.set('branch_id', String(br));
+                    window.location.href = u.pathname + u.search;
+                } catch (e) {
+                    window.location.href = next + (sp ? ('?sales_person=' + encodeURIComponent(sp)) : '');
+                }
             })
             .catch(function () {
                 alert('Could not save. Check your connection or login.');
-            })
-            .finally(function () {
                 btn.disabled = false;
             });
     });
@@ -1749,6 +1759,34 @@ if (!empty($conn_master) && $aits_default_branch_id > 0) {
     });
 
     updateCounts();
+
+    // After save reload: restore sale person from ?sales_person= and load their assignments.
+    (function aitsRestoreFromQuery() {
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            var spQ = String(params.get('sales_person') || '').trim();
+            if (!spQ) return;
+            var sel = document.getElementById('aitsSalesPerson');
+            if (!sel) return;
+            var found = false;
+            for (var i = 0; i < sel.options.length; i++) {
+                if (String(sel.options[i].value || '') === spQ) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                var opt = document.createElement('option');
+                opt.value = spQ;
+                opt.textContent = spQ;
+                sel.appendChild(opt);
+            }
+            sel.value = spQ;
+            loadAssignedForSalesPerson(spQ, function () {
+                loadPoolStockFromServer();
+            });
+        } catch (e) {}
+    })();
 })();
 </script>
 </body>

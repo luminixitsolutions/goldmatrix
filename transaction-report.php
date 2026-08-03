@@ -24,6 +24,225 @@ function transaction_report_branch_label(array $nameById, $branchId) {
     return $n !== '' ? $n : '—';
 }
 
+/** Normalize filter date to Y-m-d (accepts Y-m-d, d-m-Y, d/m/Y). */
+function transaction_report_normalize_date($raw): string {
+    $raw = trim((string) $raw);
+    if ($raw === '') {
+        return '';
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+        return $raw;
+    }
+    if (preg_match('/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/', $raw, $m)) {
+        return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
+    }
+    $ts = strtotime($raw);
+    return $ts ? date('Y-m-d', $ts) : '';
+}
+
+/** Sort key for newest-saved-first (prefer updated/created datetime, else document date). */
+function transaction_report_sort_ts($docDate = '', $savedAt = ''): string {
+    $savedAt = trim((string) $savedAt);
+    if ($savedAt !== '' && $savedAt !== '0000-00-00' && $savedAt !== '0000-00-00 00:00:00') {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $savedAt)) {
+            return $savedAt . ' 00:00:00';
+        }
+        return $savedAt;
+    }
+    $docDate = trim((string) $docDate);
+    if ($docDate !== '' && $docDate !== '0000-00-00') {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}/', $docDate, $m)) {
+            $d = substr($docDate, 0, 10);
+            return (strlen($docDate) > 10) ? $docDate : ($d . ' 00:00:00');
+        }
+        $ts = strtotime($docDate);
+        if ($ts) {
+            return date('Y-m-d H:i:s', $ts);
+        }
+    }
+    return '1970-01-01 00:00:00';
+}
+
+/**
+ * Fill sort_ts from each voucher table's updated_at/created_at so recently saved rows float to the top.
+ *
+ * @param list<array<string,mixed>> $rows
+ */
+function transaction_report_enrich_sort_timestamps(array &$rows, $conn): void {
+    if (!($conn instanceof mysqli) || $rows === []) {
+        return;
+    }
+    $typeTable = [
+        'purchase_invoice' => 'tbl_purchase_invoices',
+        'sale_invoice' => 'tbl_sale_invoices',
+        'sale_order' => 'tbl_sale_orders',
+        'jobwork_order' => 'tbl_jobwork_orders',
+        'sale_return' => 'tbl_sale_returns',
+        'purchase_return' => 'tbl_purchase_returns',
+        'sale_quotation' => 'tbl_sale_quotations',
+        'purchase_quotation' => 'tbl_purchase_quotations',
+        'material_issue' => 'tbl_material_issues',
+        'material_receive' => 'tbl_material_receives',
+        'sale_fixing_direct' => 'tbl_sale_fixing_direct',
+        'purchase_fixing_direct' => 'tbl_purchase_fixing_direct',
+        'old_jewelry_scrap_invoice' => 'tbl_old_jewelry_scrap_invoices',
+        'payment_voucher' => 'tbl_payment_vouchers',
+        'receipt_voucher' => 'tbl_receipt_vouchers',
+        'sale_receipt_voucher' => 'tbl_sale_receipt_vouchers',
+        'advance_payment' => 'tbl_advance_payments',
+        'contra_voucher' => 'tbl_contra_vouchers',
+        'journal_voucher' => 'tbl_journal_vouchers',
+        'metal_to_amount' => 'tbl_metal_amount_conversions',
+        'amount_to_metal' => 'tbl_metal_amount_conversions',
+        'credit_note' => 'tbl_credit_notes',
+        'debit_note' => 'tbl_debit_notes',
+        'repair_invoice' => 'tbl_repair_invoices',
+        'repair_order' => 'tbl_repair_orders',
+        'purchase_order' => 'tbl_purchase_orders',
+        'consignment_in' => 'tbl_consignment_in',
+        'consignment_out' => 'tbl_consignment_out',
+    ];
+
+    $byType = [];
+    foreach ($rows as $i => $t) {
+        $type = (string) ($t['type'] ?? '');
+        $id = (int) ($t['id'] ?? 0);
+        if ($type === '' || $id <= 0) {
+            continue;
+        }
+        $byType[$type][$id] = $i;
+    }
+
+    $hasCol = static function ($conn, string $table, string $col): bool {
+        if (function_exists('auragold_tbl_has_column')) {
+            return auragold_tbl_has_column($conn, $table, $col);
+        }
+        $c = @mysqli_query($conn, "SHOW COLUMNS FROM `" . str_replace('`', '``', $table) . "` LIKE '" . mysqli_real_escape_string($conn, $col) . "'");
+        $ok = $c && mysqli_num_rows($c) > 0;
+        if ($c) {
+            mysqli_free_result($c);
+        }
+        return $ok;
+    };
+
+    foreach ($byType as $type => $idToIdx) {
+        $table = $typeTable[$type] ?? '';
+        if ($table === '') {
+            continue;
+        }
+        $tcheck = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $table) . "'");
+        if (!$tcheck || mysqli_num_rows($tcheck) === 0) {
+            if ($tcheck) {
+                mysqli_free_result($tcheck);
+            }
+            continue;
+        }
+        mysqli_free_result($tcheck);
+
+        $hasCreated = $hasCol($conn, $table, 'created_at');
+        $hasUpdated = $hasCol($conn, $table, 'updated_at');
+        if (!$hasCreated && !$hasUpdated) {
+            continue;
+        }
+        if ($hasCreated && $hasUpdated) {
+            $tsSql = "COALESCE(NULLIF(updated_at, '0000-00-00 00:00:00'), NULLIF(created_at, '0000-00-00 00:00:00'), created_at) AS saved_at";
+        } elseif ($hasUpdated) {
+            $tsSql = "updated_at AS saved_at";
+        } else {
+            $tsSql = "created_at AS saved_at";
+        }
+
+        $ids = array_keys($idToIdx);
+        foreach (array_chunk($ids, 400) as $chunk) {
+            $in = implode(',', array_map('intval', $chunk));
+            if ($in === '') {
+                continue;
+            }
+            $rs = @mysqli_query($conn, "SELECT id, $tsSql FROM `$table` WHERE id IN ($in)");
+            if (!$rs) {
+                continue;
+            }
+            while ($row = mysqli_fetch_assoc($rs)) {
+                $id = (int) ($row['id'] ?? 0);
+                if ($id <= 0 || !isset($idToIdx[$id])) {
+                    continue;
+                }
+                $idx = $idToIdx[$id];
+                $rows[$idx]['created_at'] = (string) ($row['saved_at'] ?? '');
+                $rows[$idx]['sort_ts'] = transaction_report_sort_ts($rows[$idx]['date'] ?? '', $row['saved_at'] ?? '');
+            }
+            mysqli_free_result($rs);
+        }
+    }
+
+    foreach ($rows as $i => $t) {
+        if (empty($t['sort_ts'])) {
+            $rows[$i]['sort_ts'] = transaction_report_sort_ts($t['date'] ?? '', $t['created_at'] ?? '');
+        }
+    }
+}
+
+/**
+ * Map Advance Filter "Type of Voucher" keys → transaction list type keys.
+ *
+ * @return list<string>
+ */
+function transaction_report_voucher_filter_to_types(array $keys): array {
+    $map = [
+        'purchase_invoice' => ['purchase_invoice'],
+        'sale_invoice' => ['sale_invoice'],
+        'sale_order' => ['sale_order'],
+        'jobwork_order' => ['jobwork_order'],
+        'payment' => ['payment_voucher'],
+        'payment_voucher' => ['payment_voucher'],
+        'receipt' => ['receipt_voucher', 'sale_receipt_voucher'],
+        'receipt_voucher' => ['receipt_voucher'],
+        'sale_receipt_voucher' => ['sale_receipt_voucher'],
+        'advance' => ['advance_payment'],
+        'advance_payment' => ['advance_payment'],
+        'return' => ['sale_return', 'purchase_return'],
+        'sale_return' => ['sale_return'],
+        'purchase_return' => ['purchase_return'],
+        'sale_quotation' => ['sale_quotation'],
+        'purchase_quotation' => ['purchase_quotation'],
+        'material_issue' => ['material_issue'],
+        'material_receive' => ['material_receive'],
+        'sale_fixing_direct' => ['sale_fixing_direct'],
+        'purchase_fixing_direct' => ['purchase_fixing_direct'],
+        'old_jewelry_scrap_invoice' => ['old_jewelry_scrap_invoice'],
+        'metal_to_amount' => ['metal_to_amount'],
+        'amount_to_metal' => ['amount_to_metal'],
+        'contra_voucher' => ['contra_voucher'],
+        'contra' => ['contra_voucher'],
+        'journal_voucher' => ['journal_voucher'],
+        'journal' => ['journal_voucher'],
+        'credit_note' => ['credit_note'],
+        'debit_note' => ['debit_note'],
+        'repair_invoice' => ['repair_invoice'],
+        'repair_order' => ['repair_order'],
+        'purchase_order' => ['purchase_order'],
+        'consignment_in' => ['consignment_in'],
+        'consignment_out' => ['consignment_out'],
+        'investment_fund_installment' => ['investment_fund_installment'],
+        'investment_fund_transfer' => ['investment_fund_transfer'],
+    ];
+    $out = [];
+    foreach ($keys as $k) {
+        $k = trim((string) $k);
+        if ($k === '') {
+            continue;
+        }
+        if (isset($map[$k])) {
+            foreach ($map[$k] as $t) {
+                $out[] = $t;
+            }
+        } else {
+            $out[] = $k;
+        }
+    }
+    return array_values(array_unique($out));
+}
+
 // Get filters (multi-select via [] supported; legacy single values still work)
 $date_range = isset($_GET['date_range']) ? esc($_GET['date_range']) : '';
 
@@ -135,19 +354,16 @@ $to_date = '';
 if (!empty($date_range)) {
     $dates = explode(' - ', $date_range);
     if (count($dates) == 2) {
-        $from_date = trim($dates[0]);
-        $to_date = trim($dates[1]);
+        $from_date = transaction_report_normalize_date(trim($dates[0]));
+        $to_date = transaction_report_normalize_date(trim($dates[1]));
     }
 } else {
-    $from_date = isset($_GET['from_date']) ? esc($_GET['from_date']) : '';
-    $to_date = isset($_GET['to_date']) ? esc($_GET['to_date']) : '';
+    $from_date = transaction_report_normalize_date(isset($_GET['from_date']) ? (string) $_GET['from_date'] : '');
+    $to_date = transaction_report_normalize_date(isset($_GET['to_date']) ? (string) $_GET['to_date'] : '');
 }
 
-// Default to today when no date filter (show today's records first; when user applies date filter, show as per filter)
-if (empty($from_date) && empty($to_date) && empty($date_range)) {
-    $from_date = date('Y-m-d');
-    $to_date = date('Y-m-d');
-}
+// No default "today only" window — empty dates show all records (latest first).
+// Previously defaulting to today hid July vouchers and looked like a broken filter.
 
 $search_raw = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
 $search = $search_raw !== '' ? esc($search_raw) : '';
@@ -160,8 +376,67 @@ $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 25;
 $offset = ($page - 1) * $per_page;
 
-// Get branches
-$branches = getListMaster("SELECT id, name FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+// Get branches — only those present for this shop / assigned to the user (hide other registry shops)
+require_once __DIR__ . '/includes/branch_working_context.php';
+if (!function_exists('auragold_um_parse_branch_ids_string')) {
+    require_once __DIR__ . '/includes/user_management_schema.php';
+}
+$branches = getListMaster("SELECT id, name, main_branch_id FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+if (!is_array($branches)) {
+    $branches = [];
+}
+$tr_branch_list_scope_main = function_exists('auragold_branches_page_list_scope_main_id')
+    ? (int) auragold_branches_page_list_scope_main_id()
+    : 0;
+if ($tr_branch_list_scope_main > 0) {
+    $branches = array_values(array_filter($branches, static function ($b) use ($tr_branch_list_scope_main) {
+        $id = (int) ($b['id'] ?? 0);
+        $mb = (int) ($b['main_branch_id'] ?? 0);
+        return $id === $tr_branch_list_scope_main || $mb === $tr_branch_list_scope_main;
+    }));
+}
+$tr_assigned_branch_ids = [];
+if (!empty($_SESSION['Admin']) && is_array($_SESSION['Admin'])) {
+    foreach ($_SESSION['Admin'] as $_tr_uk => $_tr_uv) {
+        if (strcasecmp((string) $_tr_uk, 'user_branch_ids') === 0) {
+            $tr_assigned_branch_ids = auragold_um_parse_branch_ids_string((string) $_tr_uv);
+            break;
+        }
+    }
+}
+if ($tr_assigned_branch_ids !== []) {
+    $tr_assigned_allow = array_fill_keys($tr_assigned_branch_ids, true);
+    if ($tr_effective_branch_id > 0) {
+        $tr_assigned_allow[$tr_effective_branch_id] = true;
+    }
+    $branches = array_values(array_filter($branches, static function ($b) use ($tr_assigned_allow) {
+        return isset($tr_assigned_allow[(int) ($b['id'] ?? 0)]);
+    }));
+}
+if (function_exists('auragold_can_user_open_branch_row')) {
+    $branches = array_values(array_filter($branches, static function ($b) {
+        return auragold_can_user_open_branch_row($b);
+    }));
+}
+$tr_allowed_branch_ids = [];
+foreach ($branches as $_trbr) {
+    $bid = (int) ($_trbr['id'] ?? 0);
+    if ($bid > 0) {
+        $tr_allowed_branch_ids[$bid] = $bid;
+    }
+}
+if ($tr_allowed_branch_ids !== [] && !empty($tr_resolved_branch_ids)) {
+    $tr_resolved_branch_ids = array_values(array_filter(
+        array_map('intval', $tr_resolved_branch_ids),
+        static function ($id) use ($tr_allowed_branch_ids) {
+            return isset($tr_allowed_branch_ids[$id]);
+        }
+    ));
+    if ($tr_resolved_branch_ids === [] && $tr_effective_branch_id > 0 && isset($tr_allowed_branch_ids[$tr_effective_branch_id])) {
+        $tr_resolved_branch_ids = [$tr_effective_branch_id];
+    }
+}
+$tr_scope_includes_main_legacy = ($tr_main_branch_id > 0 && !empty($tr_resolved_branch_ids) && in_array($tr_main_branch_id, $tr_resolved_branch_ids, true));
 $tr_branch_name_by_id = [];
 foreach ($branches as $_trbr) {
     $tr_branch_name_by_id[(int) ($_trbr['id'] ?? 0)] = (string) ($_trbr['name'] ?? '');
@@ -182,14 +457,45 @@ $ledger_groups = [
     ['id' => 6, 'name' => 'Purchase'],
 ];
 
-// Voucher types (for ledger view)
+// Voucher types (Advance Filter — Type of Voucher / Against Voucher)
 $voucher_types = [
-    'purchase_invoice' => 'Purchase Invoice',
+    'sale_invoice' => 'Sale Invoice',
     'sale_order' => 'Sale Order',
+    'jobwork_order' => 'Job Work Order',
+    'purchase_invoice' => 'Purchase Invoice',
+    'sale_return' => 'Sale Return',
+    'purchase_return' => 'Purchase Return',
+    'sale_quotation' => 'Sale Quotation',
+    'purchase_quotation' => 'Purchase Quotation',
+    'material_issue' => 'Material Issue',
+    'material_receive' => 'Material Receive',
+    'sale_fixing_direct' => 'Sale Fixing Direct',
+    'purchase_fixing_direct' => 'Purchase Fixing Direct',
+    'old_jewelry_scrap_invoice' => 'Old Jewelry Scrap Invoice',
+    'payment_voucher' => 'Payment Voucher',
+    'receipt_voucher' => 'Receipt Voucher',
+    'sale_receipt_voucher' => 'Sale Receipt Voucher',
+    'advance_payment' => 'Advance Payment',
+    'metal_to_amount' => 'Metal to Amount',
+    'amount_to_metal' => 'Amount to Metal',
+    'contra_voucher' => 'Contra Voucher',
+    'journal_voucher' => 'Journal Voucher',
+    'credit_note' => 'Credit Note',
+    'debit_note' => 'Debit Note',
+    'repair_invoice' => 'Repair Invoice',
+    'repair_order' => 'Repair Order',
+    'purchase_order' => 'Purchase Order',
+    'consignment_in' => 'Consignment In',
+    'consignment_out' => 'Consignment Out',
+    'investment_fund_installment' => 'Investment Fund Installment',
+    'investment_fund_transfer' => 'Investment Fund Transfer',
+    // Legacy short keys (kept for old saved filter links)
     'payment' => 'Payment',
     'receipt' => 'Receipt',
     'advance' => 'Advance',
     'return' => 'Return',
+    'contra' => 'Contra Voucher',
+    'journal' => 'Journal Voucher',
 ];
 
 $filter_voucher_keys = [];
@@ -274,24 +580,16 @@ if (!empty($against_inv_no)) {
 if (!empty($search)) {
     $where_clause .= " AND (l.customer_name LIKE '%$search%' OR l.transaction_no LIKE '%$search%')";
 }
-if ($ledger_has_branch_id && !empty($tr_resolved_branch_ids)) {
-    $ids = implode(',', array_map('intval', $tr_resolved_branch_ids));
-    if ($tr_scope_includes_main_legacy) {
-        $where_clause .= " AND (l.branch_id IN ($ids) OR l.branch_id IS NULL OR l.branch_id = 0)";
-    } else {
-        $where_clause .= " AND l.branch_id IN ($ids)";
-    }
-}
-
-// Branch filter fragment for unified voucher queries (only when column exists on that table)
+// Branch filter fragment for unified voucher queries (only when column exists on that table).
+// Always include NULL/0 branch_id so legacy rows without branch still appear.
 $tr_branch_filter_sql = '';
 if (!empty($tr_resolved_branch_ids)) {
     $ids = implode(',', array_map('intval', $tr_resolved_branch_ids));
-    if ($tr_scope_includes_main_legacy) {
-        $tr_branch_filter_sql = " AND (branch_id IN ($ids) OR branch_id IS NULL OR branch_id = 0)";
-    } else {
-        $tr_branch_filter_sql = " AND branch_id IN ($ids)";
-    }
+    $tr_branch_filter_sql = " AND (branch_id IN ($ids) OR branch_id IS NULL OR branch_id = 0)";
+}
+if ($ledger_has_branch_id && !empty($tr_resolved_branch_ids)) {
+    $ids = implode(',', array_map('intval', $tr_resolved_branch_ids));
+    $where_clause .= " AND (l.branch_id IN ($ids) OR l.branch_id IS NULL OR l.branch_id = 0)";
 }
 
 // Transaction list types (for unified Transaction Report - like Jewelstep)
@@ -316,6 +614,15 @@ $transaction_list_types = [
     'advance_payment' => 'Advance Payment',
     'metal_to_amount' => 'Metal to Amount',
     'amount_to_metal' => 'Amount to Metal',
+    'credit_note' => 'Credit Note',
+    'debit_note' => 'Debit Note',
+    'repair_invoice' => 'Repair Invoice',
+    'repair_order' => 'Repair Order',
+    'purchase_order' => 'Purchase Order',
+    'consignment_in' => 'Consignment In',
+    'consignment_out' => 'Consignment Out',
+    'contra_voucher' => 'Contra Voucher',
+    'journal_voucher' => 'Journal Voucher',
 ];
 
 // Build unified transaction list (sale invoice, purchase invoice, sale return, purchase return, sale quotation, purchase quotation)
@@ -1023,6 +1330,176 @@ if ($pv_list_exists && ($transaction_voucher_filter === '' || $transaction_vouch
     }
 }
 
+// Journal Vouchers
+$jv_list_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_journal_vouchers'");
+$jv_list_exists = $jv_list_check && mysqli_num_rows($jv_list_check) > 0;
+if ($jv_list_check) {
+    mysqli_free_result($jv_list_check);
+}
+if ($jv_list_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'journal_voucher' || $transaction_voucher_filter === 'journal')) {
+    $jv_l_has_br = auragold_tbl_has_column($conn, 'tbl_journal_vouchers', 'branch_id');
+    $jv_l_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $jv_l_where .= " AND voucher_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $jv_l_where .= " AND voucher_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $jv_l_where .= " AND (
+            voucher_no LIKE '%$search%'
+            OR IFNULL(comment,'') LIKE '%$search%'
+            OR EXISTS (
+                SELECT 1 FROM tbl_journal_voucher_items jvi
+                WHERE jvi.voucher_id = tbl_journal_vouchers.id AND jvi.status = 1
+                AND jvi.account_ledger LIKE '%$search%'
+            )
+        )";
+    }
+    if ($jv_l_has_br && $tr_branch_filter_sql !== '') {
+        $jv_l_where .= $tr_branch_filter_sql;
+    }
+    $jv_l_sel = 'id, voucher_no, voucher_date, COALESCE(debit_total, credit_total, 0) AS total_amount, comment';
+    if ($jv_l_has_br) {
+        $jv_l_sel .= ', branch_id';
+    }
+    $jv_l_rows = getList("SELECT $jv_l_sel FROM tbl_journal_vouchers WHERE $jv_l_where ORDER BY voucher_date DESC, id DESC");
+    if (is_array($jv_l_rows)) {
+        foreach ($jv_l_rows as $r) {
+            $jv_id = (int) ($r['id'] ?? 0);
+            $accts = '';
+            $accts_detail = '';
+            if ($jv_id > 0) {
+                $acct_row = getRecord("SELECT GROUP_CONCAT(DISTINCT account_ledger ORDER BY id SEPARATOR ', ') AS accts FROM tbl_journal_voucher_items WHERE voucher_id = $jv_id AND status = 1");
+                $accts = trim((string) ($acct_row['accts'] ?? ''));
+                $det_row = getRecord("
+                    SELECT GROUP_CONCAT(
+                        CONCAT(account_ledger, ' ', cr_dr, ' ', FORMAT(COALESCE(amount,0), 2))
+                        ORDER BY id SEPARATOR ' | '
+                    ) AS det
+                    FROM tbl_journal_voucher_items
+                    WHERE voucher_id = $jv_id AND status = 1
+                ");
+                $accts_detail = trim((string) ($det_row['det'] ?? ''));
+            }
+            $cmt = trim((string) ($r['comment'] ?? ''));
+            $ex3 = $accts_detail !== '' ? $accts_detail : ($cmt !== '' ? $cmt : 'NA');
+            $all_transactions[] = [
+                'type' => 'journal_voucher',
+                'type_label' => 'JOURNAL VOUCHER',
+                'voucher_no' => $r['voucher_no'] ?? '',
+                'party_name' => $accts !== '' ? $accts : 'Journal',
+                'sales_person' => 'NA',
+                'date' => $r['voucher_date'] ?? '',
+                'amount' => (float) ($r['total_amount'] ?? 0),
+                'balance' => 0,
+                'id' => $jv_id,
+                'link' => 'journal-voucher.php?id=' . $jv_id,
+                'print_link' => 'journal-voucher.php?id=' . $jv_id,
+                'branch_name' => $jv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+                'voucher_ex_col3' => $ex3,
+            ];
+        }
+    }
+}
+
+// Contra Vouchers
+$cv_list_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_contra_vouchers'");
+$cv_list_exists = $cv_list_check && mysqli_num_rows($cv_list_check) > 0;
+if ($cv_list_check) {
+    mysqli_free_result($cv_list_check);
+}
+if ($cv_list_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'contra_voucher' || $transaction_voucher_filter === 'contra')) {
+    $cv_l_has_br = auragold_tbl_has_column($conn, 'tbl_contra_vouchers', 'branch_id');
+    $cv_items_has_status = auragold_tbl_has_column($conn, 'tbl_contra_voucher_items', 'status');
+    $cv_item_status_sql = $cv_items_has_status ? ' AND status = 1' : '';
+    $cv_l_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $cv_l_where .= " AND voucher_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $cv_l_where .= " AND voucher_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $cv_l_where .= " AND (
+            voucher_no LIKE '%$search%'
+            OR IFNULL(comment,'') LIKE '%$search%'
+            OR EXISTS (
+                SELECT 1 FROM tbl_contra_voucher_items cvi
+                WHERE cvi.voucher_id = tbl_contra_vouchers.id
+                " . ($cv_items_has_status ? ' AND cvi.status = 1' : '') . "
+                AND (cvi.bank_cash_ac LIKE '%$search%' OR IFNULL(cvi.ref_no,'') LIKE '%$search%')
+            )
+        )";
+    }
+    if ($cv_l_has_br && $tr_branch_filter_sql !== '') {
+        $cv_l_where .= $tr_branch_filter_sql;
+    }
+    $cv_l_sel = 'id, voucher_no, voucher_date, COALESCE(total_amount,0) AS total_amount, comment';
+    if ($cv_l_has_br) {
+        $cv_l_sel .= ', branch_id';
+    }
+    $cv_l_rows = getList("SELECT $cv_l_sel FROM tbl_contra_vouchers WHERE $cv_l_where ORDER BY voucher_date DESC, id DESC");
+    if (is_array($cv_l_rows)) {
+        foreach ($cv_l_rows as $r) {
+            $cv_id = (int) ($r['id'] ?? 0);
+            $accts = '';
+            $accts_detail = '';
+            $display_amt = (float) ($r['total_amount'] ?? 0);
+            if ($cv_id > 0) {
+                $acct_row = getRecord("
+                    SELECT GROUP_CONCAT(DISTINCT bank_cash_ac ORDER BY id SEPARATOR ', ') AS accts
+                    FROM tbl_contra_voucher_items
+                    WHERE voucher_id = $cv_id $cv_item_status_sql
+                ");
+                $accts = trim((string) ($acct_row['accts'] ?? ''));
+                $det_row = getRecord("
+                    SELECT
+                        GROUP_CONCAT(
+                            CONCAT(
+                                bank_cash_ac, ' ',
+                                CASE WHEN LOWER(transaction_type) = 'deposit' THEN 'Dr' ELSE 'Cr' END,
+                                ' ', FORMAT(COALESCE(amount,0), 2)
+                            )
+                            ORDER BY id SEPARATOR ' | '
+                        ) AS det,
+                        COALESCE(SUM(CASE WHEN LOWER(transaction_type) = 'deposit' THEN amount ELSE 0 END), 0) AS dr_sum,
+                        COALESCE(SUM(CASE WHEN LOWER(transaction_type) = 'withdrawal' THEN amount ELSE 0 END), 0) AS cr_sum
+                    FROM tbl_contra_voucher_items
+                    WHERE voucher_id = $cv_id $cv_item_status_sql
+                ");
+                $accts_detail = trim((string) ($det_row['det'] ?? ''));
+                $dr_sum = (float) ($det_row['dr_sum'] ?? 0);
+                $cr_sum = (float) ($det_row['cr_sum'] ?? 0);
+                // Show one-side transfer amount (not Dr+Cr combined)
+                if ($dr_sum > 0.00001 || $cr_sum > 0.00001) {
+                    $display_amt = max($dr_sum, $cr_sum);
+                } elseif ($display_amt > 0.00001 && $accts !== '' && substr_count($accts, ',') >= 1) {
+                    // Legacy rows stored both sides in total_amount
+                    $display_amt = round($display_amt / 2, 2);
+                }
+            }
+            $cmt = trim((string) ($r['comment'] ?? ''));
+            $ex3 = $accts_detail !== '' ? $accts_detail : ($cmt !== '' ? $cmt : 'NA');
+            $all_transactions[] = [
+                'type' => 'contra_voucher',
+                'type_label' => 'CONTRA VOUCHER',
+                'voucher_no' => $r['voucher_no'] ?? '',
+                'party_name' => $accts !== '' ? $accts : 'Contra',
+                'sales_person' => 'NA',
+                'date' => $r['voucher_date'] ?? '',
+                'amount' => $display_amt,
+                'balance' => 0,
+                'id' => $cv_id,
+                'link' => 'contra-voucher.php?id=' . $cv_id,
+                'print_link' => 'contra-voucher.php?id=' . $cv_id,
+                'branch_name' => $cv_l_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+                'voucher_ex_col3' => $ex3,
+            ];
+        }
+    }
+}
+
 // Receipt Vouchers
 $rv_list_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_receipt_vouchers'");
 $rv_list_exists = $rv_list_check && mysqli_num_rows($rv_list_check) > 0;
@@ -1252,12 +1729,447 @@ if ($mac_tr_exists && ($mac_dir_filter === '' || $mac_dir_filter === 'metal_to_a
     }
 }
 
-// Sort all by date desc, then id desc
-usort($all_transactions, function($a, $b) {
-    $da = strtotime($a['date'] ?? 0);
-    $db = strtotime($b['date'] ?? 0);
-    if ($da !== $db) return $db - $da;
-    return ($b['id'] ?? 0) - ($a['id'] ?? 0);
+// Credit Notes
+$cn_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_credit_notes'");
+$cn_tr_exists = $cn_tr_check && mysqli_num_rows($cn_tr_check) > 0;
+if ($cn_tr_check) {
+    mysqli_free_result($cn_tr_check);
+}
+if ($cn_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'credit_note')) {
+    $cn_has_br = auragold_tbl_has_column($conn, 'tbl_credit_notes', 'branch_id');
+    $cn_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $cn_where .= " AND credit_note_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $cn_where .= " AND credit_note_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $cn_where .= " AND (credit_note_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($cn_has_br && $tr_branch_filter_sql !== '') {
+        $cn_where .= $tr_branch_filter_sql;
+    }
+    $cn_sel = 'id, credit_note_no, customer_name, credit_note_date, COALESCE(grand_total,0) AS grand_total, COALESCE(balance_amt,0) AS balance_amt, sales_person';
+    if ($cn_has_br) {
+        $cn_sel .= ', branch_id';
+    }
+    $cn_rows = getList("SELECT $cn_sel FROM tbl_credit_notes WHERE $cn_where ORDER BY credit_note_date DESC, id DESC");
+    if (is_array($cn_rows)) {
+        foreach ($cn_rows as $r) {
+            $all_transactions[] = [
+                'type' => 'credit_note',
+                'type_label' => 'CREDIT NOTE',
+                'voucher_no' => $r['credit_note_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['credit_note_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => (float) ($r['balance_amt'] ?? 0),
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'credit-note.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'credit-note.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $cn_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            ];
+        }
+    }
+}
+
+// Debit Notes
+$dn_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_debit_notes'");
+$dn_tr_exists = $dn_tr_check && mysqli_num_rows($dn_tr_check) > 0;
+if ($dn_tr_check) {
+    mysqli_free_result($dn_tr_check);
+}
+if ($dn_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'debit_note')) {
+    $dn_has_br = auragold_tbl_has_column($conn, 'tbl_debit_notes', 'branch_id');
+    $dn_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $dn_where .= " AND debit_note_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $dn_where .= " AND debit_note_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $dn_where .= " AND (debit_note_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($dn_has_br && $tr_branch_filter_sql !== '') {
+        $dn_where .= $tr_branch_filter_sql;
+    }
+    $dn_sel = 'id, debit_note_no, customer_name, debit_note_date, COALESCE(grand_total,0) AS grand_total, COALESCE(balance_amt,0) AS balance_amt, sales_person';
+    if ($dn_has_br) {
+        $dn_sel .= ', branch_id';
+    }
+    $dn_rows = getList("SELECT $dn_sel FROM tbl_debit_notes WHERE $dn_where ORDER BY debit_note_date DESC, id DESC");
+    if (is_array($dn_rows)) {
+        foreach ($dn_rows as $r) {
+            $all_transactions[] = [
+                'type' => 'debit_note',
+                'type_label' => 'DEBIT NOTE',
+                'voucher_no' => $r['debit_note_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['debit_note_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => (float) ($r['balance_amt'] ?? 0),
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'debit-note.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'debit-note.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $dn_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            ];
+        }
+    }
+}
+
+// Repair Invoices
+$ri_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_repair_invoices'");
+$ri_tr_exists = $ri_tr_check && mysqli_num_rows($ri_tr_check) > 0;
+if ($ri_tr_check) {
+    mysqli_free_result($ri_tr_check);
+}
+if ($ri_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'repair_invoice')) {
+    $ri_has_br = auragold_tbl_has_column($conn, 'tbl_repair_invoices', 'branch_id');
+    $ri_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $ri_where .= " AND repair_invoice_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $ri_where .= " AND repair_invoice_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $ri_where .= " AND (repair_invoice_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($ri_has_br && $tr_branch_filter_sql !== '') {
+        $ri_where .= $tr_branch_filter_sql;
+    }
+    $ri_sel = 'id, repair_invoice_no, customer_name, repair_invoice_date, COALESCE(grand_total,0) AS grand_total, COALESCE(balance_amt,0) AS balance_amt, sales_person';
+    if ($ri_has_br) {
+        $ri_sel .= ', branch_id';
+    }
+    $ri_rows = getList("SELECT $ri_sel FROM tbl_repair_invoices WHERE $ri_where ORDER BY repair_invoice_date DESC, id DESC");
+    if (is_array($ri_rows)) {
+        foreach ($ri_rows as $r) {
+            $all_transactions[] = [
+                'type' => 'repair_invoice',
+                'type_label' => 'REPAIR INVOICE',
+                'voucher_no' => $r['repair_invoice_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['repair_invoice_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => (float) ($r['balance_amt'] ?? 0),
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'repair-invoice.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'repair-invoice.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $ri_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            ];
+        }
+    }
+}
+
+// Repair Orders
+$ro_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_repair_orders'");
+$ro_tr_exists = $ro_tr_check && mysqli_num_rows($ro_tr_check) > 0;
+if ($ro_tr_check) {
+    mysqli_free_result($ro_tr_check);
+}
+if ($ro_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'repair_order')) {
+    $ro_has_br = auragold_tbl_has_column($conn, 'tbl_repair_orders', 'branch_id');
+    $ro_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $ro_where .= " AND order_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $ro_where .= " AND order_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $ro_where .= " AND (order_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($ro_has_br && $tr_branch_filter_sql !== '') {
+        $ro_where .= $tr_branch_filter_sql;
+    }
+    $ro_sel = 'id, order_no, customer_name, order_date, COALESCE(grand_total,0) AS grand_total, COALESCE(balance_amt,0) AS balance_amt, sales_person';
+    if ($ro_has_br) {
+        $ro_sel .= ', branch_id';
+    }
+    $ro_rows = getList("SELECT $ro_sel FROM tbl_repair_orders WHERE $ro_where ORDER BY order_date DESC, id DESC");
+    if (is_array($ro_rows)) {
+        foreach ($ro_rows as $r) {
+            $all_transactions[] = [
+                'type' => 'repair_order',
+                'type_label' => 'REPAIR ORDER',
+                'voucher_no' => $r['order_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['order_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => (float) ($r['balance_amt'] ?? 0),
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'repair-order.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'repair-order.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $ro_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            ];
+        }
+    }
+}
+
+// Purchase Orders
+$po_tr_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_purchase_orders'");
+$po_tr_exists = $po_tr_check && mysqli_num_rows($po_tr_check) > 0;
+if ($po_tr_check) {
+    mysqli_free_result($po_tr_check);
+}
+if ($po_tr_exists && ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'purchase_order')) {
+    $po_has_br = auragold_tbl_has_column($conn, 'tbl_purchase_orders', 'branch_id');
+    $po_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $po_where .= " AND order_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $po_where .= " AND order_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $po_where .= " AND (order_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($po_has_br && $tr_branch_filter_sql !== '') {
+        $po_where .= $tr_branch_filter_sql;
+    }
+    $po_sel = 'id, order_no, customer_name, order_date, COALESCE(grand_total,0) AS grand_total, COALESCE(balance_amt,0) AS balance_amt, sales_person';
+    if ($po_has_br) {
+        $po_sel .= ', branch_id';
+    }
+    $po_rows = getList("SELECT $po_sel FROM tbl_purchase_orders WHERE $po_where ORDER BY order_date DESC, id DESC");
+    if (is_array($po_rows)) {
+        foreach ($po_rows as $r) {
+            $all_transactions[] = [
+                'type' => 'purchase_order',
+                'type_label' => 'PURCHASE ORDER',
+                'voucher_no' => $r['order_no'] ?? '',
+                'party_name' => $r['customer_name'] ?? '',
+                'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+                'date' => $r['order_date'] ?? '',
+                'amount' => (float) ($r['grand_total'] ?? 0),
+                'balance' => (float) ($r['balance_amt'] ?? 0),
+                'id' => (int) ($r['id'] ?? 0),
+                'link' => 'purchase-order.php?id=' . (int) ($r['id'] ?? 0),
+                'print_link' => 'purchase-order.php?id=' . (int) ($r['id'] ?? 0),
+                'branch_name' => $po_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            ];
+        }
+    }
+}
+
+// Consignment In / Out
+foreach (
+    [
+        ['tbl' => 'tbl_consignment_in', 'type' => 'consignment_in', 'label' => 'CONSIGNMENT IN', 'page' => 'consignment-in.php'],
+        ['tbl' => 'tbl_consignment_out', 'type' => 'consignment_out', 'label' => 'CONSIGNMENT OUT', 'page' => 'consignment-out.php'],
+    ] as $ciDef
+) {
+    $ci_tbl = $ciDef['tbl'];
+    $ci_type = $ciDef['type'];
+    $ci_check = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $ci_tbl) . "'");
+    $ci_exists = $ci_check && mysqli_num_rows($ci_check) > 0;
+    if ($ci_check) {
+        mysqli_free_result($ci_check);
+    }
+    if (!$ci_exists || !($transaction_voucher_filter === '' || $transaction_voucher_filter === $ci_type)) {
+        continue;
+    }
+    $ci_has_br = auragold_tbl_has_column($conn, $ci_tbl, 'branch_id');
+    $ci_where = "(status IS NULL OR LOWER(TRIM(COALESCE(status,''))) NOT IN ('deleted','cancelled'))";
+    if (!empty($from_date)) {
+        $ci_where .= " AND consignment_date >= '$from_date'";
+    }
+    if (!empty($to_date)) {
+        $ci_where .= " AND consignment_date <= '$to_date'";
+    }
+    if (!empty($search)) {
+        $ci_where .= " AND (consignment_no LIKE '%$search%' OR customer_name LIKE '%$search%' OR IFNULL(ref_no,'') LIKE '%$search%')";
+    }
+    if ($ci_has_br && $tr_branch_filter_sql !== '') {
+        $ci_where .= $tr_branch_filter_sql;
+    }
+    $ci_sel = 'id, consignment_no, customer_name, consignment_date, COALESCE(grand_total,0) AS grand_total, sales_person';
+    if ($ci_has_br) {
+        $ci_sel .= ', branch_id';
+    }
+    $ci_rows = getList("SELECT $ci_sel FROM `$ci_tbl` WHERE $ci_where ORDER BY consignment_date DESC, id DESC");
+    if (!is_array($ci_rows)) {
+        continue;
+    }
+    foreach ($ci_rows as $r) {
+        $all_transactions[] = [
+            'type' => $ci_type,
+            'type_label' => $ciDef['label'],
+            'voucher_no' => $r['consignment_no'] ?? '',
+            'party_name' => $r['customer_name'] ?? '',
+            'sales_person' => trim((string) ($r['sales_person'] ?? '')),
+            'date' => $r['consignment_date'] ?? '',
+            'amount' => (float) ($r['grand_total'] ?? 0),
+            'balance' => 0,
+            'id' => (int) ($r['id'] ?? 0),
+            'link' => $ciDef['page'] . '?id=' . (int) ($r['id'] ?? 0),
+            'print_link' => $ciDef['page'] . '?id=' . (int) ($r['id'] ?? 0),
+            'branch_name' => $ci_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+            'no_delete_from_report' => true,
+        ];
+    }
+}
+
+// Investment Fund Installments (from tbl_customer_ledger — posted on installment save)
+if ($transaction_voucher_filter === '' || $transaction_voucher_filter === 'investment_fund_installment') {
+    $ifi_ledger_check = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_customer_ledger'");
+    $ifi_ledger_exists = $ifi_ledger_check && mysqli_num_rows($ifi_ledger_check) > 0;
+    if ($ifi_ledger_check) {
+        mysqli_free_result($ifi_ledger_check);
+    }
+    if ($ifi_ledger_exists) {
+        $ifi_has_br = auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'branch_id');
+        $ifi_where = "l.status = 1 AND l.transaction_type = 'investment_fund_installment'
+            AND LOWER(TRIM(COALESCE(l.customer_name,''))) != 'layaways fund'
+            AND COALESCE(l.debit_amount, 0) > 0";
+        if (!empty($from_date)) {
+            $ifi_where .= " AND l.transaction_date >= '$from_date'";
+        }
+        if (!empty($to_date)) {
+            $ifi_where .= " AND l.transaction_date <= '$to_date'";
+        }
+        if (!empty($search)) {
+            $ifi_where .= " AND (l.transaction_no LIKE '%$search%' OR l.customer_name LIKE '%$search%' OR IFNULL(l.description,'') LIKE '%$search%' OR IFNULL(l.reference_no,'') LIKE '%$search%')";
+        }
+        if ($ifi_has_br && $tr_branch_filter_sql !== '') {
+            // $tr_branch_filter_sql uses bare branch_id; qualify for ledger alias
+            $ifi_where .= str_replace('branch_id', 'l.branch_id', $tr_branch_filter_sql);
+        }
+        $ifi_sel = 'l.id, l.transaction_no, l.customer_name, l.transaction_date, COALESCE(l.debit_amount,0) AS amount, l.description, l.reference_no, l.created_at';
+        if ($ifi_has_br) {
+            $ifi_sel .= ', l.branch_id';
+        }
+        $ifi_rows = getList("SELECT $ifi_sel FROM tbl_customer_ledger l WHERE $ifi_where ORDER BY l.transaction_date DESC, l.id DESC");
+        if (is_array($ifi_rows)) {
+            foreach ($ifi_rows as $r) {
+                $txnNo = trim((string) ($r['transaction_no'] ?? ''));
+                // transaction_no like IF-1-I3 → fund IF-1 for deep-link
+                $fundNo = $txnNo;
+                if (preg_match('/^(IF-\d+)-I\d+$/i', $txnNo, $mFund)) {
+                    $fundNo = $mFund[1];
+                }
+                $ex3 = trim((string) ($r['reference_no'] ?? ''));
+                if ($ex3 === '') {
+                    $ex3 = $fundNo !== '' ? $fundNo : 'NA';
+                }
+                $desc = trim((string) ($r['description'] ?? ''));
+                $all_transactions[] = [
+                    'type' => 'investment_fund_installment',
+                    'type_label' => 'INVESTMENT FUND INSTALLMENT',
+                    'voucher_no' => $txnNo,
+                    'party_name' => $r['customer_name'] ?? '',
+                    'sales_person' => '',
+                    'date' => $r['transaction_date'] ?? '',
+                    'amount' => (float) ($r['amount'] ?? 0),
+                    'balance' => 0,
+                    'id' => (int) ($r['id'] ?? 0),
+                    'link' => 'investment-fund.php?fund_no=' . rawurlencode($fundNo),
+                    'print_link' => 'investment-fund.php?fund_no=' . rawurlencode($fundNo),
+                    'branch_name' => $ifi_has_br ? transaction_report_branch_label($tr_branch_name_by_id, $r['branch_id'] ?? 0) : '—',
+                    'voucher_ex_col3' => $ex3,
+                    'created_at' => $r['created_at'] ?? '',
+                    'no_delete_from_report' => true,
+                    'party_email' => '',
+                    'description_hint' => $desc,
+                ];
+            }
+        }
+    }
+}
+
+// Apply Advance Filter criteria that are not (fully) pushed into every voucher SQL.
+if ($invoice_no_raw !== '') {
+    $invNeedle = mb_strtolower($invoice_no_raw);
+    $all_transactions = array_values(array_filter($all_transactions, static function ($t) use ($invNeedle) {
+        $hay = mb_strtolower(
+            trim((string) ($t['voucher_no'] ?? '')) . ' '
+            . trim((string) ($t['voucher_ex_col3'] ?? '')) . ' '
+            . trim((string) ($t['against_pi'] ?? '')) . ' '
+            . trim((string) ($t['against_si'] ?? ''))
+        );
+        return $invNeedle === '' || strpos($hay, $invNeedle) !== false;
+    }));
+}
+if (!empty($ledger_names_sel)) {
+    $ledgerSet = [];
+    foreach ($ledger_names_sel as $ln) {
+        $ledgerSet[mb_strtolower(trim((string) $ln))] = true;
+    }
+    $all_transactions = array_values(array_filter($all_transactions, static function ($t) use ($ledgerSet) {
+        $pn = mb_strtolower(trim((string) ($t['party_name'] ?? '')));
+        if ($pn === '') {
+            return false;
+        }
+        // Exact match (sale/purchase party name)
+        if (isset($ledgerSet[$pn])) {
+            return true;
+        }
+        // Contra / Journal may list multiple accounts: "Cash, BOI"
+        foreach ($ledgerSet as $ln => $_) {
+            if ($ln === '') {
+                continue;
+            }
+            if ($pn === $ln || strpos($pn, $ln) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }));
+}
+if ($against_inv_no_raw !== '') {
+    $agNeedle = mb_strtolower($against_inv_no_raw);
+    $all_transactions = array_values(array_filter($all_transactions, static function ($t) use ($agNeedle) {
+        $hay = mb_strtolower(
+            trim((string) ($t['voucher_ex_col3'] ?? '')) . ' '
+            . trim((string) ($t['against_pi'] ?? '')) . ' '
+            . trim((string) ($t['against_si'] ?? '')) . ' '
+            . trim((string) ($t['against_of'] ?? ''))
+        );
+        return strpos($hay, $agNeedle) !== false;
+    }));
+}
+if (!empty($filter_voucher_keys) && $transaction_voucher_filter === '') {
+    $allowedTypes = transaction_report_voucher_filter_to_types($filter_voucher_keys);
+    if ($allowedTypes !== []) {
+        $typeSet = array_fill_keys($allowedTypes, true);
+        $all_transactions = array_values(array_filter($all_transactions, static function ($t) use ($typeSet) {
+            return isset($typeSet[(string) ($t['type'] ?? '')]);
+        }));
+    }
+}
+if ($only_balance) {
+    $all_transactions = array_values(array_filter($all_transactions, static function ($t) {
+        return abs((float) ($t['balance'] ?? 0)) > 0.00001;
+    }));
+}
+
+// Newest saved/updated records first (across every voucher module)
+if (isset($conn) && $conn instanceof mysqli) {
+    transaction_report_enrich_sort_timestamps($all_transactions, $conn);
+} else {
+    foreach ($all_transactions as $i => $t) {
+        $all_transactions[$i]['sort_ts'] = transaction_report_sort_ts($t['date'] ?? '', $t['created_at'] ?? '');
+    }
+}
+usort($all_transactions, static function ($a, $b) {
+    $sa = (string) ($a['sort_ts'] ?? '');
+    $sb = (string) ($b['sort_ts'] ?? '');
+    if ($sa !== $sb) {
+        return strcmp($sb, $sa);
+    }
+    $da = trim((string) ($a['date'] ?? ''));
+    $db = trim((string) ($b['date'] ?? ''));
+    if ($da !== $db) {
+        return strcmp($db, $da);
+    }
+    return ((int) ($b['id'] ?? 0)) - ((int) ($a['id'] ?? 0));
 });
 
 // Reorder: show Sale Fixing Direct immediately above its linked Purchase Invoice (e.g. SF-1 "Fixing of PI-6" on top of PI-6)
@@ -1561,12 +2473,16 @@ if ($active_tab == 'balance') {
                     WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
                     WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
+                    WHEN l.transaction_type = 'contra_voucher' THEN 'Contra Voucher'
+                    WHEN l.transaction_type = 'journal_voucher' THEN 'Journal Voucher'
                     WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
                     WHEN l.transaction_type = 'advance' THEN 'Advance'
                     WHEN l.transaction_type = 'return' THEN 'Return'
                     WHEN l.transaction_type = 'opening' THEN 'OPENING'
                     WHEN l.transaction_type = 'old_jewelry_scrap_invoice' THEN 'Old Jewelry - Scrap Invoice'
                     WHEN l.transaction_type = 'old_jewelry_scrap_contra' THEN 'Old Jewelry - Scrap Invoice'
+                    WHEN l.transaction_type = 'investment_fund_installment' THEN 'Investment Fund Installment'
+                    WHEN l.transaction_type = 'investment_fund_transfer' THEN 'Investment Fund Transfer'
                     ELSE l.transaction_type
                 END as type_of_voucher,
                 l.debit_amount,
@@ -1607,7 +2523,24 @@ if ($active_tab == 'balance') {
                     WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                     WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
                     WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
+                    WHEN l.transaction_type = 'contra_voucher' THEN 'Contra Voucher'
+                    WHEN l.transaction_type = 'journal_voucher' THEN 'Journal Voucher'
                     WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
+                    WHEN l.transaction_type = 'advance' THEN 'Advance'
+                    WHEN l.transaction_type = 'return' THEN 'Return'
+                    WHEN l.transaction_type = 'opening' THEN 'OPENING'
+                    WHEN l.transaction_type = 'old_jewelry_scrap_invoice' THEN 'Old Jewelry - Scrap Invoice'
+                    WHEN l.transaction_type = 'old_jewelry_scrap_contra' THEN 'Old Jewelry - Scrap Invoice'
+                    WHEN l.transaction_type = 'investment_fund_installment' THEN 'Investment Fund Installment'
+                    WHEN l.transaction_type = 'investment_fund_transfer' THEN 'Investment Fund Transfer'
+                    ELSE l.transaction_type
+                END as type_of_voucher,
+                l.debit_amount,
+                l.credit_amount,
+                l.balance_amount as cl_amount,
+                l.debit_gold as gold_debit_wt,
+                l.credit_gold as gold_credit_wt,
+                l.balance_gold as gold_cl_wt,
                 CASE 
                     WHEN l.customer_id > 0 THEN 'Customer'
                     ELSE 'Account'
@@ -2443,6 +3376,10 @@ html, body {
 .voucher-advance_payment { background: #9d174d; }
 .voucher-metal_to_amount { background: #0f3d5c; }
 .voucher-amount_to_metal { background: #155e75; }
+.voucher-investment_fund_installment { background: #b45309; }
+.voucher-investment_fund_transfer { background: #92400e; }
+.voucher-journal_voucher { background: #4338ca; }
+.voucher-contra_voucher { background: #0f766e; }
 
 .invoice-label {
     display: block;
@@ -3005,7 +3942,8 @@ button.action-icon {
             $filter_count = 0;
             if (!empty($date_range) || !empty($from_date) || !empty($to_date)) $filter_count++;
             if (!empty($invoice_no)) $filter_count++;
-            if (!empty($tr_resolved_branch_ids)) $filter_count++;
+            // Count branch only when user explicitly chose it in Advance Filter
+            if (!empty($branch_ids)) $filter_count++;
             if (!empty($bill_to_bill)) $filter_count++;
             if (!empty($ledger_names_sel)) $filter_count++;
             if (!empty($group_ids)) $filter_count++;

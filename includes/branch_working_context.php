@@ -325,3 +325,130 @@ if (!function_exists('auragold_resolve_logout_branch_entry_id')) {
         return auragold_registry_main_branch_id_for_logout_entry($raw);
     }
 }
+
+/**
+ * Short initials for branch avatar chips in the profile dropdown.
+ */
+if (!function_exists('auragold_branch_name_initials')) {
+    function auragold_branch_name_initials(string $name): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return '?';
+        }
+        if (preg_match('/^([A-Za-z]+)\s*(\d+)$/u', $name, $m)) {
+            return strtoupper(mb_substr($m[1], 0, 1) . $m[2]);
+        }
+        $parts = preg_split('/\s+/u', $name) ?: [];
+        if (count($parts) >= 2) {
+            return strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
+        }
+        return strtoupper(mb_substr($name, 0, min(2, mb_strlen($name))));
+    }
+}
+
+/**
+ * Flat list of switchable branches for the header profile dropdown (scoped like Branches page).
+ *
+ * @return list<array{id:int,name:string,initials:string,is_main:bool,is_current:bool}>
+ */
+if (!function_exists('auragold_profile_dropdown_switchable_branches')) {
+    function auragold_profile_dropdown_switchable_branches(): array
+    {
+        if (!function_exists('getListMaster')) {
+            return [];
+        }
+        $listScopeMain = function_exists('auragold_branches_page_list_scope_main_id')
+            ? (int) auragold_branches_page_list_scope_main_id()
+            : 0;
+        $hiddenUserSql = "LOWER(TRIM(IFNULL(username,''))) <> 'superbranch'";
+        $cols = 'id, name, status, main_branch_id';
+
+        if ($listScopeMain > 0) {
+            $mains = getListMaster(
+                'SELECT ' . $cols . ' FROM tbl_branches WHERE main_branch_id = 0 AND id = ' . (int) $listScopeMain
+                . ' ORDER BY id ASC'
+            );
+            $subs = getListMaster(
+                'SELECT ' . $cols . ' FROM tbl_branches WHERE main_branch_id = ' . (int) $listScopeMain
+                . ' AND ' . $hiddenUserSql . ' ORDER BY id ASC'
+            );
+        } else {
+            $mains = getListMaster(
+                'SELECT ' . $cols . ' FROM tbl_branches WHERE main_branch_id = 0 AND ' . $hiddenUserSql
+                . ' ORDER BY id ASC'
+            );
+            $subs = getListMaster(
+                'SELECT ' . $cols . ' FROM tbl_branches b WHERE b.main_branch_id > 0 AND ' . $hiddenUserSql
+                . ' AND EXISTS (SELECT 1 FROM tbl_branches m WHERE m.id = b.main_branch_id AND IFNULL(m.main_branch_id, 0) = 0)'
+                . ' ORDER BY b.main_branch_id ASC, b.id ASC'
+            );
+        }
+        if (!is_array($mains)) {
+            $mains = [];
+        }
+        if (!is_array($subs)) {
+            $subs = [];
+        }
+
+        $subsByMain = [];
+        foreach ($subs as $s) {
+            if (!is_array($s)) {
+                continue;
+            }
+            $mid = (int) ($s['main_branch_id'] ?? 0);
+            if ($mid <= 0) {
+                continue;
+            }
+            if (!isset($subsByMain[$mid])) {
+                $subsByMain[$mid] = [];
+            }
+            $subsByMain[$mid][] = $s;
+        }
+
+        $currentId = (int) ($_SESSION['working_branch_id'] ?? 0);
+        if ($currentId <= 0) {
+            $currentId = (int) ($_SESSION['branch_id'] ?? 0);
+        }
+
+        $out = [];
+        $push = static function (array $row, bool $isMain) use (&$out, $currentId): void {
+            if ((int) ($row['status'] ?? 0) !== 1) {
+                return;
+            }
+            if (function_exists('auragold_can_user_open_branch_row') && !auragold_can_user_open_branch_row($row)) {
+                return;
+            }
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0) {
+                return;
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                $name = 'Branch #' . $id;
+            }
+            $out[] = [
+                'id'         => $id,
+                'name'       => $name,
+                'initials'   => auragold_branch_name_initials($name),
+                'is_main'    => $isMain,
+                'is_current' => $id === $currentId,
+            ];
+        };
+
+        foreach ($mains as $main) {
+            if (!is_array($main)) {
+                continue;
+            }
+            $push($main, true);
+            $mid = (int) ($main['id'] ?? 0);
+            foreach ($subsByMain[$mid] ?? [] as $sub) {
+                if (is_array($sub)) {
+                    $push($sub, false);
+                }
+            }
+        }
+
+        return $out;
+    }
+}

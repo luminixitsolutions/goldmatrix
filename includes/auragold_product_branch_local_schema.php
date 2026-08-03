@@ -39,6 +39,37 @@ if (!function_exists('auragold_ensure_product_branch_local_schema')) {
             mysqli_free_result($c);
         }
 
+        auragold_ensure_product_vendor_id_column($conn);
+
+        $done[$key] = true;
+        return true;
+    }
+}
+
+if (!function_exists('auragold_ensure_product_vendor_id_column')) {
+    function auragold_ensure_product_vendor_id_column(mysqli $conn) {
+        static $done = [];
+        $key = spl_object_hash($conn);
+        if (!empty($done[$key])) {
+            return true;
+        }
+        $t = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_products'");
+        if (!$t || mysqli_num_rows($t) === 0) {
+            if ($t) {
+                mysqli_free_result($t);
+            }
+            $done[$key] = true;
+            return true;
+        }
+        mysqli_free_result($t);
+        $c = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_products LIKE 'vendor_id'");
+        if ($c && mysqli_num_rows($c) === 0) {
+            mysqli_free_result($c);
+            @mysqli_query($conn, 'ALTER TABLE tbl_products ADD COLUMN vendor_id INT NULL DEFAULT NULL AFTER article');
+            @mysqli_query($conn, 'ALTER TABLE tbl_products ADD KEY idx_product_vendor_id (vendor_id)');
+        } elseif ($c) {
+            mysqli_free_result($c);
+        }
         $done[$key] = true;
         return true;
     }

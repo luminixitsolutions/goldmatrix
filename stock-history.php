@@ -2287,8 +2287,8 @@ html, body{
                                                 <div class="panel-footer-info">
                                                     Showing <?= $outward_offset + 1 ?> to <?= min($outward_offset + $outward_per_page, $outward_total) ?> of <?= $outward_total ?> entries
                                                 </div>
-                                                <div class="panel-footer-total" title="Total net amount">
-                                                    <?= number_format($outward_totals['total_net_amt'] ?: 0, 2) ?>
+                                                <div class="panel-footer-total" title="Total gross weight">
+                                                    <?= number_format($outward_totals['total_gross_wt'] ?: 0, 3) ?>
                                                 </div>
                                                 <div class="pagination-controls">
                                                     <select class="show-all-dropdown" id="outwardPerPageSelect">

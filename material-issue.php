@@ -3840,7 +3840,7 @@ require __DIR__ . '/includes/voucher_diamond_stone_assets.php';
 .select2-dropdown.jwo-dept-user-select2-dropdown { z-index: 50 !important; }
 </style>
 
-<script src="assets/js/product-modal-add-item-common.js"></script>
+<script src="assets/js/product-modal-add-item-common.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-add-item-common.js'); ?>"></script>
 <script>window.AURAGOLD_ADD_ITEM_ALWAYS_ENABLED = true;</script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
@@ -8465,6 +8465,14 @@ window.PB_PAGE_CONFIG = {
     
     // Update a merged Product List row from current modal rows (re-merge and save)
     function updateMergedRowFromModalRows(rowId, modalRowsData) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function') {
+            var _qFn = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(rowId, modalRowsData, _qFn ? { quantityFromLine: _qFn } : {});
+            return;
+        }
         const row = document.getElementById(rowId);
         if (!row || !modalRowsData || modalRowsData.length === 0) return;
         var productNames = modalRowsData.map(function(d) { return (d.product_name || '').trim(); }).filter(Boolean);
@@ -8569,6 +8577,15 @@ window.PB_PAGE_CONFIG = {
     
     // Update Product List table row with data from Product Selection modal row
     function updateProductListRowFromModalRow(productListRowId, modalRow) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function' && typeof getModalRowDataFromRow === 'function' && modalRow) {
+            var _d = getModalRowDataFromRow(modalRow, true);
+            var _qFn2 = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn2 = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn2 = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn2 = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(productListRowId, [_d], _qFn2 ? { quantityFromLine: _qFn2 } : {});
+            return;
+        }
         const productListRow = document.getElementById(productListRowId);
         if (!productListRow || !modalRow) {
             console.error('Row not found');

@@ -152,28 +152,84 @@ if (!function_exists('auragold_carat_purity_for_sql_filter')) {
 if (!function_exists('auragold_get_carat_list')) {
     /**
      * @param string $context sales|purchase|common|all — sets resolved `purity` for dropdowns
+     * @param int $branchId optional branch scope (same as voucher metal tabs); 0 = session/default suffix
      */
-    function auragold_get_carat_list($conn, string $context = 'all'): array
+    function auragold_get_carat_list($conn, string $context = 'all', int $branchId = 0): array
     {
         if (!$conn instanceof mysqli || !function_exists('getList')) {
             return [];
         }
         auragold_ensure_tbl_carat_purity_split($conn);
-        $suffix = function_exists('auragold_master_list_sql_suffix')
-            ? auragold_master_list_sql_suffix($conn, 'tbl_carat')
-            : '';
         $has_metal = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
+        $branchCol = $has_metal ? 'c.branch_id' : 'branch_id';
+        $suffix = '';
+        if ($branchId > 0 && function_exists('auragold_master_list_sql_for_branch_id')) {
+            $suffix = auragold_master_list_sql_for_branch_id($conn, 'tbl_carat', $branchId, $branchCol);
+        }
+        if ($suffix === '' && function_exists('auragold_settings_main_branch_id')) {
+            $mainBranch = (int) auragold_settings_main_branch_id();
+            if ($mainBranch > 0 && function_exists('auragold_master_list_sql_for_branch_id')) {
+                $suffix = auragold_master_list_sql_for_branch_id($conn, 'tbl_carat', $mainBranch, $branchCol);
+            }
+        }
+        if ($suffix === '' && function_exists('auragold_master_list_sql_suffix')) {
+            $suffix = auragold_master_list_sql_suffix($conn, 'tbl_carat', $branchCol);
+        }
         $has_split = auragold_carat_has_split_purity($conn);
-        $extra = $has_split ? ', purity_sales, purity_purchase, purity_common' : '';
+        $extraSplit = $has_split ? ', purity_sales, purity_purchase, purity_common' : '';
+        $extraSplitAliased = $has_split ? ', c.purity_sales, c.purity_purchase, c.purity_common' : '';
         if ($has_metal) {
-            $sql = 'SELECT id, name, purity, description, metal_id' . $extra
-                . ' FROM tbl_carat WHERE status = 1 ' . $suffix
-                . ' ORDER BY metal_id IS NULL, metal_id ASC, id ASC';
+            $sql = 'SELECT c.id, c.name, c.purity, c.description, c.metal_id, m.display_name AS metal_name' . $extraSplitAliased
+                . ' FROM tbl_carat c'
+                . ' LEFT JOIN tbl_metal m ON m.id = c.metal_id AND m.status = 1'
+                . ' WHERE c.status = 1 ' . $suffix
+                . ' ORDER BY c.metal_id IS NULL, c.metal_id ASC, c.id ASC';
         } else {
-            $sql = 'SELECT id, name, purity, description' . $extra
+            $sql = 'SELECT id, name, purity, description' . $extraSplit
                 . ' FROM tbl_carat WHERE status = 1 ' . $suffix . ' ORDER BY id ASC';
         }
         $list = getList($sql);
+        if (!is_array($list)) {
+            $list = [];
+        }
+        if ($list === [] && $suffix !== '' && $branchId > 0) {
+            $fallbackSuffix = '';
+            if (function_exists('auragold_master_list_sql_suffix')) {
+                $fallbackSuffix = auragold_master_list_sql_suffix($conn, 'tbl_carat', $branchCol);
+            }
+            if ($fallbackSuffix !== $suffix) {
+                if ($has_metal) {
+                    $sqlFb = 'SELECT c.id, c.name, c.purity, c.description, c.metal_id, m.display_name AS metal_name' . $extraSplitAliased
+                        . ' FROM tbl_carat c'
+                        . ' LEFT JOIN tbl_metal m ON m.id = c.metal_id AND m.status = 1'
+                        . ' WHERE c.status = 1 ' . $fallbackSuffix
+                        . ' ORDER BY c.metal_id IS NULL, c.metal_id ASC, c.id ASC';
+                } else {
+                    $sqlFb = 'SELECT id, name, purity, description' . $extraSplit
+                        . ' FROM tbl_carat WHERE status = 1 ' . $fallbackSuffix . ' ORDER BY id ASC';
+                }
+                $listFb = getList($sqlFb);
+                if (is_array($listFb) && $listFb !== []) {
+                    $list = $listFb;
+                }
+            }
+            if ($list === []) {
+                if ($has_metal) {
+                    $sqlAll = 'SELECT c.id, c.name, c.purity, c.description, c.metal_id, m.display_name AS metal_name' . $extraSplitAliased
+                        . ' FROM tbl_carat c'
+                        . ' LEFT JOIN tbl_metal m ON m.id = c.metal_id AND m.status = 1'
+                        . ' WHERE c.status = 1'
+                        . ' ORDER BY c.metal_id IS NULL, c.metal_id ASC, c.id ASC';
+                } else {
+                    $sqlAll = 'SELECT id, name, purity, description' . $extraSplit
+                        . ' FROM tbl_carat WHERE status = 1 ORDER BY id ASC';
+                }
+                $listAll = getList($sqlAll);
+                if (is_array($listAll)) {
+                    $list = $listAll;
+                }
+            }
+        }
         if (!is_array($list)) {
             return [];
         }
@@ -181,6 +237,15 @@ if (!function_exists('auragold_get_carat_list')) {
         foreach ($list as $i => $row) {
             if (!is_array($row)) {
                 continue;
+            }
+            if ($has_metal && (!isset($row['metal_name']) || $row['metal_name'] === null || $row['metal_name'] === '')) {
+                $mid = isset($row['metal_id']) ? (int) $row['metal_id'] : 0;
+                if ($mid > 0 && function_exists('getRecord')) {
+                    $mr = @getRecord('SELECT display_name FROM tbl_metal WHERE id = ' . $mid . ' AND status = 1 LIMIT 1');
+                    if (is_array($mr)) {
+                        $row['metal_name'] = trim((string) ($mr['display_name'] ?? ''));
+                    }
+                }
             }
             $list[$i] = auragold_carat_apply_context_purity($row, $ctx);
         }

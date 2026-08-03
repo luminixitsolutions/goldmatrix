@@ -9,6 +9,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
 $show_branches_menu = !empty($_SESSION['Admin']);
 $region_sub_pages = ['master-country.php', 'master-state.php', 'master-city.php'];
 $region_nav_open = in_array($current_page, $region_sub_pages, true);
+$masters_sub_pages = ['masters.php', 'metal-rates-url.php'];
+$masters_nav_open = in_array($current_page, $masters_sub_pages, true);
 $ewaybill_sub_pages = ['ewaybill-api-settings.php', 'ewaybill-authentication.php'];
 $ewaybill_nav_open = in_array($current_page, $ewaybill_sub_pages, true);
 $auragold_set_ss_title = function_exists('auragold_t')
@@ -67,10 +69,16 @@ $auragold_ss_menu_close = function_exists('auragold_t')
         <i class="feather icon-chevron-right"></i>
     </a>
    
-    <a href="masters.php" class="set-software-nav-item<?php echo ($current_page === 'masters.php') ? ' active' : ''; ?>">
-        <span><i class="feather icon-grid"></i> <?php echo $auragold_t_ss('set_software.masters'); ?></span>
-        <i class="feather icon-chevron-right"></i>
-    </a>
+    <details class="set-software-nav-group"<?php echo $masters_nav_open ? ' open' : ''; ?>>
+        <summary class="set-software-nav-summary">
+            <span><i class="feather icon-grid"></i> <?php echo $auragold_t_ss('set_software.masters'); ?></span>
+            <i class="feather icon-chevron-down set-software-nav-summary-chevron"></i>
+        </summary>
+        <div class="set-software-nav-sub">
+            <a href="masters.php" class="set-software-nav-sub-item<?php echo ($current_page === 'masters.php') ? ' active' : ''; ?>"><?php echo $auragold_t_ss('set_software.masters'); ?></a>
+            <a href="metal-rates-url.php" class="set-software-nav-sub-item<?php echo ($current_page === 'metal-rates-url.php') ? ' active' : ''; ?>">Metal Rates Url</a>
+        </div>
+    </details>
     <details class="set-software-nav-group"<?php echo $region_nav_open ? ' open' : ''; ?>>
         <summary class="set-software-nav-summary">
             <span><i class="feather icon-map-pin"></i> <?php echo $auragold_t_ss('set_software.region'); ?></span>

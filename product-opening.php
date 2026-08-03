@@ -62,6 +62,75 @@ function opening_barcode_prefix_value($metal_display_name, $char_data) {
 // Load Categories from database
 $categories = getList("SELECT id, name FROM tbl_categories WHERE status = 1 ORDER BY name ASC");
 
+// Vendors (suppliers from ledger / tbl_customers)
+$vendors = [];
+$supplier_type_row = getRecord(
+    "SELECT id FROM tbl_customer_types WHERE status = 1 AND LOWER(TRIM(name)) IN ('supplier', 'vendor') ORDER BY id ASC LIMIT 1"
+);
+$supplier_type_id = (int) ($supplier_type_row['id'] ?? 0);
+if ($supplier_type_id > 0) {
+    $vendors = getList(
+        "SELECT id, name FROM tbl_customers WHERE status = 1 AND customer_type_id = $supplier_type_id ORDER BY name ASC"
+    );
+} else {
+    $vendors = getList(
+        "SELECT id, name FROM tbl_customers WHERE status = 1 AND group_id = 2 ORDER BY name ASC"
+    );
+}
+if (!is_array($vendors)) {
+    $vendors = [];
+}
+
+// Ledger modal data (vendor creation)
+$ledger_groups = [
+    ['id' => 1, 'name' => 'Sundry Debtors'],
+    ['id' => 2, 'name' => 'Sundry Creditors'],
+    ['id' => 3, 'name' => 'Bank Accounts'],
+    ['id' => 4, 'name' => 'Cash'],
+    ['id' => 5, 'name' => 'Sales'],
+    ['id' => 6, 'name' => 'Purchase'],
+    ['id' => 7, 'name' => 'Expenses'],
+    ['id' => 8, 'name' => 'Income'],
+    ['id' => 9, 'name' => 'Capital'],
+    ['id' => 10, 'name' => 'Loans & Advances'],
+    ['id' => 11, 'name' => 'Fixed Assets'],
+    ['id' => 12, 'name' => 'Current Assets'],
+    ['id' => 13, 'name' => 'Current Liabilities'],
+    ['id' => 14, 'name' => 'Investment'],
+];
+$sundry_options = [
+    ['id' => 1,  'name' => 'Primary'],
+    ['id' => 2,  'name' => 'Capital Account'],
+    ['id' => 3,  'name' => 'Loans (Liability)'],
+    ['id' => 4,  'name' => 'Current Liabilities'],
+    ['id' => 5,  'name' => 'Fixed Assets'],
+    ['id' => 6,  'name' => 'Investments'],
+    ['id' => 7,  'name' => 'Current Assets'],
+    ['id' => 8,  'name' => 'Branch /Divisions'],
+    ['id' => 9,  'name' => 'Misc.Expenses (ASSET)'],
+    ['id' => 10, 'name' => 'Suspense A/C'],
+    ['id' => 11, 'name' => 'Sales Account'],
+    ['id' => 12, 'name' => 'Purchase Account'],
+    ['id' => 13, 'name' => 'Direct Income'],
+    ['id' => 14, 'name' => 'Direct Expenses'],
+    ['id' => 15, 'name' => 'Indirect Income'],
+    ['id' => 16, 'name' => 'Indirect Expenses'],
+    ['id' => 17, 'name' => 'Reserves & Surplus'],
+    ['id' => 18, 'name' => 'Bank OD A/C'],
+    ['id' => 19, 'name' => 'Secured Loans'],
+    ['id' => 20, 'name' => 'UnSecured Loans'],
+    ['id' => 21, 'name' => 'Duties & Taxes'],
+    ['id' => 22, 'name' => 'Provisions'],
+    ['id' => 23, 'name' => 'Sundry Creditors'],
+    ['id' => 24, 'name' => 'Stock-in-Hand'],
+    ['id' => 25, 'name' => 'Deposits(Assets)'],
+    ['id' => 26, 'name' => 'Loans & Advances(Asset)'],
+    ['id' => 27, 'name' => 'Sundry Debtors'],
+    ['id' => 28, 'name' => 'Cash-in Hand'],
+    ['id' => 29, 'name' => 'Bank Account'],
+    ['id' => 30, 'name' => 'Service Account'],
+];
+
 // Load Branches from database
 $branches = getListMaster("SELECT id, name, code FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
 
@@ -961,6 +1030,15 @@ html, body{
     margin-bottom: 12px;
 }
 
+.form-row-custom.form-row-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.form-row-custom.form-row-product-top,
+.form-row-custom.form-row-product-second {
+    grid-template-columns: 1fr 1fr;
+}
+
 .form-row-custom .form-group {
     margin-bottom: 0;
 }
@@ -1002,6 +1080,110 @@ html, body{
     cursor: pointer;
     font-size: 0.9rem;
     z-index: 2;
+}
+
+/* Select + external plus button (vendor) */
+.select-with-add-btn {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.select-with-add-btn select.form-control {
+    flex: 1;
+    min-width: 0;
+}
+
+.select-with-add-btn .po-field-add-btn {
+    flex: 0 0 32px;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+    color: #11294b;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.select-with-add-btn .po-field-add-btn:hover {
+    border-color: #11294b;
+    background: #f8fafc;
+    color: #11294b;
+}
+
+.select-with-add-btn .po-field-add-btn i {
+    font-size: 0.95rem;
+}
+
+/* Vendor Select2 (searchable dropdown) */
+.select-with-add-btn .select2-container {
+    flex: 1;
+    min-width: 0;
+    width: 100% !important;
+}
+
+.select-with-add-btn .select2-container--default .select2-selection--single {
+    height: 32px;
+    min-height: 32px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+
+.select-with-add-btn .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 30px;
+    padding-left: 10px;
+    color: #334155;
+}
+
+.select-with-add-btn .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 30px;
+}
+
+.select2-container.po-vendor-select2-dropdown {
+    z-index: 10950 !important;
+}
+
+.select2-dropdown.po-vendor-select2-dropdown {
+    z-index: 10950 !important;
+    font-size: 0.8rem;
+}
+
+/* Right-side drawer modal (vendor ledger) */
+.modal.fade.right .modal-dialog {
+    transform: translateX(100%);
+    transition: transform 0.3s ease-out;
+}
+
+.modal.fade.right.show .modal-dialog {
+    transform: translateX(0);
+}
+
+.modal-dialog-right {
+    position: fixed;
+    right: 0;
+    top: 0;
+    margin: 0;
+    height: 100vh;
+}
+
+.modal.fade.right {
+    padding-right: 0 !important;
+}
+
+#customerCreationModal {
+    z-index: 1060 !important;
+}
+
+#customerCreationModal .modal-backdrop,
+body.modal-open .modal-backdrop.show {
+    z-index: 1055 !important;
 }
 
 /* Branch Tags */
@@ -1913,12 +2095,38 @@ if (!empty($products)) {
 <input type="hidden" name="product_id" value="<?= $edit_product_id ?>">
 <?php endif; ?>
 
-<div class="form-row-custom">
+<div class="form-row-custom form-row-product-top">
 <div class="form-group">
 <label>Name *</label>
 <input name="name" class="form-control" required value="<?= $edit_product ? htmlspecialchars($edit_product['name']) : '' ?>"<?= !empty($auragold_po_sub_branch_edit) ? ' readonly tabindex="-1"' : '' ?>>
 </div>
 
+<div class="form-group">
+<label>Vendor Name</label>
+<div class="select-with-add-btn">
+<select name="vendor_id" class="form-control" id="productVendorSelect"<?= !empty($auragold_po_sub_branch_edit) ? ' disabled tabindex="-1"' : '' ?>>
+<?php
+$sel_vendor = $edit_product ? (int) ($edit_product['vendor_id'] ?? 0) : 0;
+?>
+<option value=""<?= $sel_vendor === 0 ? ' selected' : '' ?>>Select Vendor</option>
+<?php
+foreach ($vendors as $vendor) {
+    $vid = (int) $vendor['id'];
+    $selected = ($sel_vendor > 0 && $sel_vendor === $vid) ? 'selected' : '';
+    echo '<option value="' . $vid . '" ' . $selected . '>' . htmlspecialchars($vendor['name']) . '</option>';
+}
+?>
+</select>
+<?php if (empty($auragold_po_sub_branch_edit)): ?>
+<button type="button" class="po-field-add-btn po-add-vendor" title="Add Vendor" aria-label="Add Vendor">
+<i class="feather icon-plus"></i>
+</button>
+<?php endif; ?>
+</div>
+</div>
+</div>
+
+<div class="form-row-custom form-row-product-second">
 <div class="form-group">
 <label>Article</label>
 <input name="article" class="form-control" value="<?= $edit_product ? htmlspecialchars($edit_product['article']) : '' ?>"<?= !empty($auragold_po_sub_branch_edit) ? ' readonly tabindex="-1"' : '' ?>>
@@ -1951,7 +2159,7 @@ foreach ($categories as $cat) {
 ?>
 </select>
 <?php if (empty($auragold_po_sub_branch_edit)): ?>
-<i class="feather icon-plus add-icon" title="Add Category"></i>
+<i class="feather icon-plus add-icon po-add-category" title="Add Category"></i>
 <?php endif; ?>
 </div>
 </div>
@@ -2426,9 +2634,89 @@ endforeach;
 </div>
 <!-- / Layout wrapper -->
 
+<!-- Category Creation Modal -->
+<div class="modal fade" id="categoryCreationModal" tabindex="-1" role="dialog" aria-labelledby="categoryCreationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document" style="max-width: 600px;">
+        <div class="modal-content">
+            <div class="modal-header" style="background: #11294b; color: #fff; border: none;">
+                <h5 class="modal-title" id="categoryCreationModalLabel">Add Category</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color: #fff; opacity: 1;">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 1.5rem;">
+                <form id="categoryCreationForm">
+                    <div class="form-group">
+                        <label>Name *</label>
+                        <input type="text" class="form-control" id="categoryName" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Short Code</label>
+                        <input type="text" class="form-control" id="categoryShortCode" name="short_code" maxlength="10">
+                    </div>
+                    <div class="form-group">
+                        <label>Parent Category</label>
+                        <select class="form-control" id="categoryParentId" name="parent_id">
+                            <option value="0">None</option>
+                            <?php
+                            foreach ($categories as $cat) {
+                                echo '<option value="' . (int) $cat['id'] . '">' . htmlspecialchars($cat['name']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Min. Qty.</label>
+                                <input type="text" class="form-control" id="categoryMinQty" name="min_qty" step="0.01" value="0">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Max. Qty.</label>
+                                <input type="text" class="form-control" id="categoryMaxQty" name="max_qty" step="0.01" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Min. Wt.</label>
+                                <input type="text" class="form-control" id="categoryMinWt" name="min_wt" step="0.001" value="0">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Max. Wt.</label>
+                                <input type="text" class="form-control" id="categoryMaxWt" name="max_wt" step="0.001" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="categoryIsActive" name="is_active" checked>
+                            <label class="form-check-label" for="categoryIsActive">Active</label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid #e2e8f0; padding: 1rem 1.5rem;">
+                <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveCategory()" style="background: #11294b; border: none;">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php include __DIR__ . '/includes/customer-creation-modal-only.php'; ?>
+
 <!-- Core scripts -->
 <?php include 'footer-script.php';?>
+<link rel="stylesheet" href="assets/libs/select2/select2.css">
+<script src="assets/libs/select2/select2.js"></script>
 <script src="assets/js/product-opening-excel-import.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-opening-excel-import.js'); ?>"></script>
+<script src="assets/js/product-opening-vendor-category.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-opening-vendor-category.js'); ?>"></script>
 
 <!-- Sortable.js for column drag and drop -->
 <script src="assets/libs/sortablejs/sortable.js"></script>

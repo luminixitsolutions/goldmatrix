@@ -206,17 +206,23 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
     var nextVoucherNo = <?= json_encode($next_voucher_no) ?>;
     var bankOptions = <?= json_encode($bank_cash_options) ?>;
 
-    function addRow() {
+    function addRow(opts) {
+        opts = opts || {};
         var tbody = document.getElementById('voucherTableBody');
-        var rowId = 'row_' + Date.now();
+        var rowId = 'row_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+        var isDr = !!opts.deposit;
+        var preferAc = opts.bank_cash_ac || '';
         var tr = document.createElement('tr');
         tr.setAttribute('data-row-id', rowId);
-        tr.innerHTML = 
-            '<td data-column="bank_cash_ac"><select class="form-control row-bank-ac">' +
-            bankOptions.map(function(o){ return '<option value="'+o.id+'">'+o.name+'</option>'; }).join('') + '</select></td>' +
+        var optsHtml = bankOptions.map(function (o) {
+            var sel = preferAc && String(o.id) === String(preferAc) ? ' selected' : '';
+            return '<option value="' + o.id + '"' + sel + '>' + o.name + '</option>';
+        }).join('');
+        tr.innerHTML =
+            '<td data-column="bank_cash_ac"><select class="form-control row-bank-ac">' + optsHtml + '</select></td>' +
             '<td data-column="ref_no"><input type="text" class="form-control row-ref-no" placeholder="Ref. No."></td>' +
             '<td data-column="ref_date"><input type="date" class="form-control row-ref-date" value="<?= date('Y-m-d') ?>"></td>' +
-            '<td data-column="transaction_type"><label class="mb-0"><input type="radio" name="rtype_'+rowId+'" value="deposit"> Dr</label> <label class="mb-0"><input type="radio" name="rtype_'+rowId+'" value="withdrawal" checked> Cr</label></td>' +
+            '<td data-column="transaction_type"><label class="mb-0"><input type="radio" name="rtype_' + rowId + '" value="deposit"' + (isDr ? ' checked' : '') + '> Dr</label> <label class="mb-0"><input type="radio" name="rtype_' + rowId + '" value="withdrawal"' + (!isDr ? ' checked' : '') + '> Cr</label></td>' +
             '<td data-column="amount" class="text-right"><input type="number" class="form-control row-amount text-right" value="0" step="0.01" min="0" placeholder="0.00"></td>' +
             '<td data-column="comment"><input type="text" class="form-control row-comment" placeholder="Comment"></td>' +
             '<td class="action-cell"><span class="action-btns"><button type="button" class="btn-icon edit-row" title="Edit"><i class="feather icon-edit-2"></i></button><button type="button" class="btn-icon delete delete-row" title="Delete"><i class="feather icon-trash-2"></i></button></span></td>';
@@ -265,13 +271,93 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
     document.getElementById('btnAddRow').addEventListener('click', addRow);
     document.querySelectorAll('#voucherTableBody tr').forEach(function(tr) { bindRowEvents(tr); });
     document.getElementById('btnSaveContra').addEventListener('click', function() {
-        var bankAc = document.getElementById('bankCashAc').value;
+        var bankAc = (document.getElementById('bankCashAc').value || '').trim();
         var comment = document.getElementById('comment').value;
         var voucherDate = document.getElementById('voucherDate').value;
-        var transType = document.querySelector('input[name="transType"]:checked');
-        var items = getItems();
-        if (!bankAc) { alert('Please select Bank/Cash a/c'); return; }
-        if (items.length === 0) { alert('Add at least one row.'); return; }
+        var transTypeEl = document.querySelector('input[name="transType"]:checked');
+        var headerType = transTypeEl ? transTypeEl.value : 'withdrawal';
+        var items = getItems().filter(function (it) {
+            return it.bank_cash_ac && (parseFloat(it.amount) || 0) > 0;
+        });
+        if (items.length === 0) {
+            alert('Add at least one row with Bank/Cash a/c and amount.');
+            return;
+        }
+
+        // Top bar Bank/Cash + Dr/Cr is the other side of the contra (often not duplicated in the grid).
+        // If the grid is missing that side, auto-add the header account with matching amount.
+        var totalDr = 0;
+        var totalCr = 0;
+        items.forEach(function (it) {
+            var amt = parseFloat(it.amount) || 0;
+            if (it.transaction_type === 'deposit') totalDr += amt;
+            else totalCr += amt;
+        });
+        var headerAlreadyInItems = items.some(function (it) {
+            return String(it.bank_cash_ac).toLowerCase() === String(bankAc).toLowerCase()
+                && it.transaction_type === headerType;
+        });
+        if ((totalDr < 0.00001 || totalCr < 0.00001) && bankAc) {
+            var missingIsDeposit = headerType === 'deposit';
+            var oppositeTotal = missingIsDeposit ? totalCr : totalDr;
+            // If header is the missing side, use opposite total; if header matches the only side, flip it
+            if ((missingIsDeposit && totalDr < 0.00001) || (!missingIsDeposit && totalCr < 0.00001)) {
+                if (!headerAlreadyInItems && oppositeTotal > 0) {
+                    items.push({
+                        bank_cash_ac: bankAc,
+                        ref_no: '',
+                        ref_date: voucherDate || '',
+                        transaction_type: headerType,
+                        amount: oppositeTotal,
+                        comment: comment || ''
+                    });
+                }
+            }
+        } else if (bankAc && !headerAlreadyInItems && Math.abs(totalDr - totalCr) > 0.02) {
+            // Grid unbalanced and header account not listed — use header to fill the short side
+            var shortIsDr = totalDr < totalCr;
+            var shortAmt = Math.abs(totalCr - totalDr);
+            var useHeaderType = shortIsDr ? 'deposit' : 'withdrawal';
+            // Prefer header type when it matches the short side
+            if ((headerType === 'deposit') === shortIsDr) {
+                useHeaderType = headerType;
+            }
+            items.push({
+                bank_cash_ac: bankAc,
+                ref_no: '',
+                ref_date: voucherDate || '',
+                transaction_type: useHeaderType,
+                amount: shortAmt,
+                comment: comment || ''
+            });
+        }
+
+        totalDr = 0;
+        totalCr = 0;
+        items.forEach(function (it) {
+            var amt = parseFloat(it.amount) || 0;
+            if (it.transaction_type === 'deposit') totalDr += amt;
+            else totalCr += amt;
+        });
+        if (totalDr < 0.00001 || totalCr < 0.00001) {
+            alert(
+                'Contra needs both accounts.\n' +
+                    '1) Select the other Bank/Cash a/c and Dr/Cr in the top bar, OR\n' +
+                    '2) Add a second row with the opposite Dr/Cr.\n\n' +
+                    'Example: Cash Dr 100 + BOI Cr 100'
+            );
+            return;
+        }
+        if (Math.abs(totalDr - totalCr) > 0.02) {
+            alert(
+                'Contra voucher is not balanced.\nDeposit/Dr: ' +
+                    totalDr.toFixed(2) +
+                    '\nWithdrawal/Cr: ' +
+                    totalCr.toFixed(2) +
+                    '\nBoth sides must be equal.'
+            );
+            return;
+        }
 
         var formData = new FormData();
         formData.append('voucher_id', voucherId);
@@ -279,7 +365,7 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
         formData.append('voucher_date', voucherDate);
         formData.append('comment', comment);
         formData.append('bank_cash_ac', bankAc);
-        formData.append('transaction_type', transType ? transType.value : 'withdrawal');
+        formData.append('transaction_type', headerType);
         formData.append('items', JSON.stringify(items));
 
         fetch('ajax/save-contra-voucher.php', { method: 'POST', body: formData })
@@ -295,9 +381,9 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
             .then(function(result) {
                 var data = result.data;
                 if (result.ok && data.status === 'success') {
-                    alert('Saved successfully.');
-                    if (data.voucher_id) window.location.href = 'contra-voucher.php?id=' + data.voucher_id;
-                    else window.location.reload();
+                    alert(data.message || 'Saved successfully.');
+                    // Reload blank form ready for a new contra voucher
+                    window.location.href = 'contra-voucher.php';
                 } else {
                     alert(data.message || 'Error saving.');
                 }
@@ -347,8 +433,11 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
     });
     applyColVisibility();
 
-    // If no rows and not edit mode, add one empty row
-    if (document.querySelectorAll('#voucherTableBody tr').length === 0) addRow();
+    // New voucher: seed both sides (Cash Dr + Bank Cr) so Account Ledger gets proper double-entry
+    if (document.querySelectorAll('#voucherTableBody tr').length === 0) {
+        addRow({ deposit: true, bank_cash_ac: 'Cash' });
+        addRow({ deposit: false, bank_cash_ac: 'Bank' });
+    }
 })();
 </script>
 </body>

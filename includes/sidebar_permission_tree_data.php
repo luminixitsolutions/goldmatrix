@@ -31,10 +31,6 @@ function auragold_sidebar_permission_tree_data()
             'menu'  => true,
             'pages' => [
                 ['key' => 'product_opening', 'label' => 'Product Opening', 'actions' => $c],
-                ['key' => 'assign_inventory_sales_team', 'label' => 'Assign Inventory To Sales Team', 'actions' => $v],
-                ['key' => 'assign_inventory', 'label' => 'Assign Inventory', 'actions' => $c],
-                ['key' => 'unassign_inventory', 'label' => 'UnAssign Inventory', 'actions' => $c],
-                ['key' => 'assign_inventory_items', 'label' => 'Assign Inventory Items', 'actions' => $c],
                 ['key' => 'account_ledger', 'label' => 'Account Ledger', 'actions' => $c],
                 ['key' => 'metal_to_amount', 'label' => 'Metal to Amount', 'actions' => $c],
                 ['key' => 'amount_to_metal', 'label' => 'Amount to Metal', 'actions' => $c],
@@ -205,6 +201,10 @@ function auragold_sidebar_permission_tree_data()
                 ['key' => 'employee_incentive', 'label' => 'Employee Incentive', 'actions' => $c],
                 ['key' => 'employee_reports', 'label' => 'Employee Reports', 'actions' => $v],
                 ['key' => 'employee_salary', 'label' => 'Employee Salary', 'actions' => $c],
+                ['key' => 'assign_inventory_sales_team', 'label' => 'Assign Inventory To Sales Team', 'actions' => $v],
+                ['key' => 'assign_inventory', 'label' => 'Assign Inventory', 'actions' => $c],
+                ['key' => 'unassign_inventory', 'label' => 'UnAssign Inventory', 'actions' => $c],
+                ['key' => 'assign_inventory_items', 'label' => 'Assign Inventory Items', 'actions' => $c],
             ],
         ],
         [

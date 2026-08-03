@@ -34,6 +34,14 @@
         'wastage-per',
         'wastage-wt',
         'final-wt',
+        'purchase-amount',
+        'sale-percent',
+        'sale-amount',
+        'sale-amount-with',
+        'net-amt',
+        'tax-type',
+        'tax-percent',
+        'tax',
         'net-amt-tax',
         'reverse',
         'images',
@@ -64,6 +72,14 @@
         'wastage-per': 'Wastage %',
         'wastage-wt': 'Wastage Wt',
         'final-wt': 'Final Wt',
+        'purchase-amount': 'Purchase Amount',
+        'sale-percent': 'Sale Percentages',
+        'sale-amount': 'Sale Amount',
+        'sale-amount-with': 'Sale Amount With Tax',
+        'net-amt': 'Net Amt',
+        'tax-type': 'Tax Type',
+        'tax-percent': 'Tax %',
+        'tax': 'Tax',
         'net-amt-tax': 'Net Amt+Tax',
         'reverse': 'Reverse',
         'images': 'Images',
@@ -86,6 +102,14 @@
         { dataColumn: 'wastage-per', label: 'Wastage %' },
         { dataColumn: 'wastage-wt', label: 'Wastage Wt' },
         { dataColumn: 'final-wt', label: 'Final Wt' },
+        { dataColumn: 'purchase-amount', label: 'Purchase Amount' },
+        { dataColumn: 'sale-percent', label: 'Sale Percentages' },
+        { dataColumn: 'sale-amount', label: 'Sale Amount' },
+        { dataColumn: 'sale-amount-with', label: 'Sale Amount With Tax' },
+        { dataColumn: 'net-amt', label: 'Net Amt' },
+        { dataColumn: 'tax-type', label: 'Tax Type' },
+        { dataColumn: 'tax-percent', label: 'Tax %' },
+        { dataColumn: 'tax', label: 'Tax' },
         { dataColumn: 'net-amt-tax', label: 'Net Amt+Tax' },
         { dataColumn: 'reverse', label: 'Reverse' }
     ];
@@ -215,10 +239,21 @@
     window.auragoldIsProductOpeningContext = auragoldIsProductOpeningContext;
 
     /** Pages/tabs where Purchase Amount & Sale Amount are user-typed. */
+    function auragoldIsSaleInvoiceContext() {
+        if (window.isSaleInvoicePage === true) return true;
+        if (typeof window.PRODUCT_MODAL_COLUMNS_PAGE === 'string' && /sale-invoice/i.test(window.PRODUCT_MODAL_COLUMNS_PAGE)) return true;
+        try {
+            return !!(window.location && /sale-invoice\.php/i.test(String(window.location.pathname || '')));
+        } catch (e) { return false; }
+    }
+    window.auragoldIsSaleInvoiceContext = auragoldIsSaleInvoiceContext;
+
+    /** Pages/tabs where Purchase Amount, Sale Percentages & Sale Amount are user-typed. */
     function auragoldAllowManualPurchaseSaleAmounts() {
         return auragoldIsImitationOrOtherMetalTab()
             || auragoldIsProductOpeningContext()
-            || auragoldIsStockJournalContext();
+            || auragoldIsStockJournalContext()
+            || auragoldIsSaleInvoiceContext();
     }
     window.auragoldAllowManualPurchaseSaleAmounts = auragoldAllowManualPurchaseSaleAmounts;
 
@@ -581,12 +616,108 @@
         } else {
             select.classList.remove('diamond-category-select');
             select.classList.add('category-select');
-            if (typeof window.populateSelect === 'function' && typeof categories !== 'undefined') {
-                window.populateSelect(select, categories, 'id', 'name', 'Select Category');
+            if (typeof window.populateSelect === 'function') {
+                window.populateSelect(select, auragoldPageCategoriesList(), 'id', 'name', 'Select Category');
             }
         }
     }
     window.populateCategorySelectForModal = populateCategorySelectForModal;
+
+    function auragoldPageCategoriesList() {
+        if (typeof window.categories !== 'undefined' && Array.isArray(window.categories)) {
+            return window.categories;
+        }
+        if (typeof categories !== 'undefined' && Array.isArray(categories)) {
+            window.categories = categories;
+            return categories;
+        }
+        window.categories = [];
+        return window.categories;
+    }
+
+    function auragoldSyncPageCategoriesList(list) {
+        var arr = Array.isArray(list) ? list.slice() : [];
+        window.categories = arr;
+        if (typeof categories !== 'undefined' && Array.isArray(categories)) {
+            categories.length = 0;
+            arr.forEach(function (c) { categories.push(c); });
+        }
+        return arr;
+    }
+
+    function auragoldRepopulateCategorySelectElement(select, list, selectId) {
+        if (!select || select.classList.contains('diamond-category-select')) return;
+        var prev = select.value || '';
+        if (typeof window.populateSelect === 'function') {
+            window.populateSelect(select, list, 'id', 'name', 'Select Category');
+        }
+        if (selectId != null && String(selectId) !== '') {
+            select.value = String(selectId);
+        } else if (prev) {
+            try { select.value = prev; } catch (e) {}
+        }
+    }
+
+    /** After Add Category: refresh Product category + category column dropdowns and in-memory master list. */
+    function auragoldRefreshCategoryMasterDropdowns(newCategoryId, newCategoryName, selectNew) {
+        var list = auragoldPageCategoriesList();
+        if (newCategoryId != null && newCategoryName) {
+            var exists = list.some(function (c) { return String(c.id) === String(newCategoryId); });
+            if (!exists) {
+                list.push({ id: newCategoryId, name: String(newCategoryName) });
+            }
+        }
+        auragoldSyncPageCategoriesList(list);
+        document.querySelectorAll('.product-category-select, .category-select').forEach(function (select) {
+            auragoldRepopulateCategorySelectElement(select, list, selectNew ? newCategoryId : null);
+        });
+        var parentSelect = document.getElementById('categoryParentId');
+        if (parentSelect && newCategoryId != null && newCategoryName) {
+            var hasParent = false;
+            for (var i = 0; i < parentSelect.options.length; i++) {
+                if (String(parentSelect.options[i].value) === String(newCategoryId)) {
+                    hasParent = true;
+                    break;
+                }
+            }
+            if (!hasParent) {
+                parentSelect.appendChild(new Option(String(newCategoryName), String(newCategoryId)));
+            }
+        }
+        var productCategory = document.getElementById('productCategory');
+        if (productCategory) {
+            auragoldRepopulateCategorySelectElement(productCategory, list, selectNew ? newCategoryId : null);
+        }
+    }
+    window.auragoldRefreshCategoryMasterDropdowns = auragoldRefreshCategoryMasterDropdowns;
+
+    function auragoldReloadCategoriesFromServer(selectNewId) {
+        return fetch('ajax/category.php?action=list', { method: 'GET', credentials: 'same-origin' })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                if (!data || data.status !== 'success' || !Array.isArray(data.categories)) return;
+                auragoldSyncPageCategoriesList(data.categories);
+                document.querySelectorAll('.product-category-select, .category-select').forEach(function (select) {
+                    auragoldRepopulateCategorySelectElement(select, data.categories, selectNewId);
+                });
+                var parentSelect = document.getElementById('categoryParentId');
+                if (parentSelect) {
+                    var none = parentSelect.querySelector('option[value="0"]');
+                    parentSelect.innerHTML = '';
+                    if (none) parentSelect.appendChild(none);
+                    else parentSelect.appendChild(new Option('None', '0'));
+                    data.categories.forEach(function (cat) {
+                        parentSelect.appendChild(new Option(cat.name, cat.id));
+                    });
+                }
+                var productCategory = document.getElementById('productCategory');
+                if (productCategory) {
+                    auragoldRepopulateCategorySelectElement(productCategory, data.categories, selectNewId);
+                }
+            })
+            .catch(function (err) { console.error('Error reloading categories:', err); });
+    }
+    window.auragoldReloadCategoriesFromServer = auragoldReloadCategoriesFromServer;
 
     function isDiamondTabActive() {
         var name = getActiveProductModalMetalName();
@@ -836,14 +967,15 @@
             }
             addListeners(row.querySelector('[data-column="sale-amount"] input'), piSaleAmountFieldsChanged);
             addListeners(row.querySelector('[data-column="sale-amount-with"] input'), piSaleAmountFieldsChanged);
-        } else {
+        }
+        // Imitation/Other (and SJ/opening): typed Purchase/Sale Amount — also on Purchase Invoice when that tab is active.
+        if (auragoldAllowManualPurchaseSaleAmounts()) {
             var saleAmtInp = row.querySelector('[data-column="sale-amount"] input');
             var purchaseAmtInp = row.querySelector('[data-column="purchase-amount"] input');
             var salePercentInp = row.querySelector('[data-column="sale-percent"] input');
             if (salePercentInp && !salePercentInp._auragoldImitationSalePercentBound) {
                 salePercentInp._auragoldImitationSalePercentBound = true;
                 addListeners(salePercentInp, function() {
-                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
                     row.removeAttribute('data-manual-sale-amount');
                     calculateModalRowNetWeight(row);
                 });
@@ -851,17 +983,25 @@
             if (saleAmtInp && !saleAmtInp._auragoldImitationSaleBound) {
                 saleAmtInp._auragoldImitationSaleBound = true;
                 addListeners(saleAmtInp, function() {
-                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
                     row.setAttribute('data-manual-sale-amount', '1');
                     calculateModalRowNetWeight(row);
+                    if (auragoldIsPurchaseInvoiceContext()) {
+                        if (typeof updateSummaryPanel === 'function') updateSummaryPanel();
+                        if (typeof updateSummaryRow === 'function') updateSummaryRow();
+                    }
                 });
             }
             if (purchaseAmtInp && !purchaseAmtInp._auragoldImitationPurchaseBound) {
                 purchaseAmtInp._auragoldImitationPurchaseBound = true;
                 addListeners(purchaseAmtInp, function() {
-                    if (!auragoldAllowManualPurchaseSaleAmounts()) return;
                     row.setAttribute('data-manual-purchase-amount', '1');
                     calculateModalRowNetWeight(row);
+                });
+                purchaseAmtInp.addEventListener('blur', function() {
+                    if ((parseFloat(purchaseAmtInp.value) || 0) > 0) {
+                        row.setAttribute('data-manual-purchase-amount', '1');
+                        calculateModalRowNetWeight(row);
+                    }
                 });
             }
         }
@@ -1450,10 +1590,23 @@
         if (calculatedAmount < 0) calculatedAmount = 0;
         let netAmt = calculatedAmount + diamondAmount;
         var isManualAmtCtx = auragoldAllowManualPurchaseSaleAmounts();
+        var isPurchasePiCtx = auragoldIsPurchaseInvoiceContext();
         var manualSaleAmt = isManualAmtCtx && row.getAttribute('data-manual-sale-amount') === '1';
         var manualPurchaseAmt = isManualAmtCtx && row.getAttribute('data-manual-purchase-amount') === '1';
+        var salePercentApplied = false;
+        if (isManualAmtCtx) {
+            salePercentApplied = auragoldApplySalePercentFromPurchase(row);
+        }
         if (manualSaleAmt && saleAmountInput) {
             netAmt = parseFloat(saleAmountInput.value) || 0;
+            if (netAmt < 0) netAmt = 0;
+            calculatedAmount = Math.max(0, netAmt - diamondAmount);
+        } else if (salePercentApplied && !isPurchasePiCtx && saleAmountInput) {
+            netAmt = parseFloat(saleAmountInput.value) || 0;
+            if (netAmt < 0) netAmt = 0;
+            calculatedAmount = Math.max(0, netAmt - diamondAmount);
+        } else if (manualPurchaseAmt && purchaseAmountInput) {
+            netAmt = parseFloat(purchaseAmountInput.value) || 0;
             if (netAmt < 0) netAmt = 0;
             calculatedAmount = Math.max(0, netAmt - diamondAmount);
         }
@@ -1463,13 +1616,13 @@
         if (purchaseAmountInput && !manualPurchaseAmt && !auragoldIsInputActivelyEdited(purchaseAmountInput)) {
             purchaseAmountInput.value = netAmt.toFixed(2);
         }
-        var salePercentApplied = auragoldApplySalePercentFromPurchase(row);
-        var isPurchasePiCtx = auragoldIsPurchaseInvoiceContext();
         if (!isPurchasePiCtx) {
             if (saleAmountInput && !manualSaleAmt && !salePercentApplied && !auragoldIsInputActivelyEdited(saleAmountInput)) {
                 saleAmountInput.value = netAmt.toFixed(2);
             }
-            if (saleAmountWithInput) saleAmountWithInput.value = netAmt.toFixed(2);
+            if (saleAmountWithInput && !salePercentApplied && !manualSaleAmt) {
+                saleAmountWithInput.value = netAmt.toFixed(2);
+            }
         }
         const taxTypeSelect = row.querySelector('[data-column="tax-type"] select');
         const taxType = taxTypeSelect ? taxTypeSelect.value : 'no_tax';
@@ -1947,6 +2100,36 @@
         }
         var srcAgainst = row.getAttribute('data-source-against-item-id');
         var srcSoItem = row.getAttribute('data-source-sale-order-item-id');
+        // Select value + visible label (Carat dropdown: id vs "24K")
+        var getSelectMeta = function(column) {
+            var cell = row.querySelector('td[data-column="' + column + '"]') || row.querySelector('[data-column="' + column + '"]');
+            if (!cell) return { value: '', label: '' };
+            var select = cell.querySelector('select');
+            if (select) {
+                var val = select.value || '';
+                var label = '';
+                if (select.selectedIndex >= 0 && select.options[select.selectedIndex]) {
+                    label = (select.options[select.selectedIndex].text || '').trim();
+                    if (label && /^(select|—|-)$/i.test(label)) label = '';
+                }
+                return { value: val, label: label || val };
+            }
+            var input = cell.querySelector('input');
+            if (input) {
+                var iv = (input.value || '').trim();
+                return { value: iv, label: iv };
+            }
+            var txt = (cell.textContent || '').trim();
+            return { value: txt, label: txt };
+        };
+        var caratMeta = getSelectMeta('carat');
+        var locationMeta = getSelectMeta('location');
+        var makingType = getValue('making-type', false) || 'Fix';
+        var makingRate = getValue('making-rate', true);
+        var makingAmt = getValue('making-amount', true);
+        if (!(makingAmt > 0) && String(makingType) === 'Fix' && makingRate > 0) {
+            makingAmt = makingRate;
+        }
         return {
             product_id: productId,
             characteristic_id: row.getAttribute('data-characteristic-id') || characteristicId || '',
@@ -1958,6 +2141,12 @@
             item_code: getValue('item-code', false),
             product_category_id: getValue('product-category', false),
             category: getValue('category', false),
+            location: locationMeta.value,
+            location_id: locationMeta.value,
+            location_name: locationMeta.label,
+            carat: caratMeta.value,
+            carat_id: caratMeta.value,
+            carat_name: caratMeta.label,
             quantity: getValue('quantity', true),
             gross_wt: getValue('gross-wt', true),
             less_wt: getValue('less-wt', true),
@@ -1972,17 +2161,27 @@
             metal_weight: getValue('metal-weight', true),
             amount: getValue('amount', true),
             discount: getValue('discount', true),
-            making_amount: (function() {
-                var amt = getValue('making-amount', true);
-                if (amt > 0) return amt;
-                var makingType = (getValue('making-type', false) || 'Fix').toString();
-                var rate = getValue('making-rate', true);
-                if (makingType === 'Fix' && rate > 0) return rate;
-                return amt;
-            })(),
+            discount_type: getValue('discount-type', false),
+            discount_per: getValue('discount-per', true),
+            discount_amount: getValue('discount-amount', true),
+            making_type: makingType,
+            making_rate: makingRate,
+            making_amount: makingAmt,
+            making_discount_amt: getValue('making-discount-amt', true),
+            making_actual_value: getValue('making-actual-value', true),
+            making_cost: getValue('making-cost', true),
+            wastage_per: getValue('wastage-per', true),
+            wastage_wt: getValue('wastage-wt', true),
             stone_amount: getValue('stone-amount', true),
             stone_weight: getValue('stone-weight', true),
+            stone_charge_type: getValue('stone-charge-type', false),
+            stone_rate: getValue('stone-rate', true),
+            stone_cost: getValue('stone-cost', true),
             other_amount: getValue('other-amount', true),
+            other_charge_type: getValue('other-charge-type', false),
+            other_weight: getValue('other-weight', true),
+            other_rate: getValue('other-rate', true),
+            other_info: getValue('other-info', false),
             diamond_amount: getValue('diamond-amount', true),
             tax: getValue('tax', true),
             tax_type: getValue('tax-type', false),
@@ -2003,12 +2202,16 @@
             gold_loss1: getValue('gold-loss1', true),
             gold_loss2: getValue('gold-loss2', true),
             metal_loss_value: getValue('metal-loss-value', true),
+            metal_cost: getValue('metal-cost', true),
             setting_charge: getValue('setting-charge', true),
             fc_amount: getValue('fc-amount', true),
             diamond_line_metal_value: getValue('diamond-line-metal-value', true),
             rapnet_valuation: getValue('rapnet-valuation', true),
             mark_up_amount: getValue('mark-up-amount', true),
             mark_up_per: getValue('mark-up-per', true),
+            requested_purity: getValue('requested-purity', true),
+            requested: getValue('requested', true),
+            alloy_wt: getValue('alloy-wt', true),
             platinum_weight: getValue('platinum-weight', true),
             platinum_karat: getValue('platinum-karat', false),
             platinum_purity: getValue('platinum-purity', true),
@@ -2028,6 +2231,8 @@
             shape_id: getValue('shape', false),
             clarity_id: getValue('clarity', false),
             unit_price: getValue('unit-price', true),
+            min_price: getValue('min-price', true),
+            minimum: getValue('minimum', true),
             barcode_prefix: row.getAttribute('data-barcode-prefix') || '',
             barcode_digits: row.getAttribute('data-barcode-digits') || '',
             gst_local_percent: row.getAttribute('data-gst-local-pct') || '',
@@ -2202,6 +2407,9 @@
             design_no: d.design_no || '',
             category: (d.category != null && d.category !== '') ? String(d.category).trim() : '',
             location_id: d.location || d.location_id || '',
+            carat_id: (d.carat_id != null && d.carat_id !== '') ? d.carat_id : (d.carat != null ? d.carat : ''),
+            carat: (d.carat_name != null && d.carat_name !== '') ? d.carat_name : (d.carat != null ? d.carat : ''),
+            carat_name: (d.carat_name != null && d.carat_name !== '') ? d.carat_name : (d.carat != null ? d.carat : ''),
             quantity: parseFloat(d.quantity) || 1,
             gross_weight: parseFloat(d.gross_wt) || 0,
             less_weight: parseFloat(d.less_wt) || 0,
@@ -2304,10 +2512,29 @@
         } else {
             ['checkbox', 'id', 'category', 'calculation', 'product', 'location', 'quantity'].forEach(function (c) { metalVisibleSet[c] = 1; });
         }
+        var amountsCols = (window.PRODUCT_MODAL_COLUMN_GROUPS && window.PRODUCT_MODAL_COLUMN_GROUPS.amounts) || [
+            'purchase-amount', 'sale-percent', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'
+        ];
+        amountsCols.forEach(function (col) { metalVisibleSet[col] = 1; });
         var saved = window.productModalColumnVisibilityByTab && (window.productModalColumnVisibilityByTab[tk] || window.productModalColumnVisibilityByTab[tabKey]);
-        return Object.assign({}, metalVisibleSet, (saved && typeof saved === 'object') ? saved : {});
+        var merged = Object.assign({}, metalVisibleSet, (saved && typeof saved === 'object') ? saved : {});
+        amountsCols.forEach(function (col) { merged[col] = 1; });
+        return merged;
     }
     window.mergeProductModalMetalTabPrefs = mergeProductModalMetalTabPrefs;
+
+    /** Amounts columns (incl. Sale Percentages) stay visible on every metal tab. */
+    window.PRODUCT_MODAL_AMOUNTS_ALWAYS_VISIBLE = [
+        'purchase-amount', 'sale-percent', 'sale-amount', 'sale-amount-with', 'net-amt', 'tax-type', 'tax-percent', 'tax'
+    ];
+    function auragoldProductModalApplyAlwaysVisibleAmountColumns(prefs) {
+        var out = prefs && typeof prefs === 'object' ? Object.assign({}, prefs) : {};
+        (window.PRODUCT_MODAL_AMOUNTS_ALWAYS_VISIBLE || []).forEach(function (col) {
+            out[col] = 1;
+        });
+        return out;
+    }
+    window.auragoldProductModalApplyAlwaysVisibleAmountColumns = auragoldProductModalApplyAlwaysVisibleAmountColumns;
 
     /**
      * Modals that do not split metal-qty vs diamond quantity (e.g. repair-order, old-jewelry-scrap):
@@ -3088,6 +3315,9 @@
 
     if (typeof jQuery !== 'undefined') {
         jQuery(document).on('shown.bs.modal', '#productSelectionModal', function() {
+            if (typeof auragoldApplyManualAmountFieldsEditability === 'function') {
+                auragoldApplyManualAmountFieldsEditability();
+            }
             if (typeof auragoldPopulateModalSpecSelectsAllRows === 'function') {
                 auragoldPopulateModalSpecSelectsAllRows();
             }
@@ -3105,6 +3335,84 @@
                 fixProductModalHeader();
             }
         });
+
+        /** Keep product selection open when Add Product / Add Category / Add Image opens on top (Bootstrap hides parent by default). */
+        if (!window._auragoldProductSelectionNestedModalsBound) {
+            window._auragoldProductSelectionNestedModalsBound = true;
+            var $ = jQuery;
+            var nestedParentSel = '#productSelectionModal';
+            var nestedChildSels = ['#productCreationModal', '#categoryCreationModal', '#addImageModal'];
+
+            function nestedChildModalVisible() {
+                for (var i = 0; i < nestedChildSels.length; i++) {
+                    if ($(nestedChildSels[i]).hasClass('show')) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function restoreProductSelectionParent() {
+                var $parent = $(nestedParentSel);
+                if (!$parent.length || !$parent.data('auragold-nested-parent')) {
+                    return;
+                }
+                if (!$parent.hasClass('show')) {
+                    $parent.addClass('show');
+                    $parent.css('display', 'block');
+                    $parent.attr('aria-hidden', 'false');
+                }
+                $('body').addClass('modal-open');
+                if ($('.modal-backdrop').length === 0) {
+                    $('body').append('<div class="modal-backdrop fade show"></div>');
+                }
+            }
+
+            $(nestedParentSel).on('hide.bs.modal', function(e) {
+                if ($(document.body).data('auragold-nested-child-opening') || nestedChildModalVisible()) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    return false;
+                }
+            });
+            $(nestedParentSel).on('hidden.bs.modal', function() {
+                $(this).removeData('auragold-nested-parent');
+            });
+
+            nestedChildSels.forEach(function(childSel) {
+                var $child = $(childSel);
+                if (!$child.length) {
+                    return;
+                }
+                $child.on('show.bs.modal', function() {
+                    var $parent = $(nestedParentSel);
+                    if ($parent.hasClass('show')) {
+                        $(document.body).data('auragold-nested-child-opening', true);
+                        $parent.data('auragold-nested-parent', true);
+                    }
+                });
+                $child.on('shown.bs.modal', function() {
+                    $(document.body).removeData('auragold-nested-child-opening');
+                    restoreProductSelectionParent();
+                });
+                $child.on('hidden.bs.modal', function() {
+                    restoreProductSelectionParent();
+                });
+            });
+        }
+
+        /** Product category column uses .add-product-category-icon (tbl_categories); Diamond category uses .add-category-icon. */
+        if (!window._auragoldAddProductCategoryIconBound) {
+            window._auragoldAddProductCategoryIconBound = true;
+            jQuery(document).on('click', '.add-product-category-icon', function(e) {
+                e.stopPropagation();
+                e.preventDefault();
+                jQuery('#categoryCreationModal').modal('show');
+                if (typeof window.loadParentCategories === 'function') {
+                    window.loadParentCategories();
+                }
+            });
+        }
     }
 
     /**
@@ -3873,7 +4181,7 @@
     function plainHeaderLabel(th) {
         if (!th) return '';
         var t = th.cloneNode(true);
-        t.querySelectorAll('.product-modal-col-drag-handle, .add-category-icon, .add-product-icon, .add-location-icon, .feather').forEach(function(x) {
+        t.querySelectorAll('.product-modal-col-drag-handle, .add-category-icon, .add-product-category-icon, .add-product-icon, .add-location-icon, .feather').forEach(function(x) {
             x.remove();
         });
         return (t.textContent || '').replace(/\s+/g, ' ').trim();
@@ -4405,5 +4713,157 @@
         // Product opening rows are often filled async after load
         setTimeout(auragoldInitManualAmountFieldsEditability, 500);
         setTimeout(auragoldInitManualAmountFieldsEditability, 1500);
+    }
+
+    /** Shared carat/karat dropdown (Masters → tbl_carat) for voucher pages that set window.carats + window.metals. */
+    if (typeof window.populateCaratSelectForModalRow !== 'function') {
+        function auragoldPageCaratsList() {
+            return (window.carats && window.carats.length) ? window.carats : [];
+        }
+        function auragoldCaratsMasterUsesMetalIdsShared() {
+            var list = auragoldPageCaratsList();
+            for (var i = 0; i < list.length; i++) {
+                var m = list[i].metal_id;
+                if (m != null && String(m).trim() !== '' && String(m) !== '0') return true;
+            }
+            return false;
+        }
+        function auragoldMetalTabCategoryFromMetalIdShared(metalId) {
+            var idStr = metalId != null ? String(metalId) : '';
+            if (!idStr || !window.metals || !window.metals.length) return '';
+            for (var i = 0; i < window.metals.length; i++) {
+                var x = window.metals[i];
+                if (String(x.id) !== idStr) continue;
+                var label = (x.display_name || x.system_name || x.name || '').toLowerCase();
+                if (!label) return '';
+                if (label.indexOf('diamond') !== -1) return 'diamond';
+                if (label.indexOf('gold') !== -1) return 'gold';
+                if (label.indexOf('silver') !== -1) return 'silver';
+                if (label.indexOf('platinum') !== -1) return 'platinum';
+                if (label.indexOf('imitation') !== -1 || label.indexOf('watch') !== -1) return 'other';
+                if (label.indexOf('other') !== -1 || label.indexOf('service') !== -1) return 'other';
+                return '';
+            }
+            return '';
+        }
+        function auragoldMetalTabCategoryFromLabelShared(label) {
+            var ln = String(label != null ? label : '').toLowerCase();
+            if (!ln) return '';
+            if (ln.indexOf('diamond') !== -1) return 'diamond';
+            if (ln.indexOf('gold') !== -1) return 'gold';
+            if (ln.indexOf('silver') !== -1) return 'silver';
+            if (ln.indexOf('platinum') !== -1) return 'platinum';
+            if (ln.indexOf('imitation') !== -1 || ln.indexOf('watch') !== -1) return 'other';
+            if (ln.indexOf('other') !== -1 || ln.indexOf('service') !== -1) return 'other';
+            return '';
+        }
+        function auragoldInferCaratNameKindShared(name) {
+            var raw = String(name != null ? name : '').trim();
+            if (!raw) return '';
+            var n = raw.toLowerCase();
+            if (/\d+(\.\d+)?\s*ct\b/i.test(n)) return 'diamond';
+            if (/\d+\s*k\b/i.test(raw)) return 'gold';
+            if (/^\d{3,4}(\.\d+)?$/i.test(raw.replace(/\s+/g, ''))) return 'fineness';
+            return '';
+        }
+        function auragoldFinenessCodeShared(name) {
+            var raw = String(name != null ? name : '').trim().replace(/\s+/g, '');
+            var m = raw.match(/^(\d{3,4}(?:\.\d+)?)/i);
+            return m ? m[1].toUpperCase() : '';
+        }
+        function auragoldCaratMatchesTabCategoryShared(crow, tabCat) {
+            if (!tabCat || tabCat === 'other') return true;
+            var nm = (crow && crow.name != null) ? String(crow.name) : '';
+            var kind = auragoldInferCaratNameKindShared(nm);
+            if (tabCat === 'gold') return kind === 'gold';
+            if (tabCat === 'diamond') return kind === 'diamond';
+            var code = auragoldFinenessCodeShared(nm);
+            if (tabCat === 'silver') {
+                if (kind !== 'fineness' && !code) return false;
+                return /^(999|995|990|980|970|960|958|940|925|920|915|910|905|900|875|840|835|800)$/.test(code);
+            }
+            if (tabCat === 'platinum') {
+                if (kind !== 'fineness' && !code) return false;
+                return /^(9995|999|990|980|970|960|950|900|850|800)$/.test(code);
+            }
+            return true;
+        }
+        function auragoldMetalDisplayNameByIdShared(metalId) {
+            var idStr = metalId != null ? String(metalId).trim() : '';
+            if (!idStr || !window.metals || !window.metals.length) return '';
+            for (var i = 0; i < window.metals.length; i++) {
+                var x = window.metals[i];
+                if (String(x.id) === idStr) {
+                    return String(x.display_name || x.system_name || x.name || '').trim();
+                }
+            }
+            return '';
+        }
+        function auragoldCaratRowMatchesModalMetalShared(crow, tabMetalId) {
+            if (!crow) return false;
+            var cm = crow.metal_id;
+            var hasMetalLink = !(cm == null || String(cm).trim() === '' || String(cm) === '0');
+            if (hasMetalLink && String(cm) === String(tabMetalId)) return true;
+            var tabName = auragoldMetalDisplayNameByIdShared(tabMetalId).toLowerCase();
+            var caratMetalName = String(crow.metal_name || crow.metal_display_name || '').trim().toLowerCase();
+            if (tabName && caratMetalName && tabName === caratMetalName) return true;
+            var tabCat = auragoldMetalTabCategoryFromMetalIdShared(tabMetalId);
+            if (!tabCat && tabMetalId && window.currentMetalId != null &&
+                String(window.currentMetalId) === String(tabMetalId) && window.currentMetalName) {
+                tabCat = auragoldMetalTabCategoryFromLabelShared(window.currentMetalName);
+            }
+            if (tabCat && caratMetalName && auragoldMetalTabCategoryFromLabelShared(caratMetalName) === tabCat) return true;
+            if (tabCat) return auragoldCaratMatchesTabCategoryShared(crow, tabCat);
+            return !hasMetalLink;
+        }
+        function auragoldCaratsFilteredForModalMetalShared(metalId) {
+            var list = auragoldPageCaratsList();
+            if (!list.length) return [];
+            var idKey = metalId != null ? String(metalId).trim() : '';
+            if (auragoldCaratsMasterUsesMetalIdsShared()) {
+                if (!idKey) return list.slice();
+                var filtered = list.filter(function (c) { return auragoldCaratRowMatchesModalMetalShared(c, idKey); });
+                if (filtered.length) return filtered;
+                var tabCat = auragoldMetalTabCategoryFromMetalIdShared(idKey);
+                if (!tabCat && window.currentMetalId != null && String(window.currentMetalId) === idKey && window.currentMetalName) {
+                    tabCat = auragoldMetalTabCategoryFromLabelShared(window.currentMetalName);
+                }
+                var byCat = list.filter(function (c) {
+                    return tabCat ? auragoldCaratMatchesTabCategoryShared(c, tabCat) : true;
+                });
+                return byCat.length ? byCat : list.slice();
+            }
+            var tabCat2 = auragoldMetalTabCategoryFromMetalIdShared(idKey);
+            if (!tabCat2 && idKey && window.currentMetalId != null && String(window.currentMetalId) === idKey && window.currentMetalName) {
+                tabCat2 = auragoldMetalTabCategoryFromLabelShared(window.currentMetalName);
+            }
+            if (!tabCat2) return list.slice();
+            var byTab = list.filter(function (c) { return auragoldCaratMatchesTabCategoryShared(c, tabCat2); });
+            return byTab.length ? byTab : list.slice();
+        }
+        window.populateCaratSelectForModalRow = function (caratSelect, row) {
+            if (!caratSelect || typeof window.populateSelect !== 'function') return;
+            var mid = '';
+            if (row && row.getAttribute) mid = row.getAttribute('data-metal-id') || '';
+            if (!mid && window.currentMetalId != null && window.currentMetalId !== '') mid = String(window.currentMetalId);
+            var prev = '';
+            try { prev = caratSelect.value || ''; } catch (e) { prev = ''; }
+            window.populateSelect(caratSelect, auragoldCaratsFilteredForModalMetalShared(mid), 'id', 'name', 'Select Karat');
+            if (prev) {
+                try {
+                    caratSelect.value = prev;
+                    if (caratSelect.value !== prev) caratSelect.value = '';
+                } catch (e2) {}
+            }
+        };
+        window.refreshProductModalCaratSelectsForVisibleRows = function () {
+            var tbody = document.getElementById('productListBody');
+            if (!tbody) return;
+            tbody.querySelectorAll('tr.product-row').forEach(function (row) {
+                if (row.style.display === 'none') return;
+                var sel = row.querySelector('.carat-select');
+                if (sel) window.populateCaratSelectForModalRow(sel, row);
+            });
+        };
     }
 })(typeof window !== 'undefined' ? window : this);

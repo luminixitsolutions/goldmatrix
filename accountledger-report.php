@@ -212,13 +212,64 @@ if (!empty($accountledger_report_hidden_ledgers)) {
     $accountledger_hidden_in_sql = implode(',', $___h);
 }
 
-// Get branches
-$branches = getListMaster("SELECT id, name FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+// Get branches — only the ones present for this shop / assigned to the user (other registry shops stay hidden)
+require_once __DIR__ . '/includes/branch_working_context.php';
+if (!function_exists('auragold_um_parse_branch_ids_string')) {
+    require_once __DIR__ . '/includes/user_management_schema.php';
+}
+$branches = getListMaster("SELECT id, name, main_branch_id FROM tbl_branches WHERE status = 1 ORDER BY name ASC");
+if (!is_array($branches)) {
+    $branches = [];
+}
+$al_branch_list_scope_main = function_exists('auragold_branches_page_list_scope_main_id')
+    ? (int) auragold_branches_page_list_scope_main_id()
+    : 0;
+if ($al_branch_list_scope_main > 0) {
+    $branches = array_values(array_filter($branches, static function ($b) use ($al_branch_list_scope_main) {
+        return (int) ($b['id'] ?? 0) === $al_branch_list_scope_main
+            || (int) ($b['main_branch_id'] ?? 0) === $al_branch_list_scope_main;
+    }));
+}
+$al_assigned_branch_ids = [];
+if (!empty($_SESSION['Admin']) && is_array($_SESSION['Admin'])) {
+    foreach ($_SESSION['Admin'] as $_al_uk => $_al_uv) {
+        if (strcasecmp((string) $_al_uk, 'user_branch_ids') === 0) {
+            $al_assigned_branch_ids = auragold_um_parse_branch_ids_string((string) $_al_uv);
+            break;
+        }
+    }
+}
+if ($al_assigned_branch_ids !== []) {
+    $al_assigned_allow = array_fill_keys($al_assigned_branch_ids, true);
+    if ($tr_effective_branch_id > 0) {
+        $al_assigned_allow[$tr_effective_branch_id] = true;
+    }
+    $branches = array_values(array_filter($branches, static function ($b) use ($al_assigned_allow) {
+        return isset($al_assigned_allow[(int) ($b['id'] ?? 0)]);
+    }));
+}
+if (function_exists('auragold_can_user_open_branch_row')) {
+    $branches = array_values(array_filter($branches, static function ($b) {
+        return auragold_can_user_open_branch_row($b);
+    }));
+}
 $al_branch_id_to_name = [];
 foreach ($branches as $_abr) {
     $aid = (int) ($_abr['id'] ?? 0);
     if ($aid > 0) {
         $al_branch_id_to_name[$aid] = trim((string) ($_abr['name'] ?? ''));
+    }
+}
+if (!empty($al_branch_id_to_name) && !empty($tr_resolved_branch_ids)) {
+    $al_allowed_ids = $tr_resolved_branch_ids;
+    $tr_resolved_branch_ids = array_values(array_filter(
+        array_map('intval', $al_allowed_ids),
+        static function ($id) use ($al_branch_id_to_name) {
+            return isset($al_branch_id_to_name[$id]);
+        }
+    ));
+    if ($tr_resolved_branch_ids === [] && $tr_effective_branch_id > 0 && isset($al_branch_id_to_name[$tr_effective_branch_id])) {
+        $tr_resolved_branch_ids = [$tr_effective_branch_id];
     }
 }
 $ledger_has_branch_id = isset($conn) && $conn instanceof mysqli && function_exists('auragold_tbl_has_column')
@@ -300,12 +351,15 @@ $voucher_types = [
     'payment_voucher' => 'Payment Voucher',
     'receipt_voucher' => 'Receipt Voucher',
     'sale_receipt_voucher' => 'Sale Receipt Voucher',
+    'contra_voucher' => 'Contra Voucher',
+    'journal_voucher' => 'Journal Voucher',
     'receipt' => 'Receipt',
     'advance' => 'Advance',
     'return' => 'Return',
     'metal_to_amount' => 'Metal To Amount',
     'amount_to_metal' => 'Amount To Metal',
     'investment_fund_transfer' => 'Investment Fund Transfer',
+    'investment_fund_installment' => 'Investment Fund Installment',
     'pdc_receivable' => 'PDC Receivable',
     'pdc_payable' => 'PDC Payable',
     'pdc_clearance' => 'PDC Clearance',
@@ -349,27 +403,89 @@ if (isset($_GET['against_voucher_type'])) {
 $filter_against_voucher_keys = array_values(array_unique($filter_against_voucher_keys));
 $against_voucher_type = count($filter_against_voucher_keys) === 1 ? esc($filter_against_voucher_keys[0]) : '';
 
+// Ledger Type / Group filters classify the party, not the voucher: resolve supplier ids from customer type master.
+$al_has_customer_types = false;
+if (isset($conn) && $conn instanceof mysqli) {
+    $__ct = @mysqli_query($conn, "SHOW TABLES LIKE 'tbl_customer_types'");
+    if ($__ct) {
+        $al_has_customer_types = mysqli_num_rows($__ct) > 0;
+        mysqli_free_result($__ct);
+    }
+}
+$al_supplier_ids_sql = '';
+if ($al_has_customer_types && function_exists('auragold_tbl_has_column')
+    && auragold_tbl_has_column($conn, 'tbl_customers', 'customer_type_id')) {
+    $al_supplier_ids_sql = "SELECT c_sup.id FROM tbl_customers c_sup"
+        . " INNER JOIN tbl_customer_types ct_sup ON ct_sup.id = c_sup.customer_type_id"
+        . " WHERE LOWER(ct_sup.name) LIKE '%supplier%' OR LOWER(ct_sup.name) LIKE '%vendor%'";
+}
+$al_cond_account  = '(COALESCE(l.customer_id, 0) = 0)';
+$al_cond_supplier = $al_supplier_ids_sql !== ''
+    ? '(l.customer_id > 0 AND l.customer_id IN (' . $al_supplier_ids_sql . '))'
+    : '(l.customer_id > 0)';
+$al_cond_customer = $al_supplier_ids_sql !== ''
+    ? '(l.customer_id > 0 AND l.customer_id NOT IN (' . $al_supplier_ids_sql . '))'
+    : '(l.customer_id > 0)';
+
+$al_has_against_inv_col = isset($conn) && $conn instanceof mysqli && function_exists('auragold_tbl_has_column')
+    ? auragold_tbl_has_column($conn, 'tbl_customer_ledger', 'against_invoice_no') : false;
+$al_against_ref_expr = $al_has_against_inv_col
+    ? "TRIM(COALESCE(NULLIF(TRIM(l.against_invoice_no), ''), l.reference_no, ''))"
+    : "TRIM(COALESCE(l.reference_no, ''))";
+
 // Build WHERE clause (customer ledger)
 $where_clause = "l.status = 1";
-$tt_conds = [];
 if (!empty($ledger_types_sel)) {
     $parts = [];
     foreach ($ledger_types_sel as $lt) {
-        $parts[] = "'" . esc($lt) . "'";
+        if ($lt === 'Customer') {
+            $parts[] = $al_cond_customer;
+        } elseif ($lt === 'Supplier') {
+            $parts[] = $al_cond_supplier;
+        } elseif ($lt === 'Account') {
+            $parts[] = $al_cond_account;
+        }
     }
-    $tt_conds[] = 'l.transaction_type IN (' . implode(',', $parts) . ')';
+    if (!empty($parts)) {
+        $where_clause .= ' AND (' . implode(' OR ', $parts) . ')';
+    }
 }
 if (!empty($filter_voucher_keys)) {
     $parts = [];
     foreach ($filter_voucher_keys as $vk) {
         $parts[] = "'" . esc($vk) . "'";
     }
-    $tt_conds[] = 'l.transaction_type IN (' . implode(',', $parts) . ')';
+    $where_clause .= ' AND l.transaction_type IN (' . implode(',', $parts) . ')';
 }
-if (count($tt_conds) === 1) {
-    $where_clause .= ' AND ' . $tt_conds[0];
-} elseif (count($tt_conds) === 2) {
-    $where_clause .= ' AND (' . $tt_conds[0] . ' OR ' . $tt_conds[1] . ')';
+if (!empty($group_ids)) {
+    $parts = [];
+    foreach ($group_ids as $g) {
+        switch ((int) $g) {
+            case 1: $parts[] = $al_cond_customer; break;
+            case 2: $parts[] = $al_cond_supplier; break;
+            case 3: $parts[] = "LOWER(COALESCE(l.customer_name,'')) LIKE '%bank%'"; break;
+            case 4: $parts[] = "LOWER(COALESCE(l.customer_name,'')) LIKE '%cash%'"; break;
+            case 5: $parts[] = "LOWER(COALESCE(l.customer_name,'')) LIKE '%sale%'"; break;
+            case 6: $parts[] = "LOWER(COALESCE(l.customer_name,'')) LIKE '%purchase%'"; break;
+        }
+    }
+    if (!empty($parts)) {
+        $where_clause .= ' AND (' . implode(' OR ', $parts) . ')';
+    }
+}
+if ($bill_to_bill_raw === 'yes') {
+    $where_clause .= " AND $al_against_ref_expr <> ''";
+} elseif ($bill_to_bill_raw === 'no') {
+    $where_clause .= " AND $al_against_ref_expr = ''";
+}
+if (!empty($filter_against_voucher_keys)) {
+    $parts = [];
+    foreach ($filter_against_voucher_keys as $vk) {
+        $parts[] = "'" . esc($vk) . "'";
+    }
+    $where_clause .= " AND EXISTS (SELECT 1 FROM tbl_customer_ledger l_ag"
+        . " WHERE l_ag.transaction_no = $al_against_ref_expr"
+        . ' AND l_ag.transaction_type IN (' . implode(',', $parts) . '))';
 }
 if (!empty($from_date)) {
     $where_clause .= " AND l.transaction_date >= '$from_date'";
@@ -380,7 +496,7 @@ if (!empty($to_date)) {
 if (!empty($invoice_no)) {
     $where_clause .= " AND l.transaction_no LIKE '%$invoice_no%'";
 }
-if (!empty($ledger_names_sel) && $active_tab !== 'balance') {
+if (!empty($ledger_names_sel)) {
     $parts = [];
     foreach ($ledger_names_sel as $ln) {
         $parts[] = "'" . esc($ln) . "'";
@@ -430,15 +546,15 @@ $payment_metal_condition = "(COALESCE(l.transaction_type,'') = 'payment' AND (AB
 $rv_pv_metal_condition = "(COALESCE(l.transaction_type,'') IN ('receipt_voucher','sale_receipt_voucher','payment_voucher') AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0)) > 0.00001))";
 $jobwork_ledger_metal_condition = "(COALESCE(l.transaction_type,'') = 'jobwork_order' AND (ABS(COALESCE(l.debit_gold,0)) + ABS(COALESCE(l.credit_gold,0)) + ABS(COALESCE(l.debit_silver,0)) + ABS(COALESCE(l.credit_silver,0))" . ($ledger_has_diamond ? " + ABS(COALESCE(l.debit_diamond,0)) + ABS(COALESCE(l.credit_diamond,0))" : "") . " > 0.00001))";
 $ledger_metal_view_condition = "($hedging_desc_condition OR $payment_metal_condition OR $rv_pv_metal_condition OR $jobwork_ledger_metal_condition)";
-// For Balance tab: exclude 'opening' from metal sum; Hedging + Job Work Order lines contribute to metal/diamond columns.
-$hedging_case = "COALESCE(l.transaction_type,'') != 'opening' AND (($hedging_desc_condition) OR ($jobwork_ledger_metal_condition))";
+// For Balance tab: exclude 'opening' from metal sum; Hedging + Job Work Order + RV/PV metal lines contribute.
+$hedging_case = "COALESCE(l.transaction_type,'') != 'opening' AND (($hedging_desc_condition) OR ($jobwork_ledger_metal_condition) OR ($rv_pv_metal_condition) OR ($payment_metal_condition))";
 
-// For Balance Amounts tab - one row per ledger account (not per branch): group by customer_id + name
-// so mixed NULL/0/branch_id for the same party does not duplicate (legacy rows vs per-branch tag).
+// For Balance Amounts tab — one row per ledger display name (not per customer_id).
+// Same name can appear as party (customer_id > 0) and bank/account lines (customer_id = 0), e.g. "BOI";
+// grouping by id + name duplicated those. View All already filters by name only.
 // Metal weight (balance tab): Hedging descriptions + Job Work Order ledger rows with metal/diamond movement.
 if ($active_tab == 'balance') {
-    // Ledger key: (customer_id > 0) ? one row per id; else nominal accounts (customer_id=0) per name
-    $al_ledger_group_expr = '(CASE WHEN l.customer_id > 0 THEN l.customer_id ELSE 0 END), l.customer_name';
+    $al_ledger_group_expr = 'LOWER(TRIM(l.customer_name))';
     $gold_pure_sql = $has_gold_pure ? "
             COALESCE(SUM(CASE WHEN $hedging_case THEN l.debit_gold_pure ELSE 0 END), 0) as total_debit_gold_pure,
             COALESCE(SUM(CASE WHEN $hedging_case THEN l.credit_gold_pure ELSE 0 END), 0) as total_credit_gold_pure,
@@ -461,7 +577,7 @@ if ($active_tab == 'balance') {
             : 'MAX(COALESCE(b.name, \'—\')) AS branch_name';
         $ledger_query = "
             SELECT 
-                l.customer_name as ledger_name,
+                MAX(TRIM(l.customer_name)) as ledger_name,
                 MAX(l.customer_id) as customer_id,
                 MAX(l.branch_id) as branch_id,
                 $al_bal_branch_name,
@@ -483,12 +599,12 @@ if ($active_tab == 'balance') {
             $al_bal_join_main
             WHERE $where_clause
             GROUP BY $al_ledger_group_expr
-            ORDER BY l.customer_name ASC
+            ORDER BY ledger_name ASC
         ";
     } else {
         $ledger_query = "
             SELECT 
-                l.customer_name as ledger_name,
+                MAX(TRIM(l.customer_name)) as ledger_name,
                 MAX(l.customer_id) as customer_id,
                 '—' as branch_name,
                 COALESCE(SUM(CASE WHEN COALESCE(l.transaction_type,'') != 'opening' THEN l.debit_amount ELSE 0 END), 0) as total_debit,
@@ -507,7 +623,7 @@ if ($active_tab == 'balance') {
             FROM tbl_customer_ledger l
             WHERE $where_clause
             GROUP BY $al_ledger_group_expr
-            ORDER BY l.customer_name ASC
+            ORDER BY ledger_name ASC
         ";
     }
     
@@ -516,11 +632,11 @@ if ($active_tab == 'balance') {
         accountledger_branch_display_name($ledger_data, $al_branch_id_to_name, $al_main_branch_id);
     }
 
-    // Calculate opening and closing balances (one per ledger: same branch scope as main sum — no per-row branch split)
+    // Calculate opening and closing balances (one per ledger name — include all customer_id variants)
     foreach ($ledger_data as &$ledger) {
         $customer_name = $ledger['ledger_name'];
-        $cid_open = (int) ($ledger['customer_id'] ?? 0);
-        $ledger_cust_id_sql = ($cid_open > 0) ? ' AND customer_id = ' . $cid_open : '';
+        // Do not filter by customer_id: name may mix party rows (id>0) and bank/account rows (id=0).
+        $ledger_cust_id_sql = '';
         // Match report WHERE on tbl_customer_ledger (incl. legacy NULL/0 when main branch is in scope)
         $ledger_branch_open_sql = $ledger_has_branch_id ? $al_branch_scope_sql_tbl : '';
 
@@ -533,11 +649,13 @@ if ($active_tab == 'balance') {
         $opening_silver = 0;
         $opening_select = "balance_amount, balance_gold, balance_silver";
         if ($has_gold_pure) $opening_select .= ", balance_gold_pure";
+        $cust_esc = mysqli_real_escape_string($conn, $customer_name);
+        $name_match_sql = "LOWER(TRIM(customer_name)) = LOWER(TRIM('" . $cust_esc . "'))";
         if (!empty($from_date)) {
             $opening_query = "
                 SELECT $opening_select
                 FROM tbl_customer_ledger
-                WHERE customer_name = '" . mysqli_real_escape_string($conn, $customer_name) . "'
+                WHERE $name_match_sql
                 AND status = 1
                 $ledger_cust_id_sql
                 $ledger_branch_open_sql
@@ -553,7 +671,6 @@ if ($active_tab == 'balance') {
                 $opening_silver = (float)($opening_balance['balance_silver'] ?? 0);
             }
             // Metal opening: sum only Hedging entries before from_date (balance_gold in DB mixes Standard+Hedging)
-            $cust_esc = mysqli_real_escape_string($conn, $customer_name);
             // Opening metal: only from Hedging entries (Standard fixing type does not contribute)
             $opening_metal_row = getRecord("
                 SELECT
@@ -561,7 +678,7 @@ if ($active_tab == 'balance') {
                     " . ($has_gold_pure ? "COALESCE(SUM(debit_gold_pure - credit_gold_pure), 0) as opening_gold_pure," : "0 as opening_gold_pure,") . "
                     COALESCE(SUM(debit_silver - credit_silver), 0) as opening_silver
                 FROM tbl_customer_ledger
-                WHERE customer_name = '$cust_esc' AND status = 1 $ledger_cust_id_sql $ledger_branch_open_sql AND transaction_date < '$from_date'
+                WHERE $name_match_sql AND status = 1 $ledger_cust_id_sql $ledger_branch_open_sql AND transaction_date < '$from_date'
                 AND LOWER(COALESCE(description,'')) LIKE '%(hedging)%'
             ");
             if ($opening_metal_row) {
@@ -575,7 +692,7 @@ if ($active_tab == 'balance') {
             $opening_row = getRecord("
                 SELECT $opening_row_select
                 FROM tbl_customer_ledger
-                WHERE customer_name = '" . mysqli_real_escape_string($conn, $customer_name) . "'
+                WHERE $name_match_sql
                 AND status = 1
                 $ledger_cust_id_sql
                 $ledger_branch_open_sql
@@ -640,7 +757,17 @@ if ($active_tab == 'balance') {
         }
     }
     unset($ledger);
-    
+
+    // "Only Balance": drop ledgers that net to zero for the selected period.
+    if ($only_balance) {
+        $ledger_data = array_values(array_filter($ledger_data, static function ($row) {
+            $closing = isset($row['closing_amt_signed'])
+                ? (float) $row['closing_amt_signed']
+                : (float) ($row['closing_amt'] ?? 0);
+            return abs($closing) > 0.00001 || abs((float) ($row['opening_amt'] ?? 0)) > 0.00001;
+        }));
+    }
+
     // Calculate totals (before pagination, from all data)
     $all_ledger_data = $ledger_data; // Keep full dataset for totals
     foreach ($all_ledger_data as $ledger) {
@@ -734,6 +861,8 @@ if ($active_tab == 'balance') {
                 WHEN l.transaction_type = 'payment_voucher' THEN 'Payment Voucher'
                 WHEN l.transaction_type = 'receipt_voucher' THEN 'Receipt Voucher'
                 WHEN l.transaction_type = 'sale_receipt_voucher' THEN 'Sale Receipt Voucher'
+                WHEN l.transaction_type = 'contra_voucher' THEN 'Contra Voucher'
+                WHEN l.transaction_type = 'journal_voucher' THEN 'Journal Voucher'
                 WHEN l.transaction_type = 'receipt' THEN 'Receipt Voucher'
                 WHEN l.transaction_type = 'advance' THEN 'Advance'
                 WHEN l.transaction_type = 'return' THEN 'Return'
@@ -743,6 +872,7 @@ if ($active_tab == 'balance') {
                 WHEN l.transaction_type = 'metal_to_amount' THEN 'Metal To Amount'
                 WHEN l.transaction_type = 'amount_to_metal' THEN 'Amount To Metal'
                 WHEN l.transaction_type = 'investment_fund_transfer' THEN 'Investment Fund Transfer'
+                WHEN l.transaction_type = 'investment_fund_installment' THEN 'Investment Fund Installment'
                 WHEN l.transaction_type = 'jobwork_order' THEN 'Job Work Order'
                 WHEN l.transaction_type = 'pdc_receivable' THEN 'PDC Receivable'
                 WHEN l.transaction_type = 'pdc_payable' THEN 'PDC Payable'
@@ -871,6 +1001,89 @@ if ($active_tab == 'balance') {
         }
     }
 
+    // Contra / Journal: rebuild Against from sibling ledger rows (opposite account Dr/Cr)
+    // for older posts that only stored "Contra Deposit/Dr", "Journal Dr", invoice-only Against, etc.
+    $cv_against_by_tid = [];
+    $cv_tid_need = [];
+    foreach ($ledger_data as $entry) {
+        $tt = (string) ($entry['transaction_type'] ?? '');
+        if ($tt !== 'contra_voucher' && $tt !== 'journal_voucher') {
+            continue;
+        }
+        $al = trim((string) ($entry['against_ledger'] ?? ''));
+        $weak = ($al === ''
+            || preg_match('/^contra\s+(deposit|withdrawal)/i', $al)
+            || preg_match('/^journal\s+(dr|cr)\s*$/i', $al));
+        if (!$weak && $tt === 'journal_voucher' && !preg_match('/\(\s*[\d.]+\s*(Dr|Cr)\s*\)/i', $al)) {
+            $weak = true;
+        }
+        if (!$weak) {
+            continue;
+        }
+        $tid = (int) ($entry['transaction_id'] ?? 0);
+        if ($tid > 0) {
+            $cv_tid_need[$tt . ':' . $tid] = ['tt' => $tt, 'tid' => $tid];
+        }
+    }
+    if (!empty($cv_tid_need)) {
+        foreach ($cv_tid_need as $pack) {
+            $tid = (int) $pack['tid'];
+            $tt_esc = mysqli_real_escape_string($conn, (string) $pack['tt']);
+            $cv_rows = getList("
+                SELECT id, transaction_id, customer_name, debit_amount, credit_amount
+                FROM tbl_customer_ledger
+                WHERE status = 1 AND transaction_type = '$tt_esc' AND transaction_id = $tid
+                ORDER BY id ASC
+            ");
+            if (!is_array($cv_rows) || $cv_rows === []) {
+                continue;
+            }
+            foreach ($cv_rows as $self) {
+                $self_id = (int) ($self['id'] ?? 0);
+                $self_dr = (float) ($self['debit_amount'] ?? 0) > 0.00001;
+                $parts = [];
+                foreach ($cv_rows as $other) {
+                    if ((int) ($other['id'] ?? 0) === $self_id) {
+                        continue;
+                    }
+                    $odr = (float) ($other['debit_amount'] ?? 0);
+                    $ocr = (float) ($other['credit_amount'] ?? 0);
+                    $other_is_dr = $odr > 0.00001;
+                    if ($other_is_dr === $self_dr) {
+                        continue;
+                    }
+                    $amt = $other_is_dr ? $odr : $ocr;
+                    $side = $other_is_dr ? 'Dr' : 'Cr';
+                    $nm = trim((string) ($other['customer_name'] ?? ''));
+                    if ($nm === '' || $amt <= 0) {
+                        continue;
+                    }
+                    $parts[] = $nm . '(' . number_format($amt, 2, '.', '') . $side . ')';
+                }
+                if ($parts === []) {
+                    foreach ($cv_rows as $other) {
+                        if ((int) ($other['id'] ?? 0) === $self_id) {
+                            continue;
+                        }
+                        $odr = (float) ($other['debit_amount'] ?? 0);
+                        $ocr = (float) ($other['credit_amount'] ?? 0);
+                        $other_is_dr = $odr > 0.00001;
+                        $amt = $other_is_dr ? $odr : $ocr;
+                        $side = $other_is_dr ? 'Dr' : 'Cr';
+                        $nm = trim((string) ($other['customer_name'] ?? ''));
+                        if ($nm === '' || $amt <= 0) {
+                            continue;
+                        }
+                        $parts[] = $nm . '(' . number_format($amt, 2, '.', '') . $side . ')';
+                    }
+                }
+                if ($parts !== []) {
+                    $cv_against_by_tid[$self_id] = implode(', ', $parts);
+                }
+            }
+        }
+    }
+
     // PI scrap settlement: stored as party Debit for correct CL math; user-facing report shows amount under Credit (same net effect as other payments).
     foreach ($ledger_data as &$entry) {
         $da = (float)($entry['debit_amount'] ?? 0);
@@ -902,6 +1115,15 @@ if ($active_tab == 'balance') {
             $entry['display_debit_amount'] = $da;
             $entry['display_credit_amount'] = $ca;
             $entry['against_ledger_display'] = $al;
+            if ($tt === 'contra_voucher' || $tt === 'journal_voucher') {
+                $eid = (int) ($entry['id'] ?? 0);
+                if ($eid > 0 && !empty($cv_against_by_tid[$eid])) {
+                    $entry['against_ledger_display'] = $cv_against_by_tid[$eid];
+                }
+                if (trim((string) ($entry['against_invoice_no'] ?? '')) === '' && trim((string) ($entry['invoice_no'] ?? '')) !== '') {
+                    $entry['against_invoice_no'] = $entry['invoice_no'];
+                }
+            }
             if ($tt === 'sale_invoice' && $ledger_nm !== 'Hedging Account' && $da > 0.00001 && $ca < 0.00001) {
                 $al_trim = trim($al);
                 if ($al_trim === '' || preg_match('/^cash\(/i', $al_trim)) {
@@ -1061,7 +1283,7 @@ function al_build_query(array $overrides = []) {
     if ($bill_to_bill_raw !== '') {
         $q['bill_to_bill'] = $bill_to_bill_raw;
     }
-    if (!empty($ledger_names_sel) && ($overrides['tab'] ?? $active_tab) !== 'balance') {
+    if (!empty($ledger_names_sel)) {
         $q['ledger_name'] = $ledger_names_sel;
     }
     if (!empty($group_ids)) {
@@ -1892,9 +2114,9 @@ html, body {
             $filter_count = 0;
             if (!empty($date_range) || !empty($from_date) || !empty($to_date)) $filter_count++;
             if (!empty($invoice_no)) $filter_count++;
-            if (!empty($tr_resolved_branch_ids)) $filter_count++;
+            if (!empty($branch_ids)) $filter_count++;
             if (!empty($bill_to_bill)) $filter_count++;
-            if (!empty($ledger_names_sel) && $active_tab !== 'balance') $filter_count++;
+            if (!empty($ledger_names_sel)) $filter_count++;
             if (!empty($group_ids)) $filter_count++;
             if (!empty($ledger_types_sel)) $filter_count++;
             if (!empty($filter_voucher_keys)) $filter_count++;
@@ -2736,6 +2958,21 @@ function viewTransactionDetails(invoiceNo, transactionType, transactionId) {
 
     if (transactionType === 'receipt_voucher' && transactionId > 0) {
         window.location.href = 'receipt-voucher.php?id=' + transactionId;
+        return;
+    }
+
+    if (transactionType === 'contra_voucher' && transactionId > 0) {
+        window.location.href = 'contra-voucher.php?id=' + transactionId;
+        return;
+    }
+
+    if (transactionType === 'journal_voucher' && transactionId > 0) {
+        window.location.href = 'journal-voucher.php?id=' + transactionId;
+        return;
+    }
+
+    if ((transactionType === 'pdc_clearance' || transactionType === 'pdc_payable' || transactionType === 'pdc_receivable') && transactionId > 0) {
+        window.location.href = 'cheque-entry.php?id=' + transactionId;
         return;
     }
     

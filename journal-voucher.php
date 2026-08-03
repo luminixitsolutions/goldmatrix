@@ -514,8 +514,25 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
         var comment = document.getElementById('comment').value;
         var items = getItems();
         if (items.length === 0) { alert('Add at least one row.'); return; }
+        var hasValid = items.some(function (it) {
+            return it.account_ledger && ((parseFloat(it.amount) || 0) > 0 || (parseFloat(it.purity_wt) || 0) > 0);
+        });
+        if (!hasValid) {
+            alert('Add at least one row with Account Ledger and Amount (or metal weight).');
+            return;
+        }
         var debitTotal = parseFloat(String(document.getElementById('debitTotal').value).replace(/,/g, '')) || 0;
         var creditTotal = parseFloat(String(document.getElementById('creditTotal').value).replace(/,/g, '')) || 0;
+        var hasDr = items.some(function (it) {
+            return it.cr_dr === 'Dr' && it.account_ledger && ((parseFloat(it.amount) || 0) > 0 || (parseFloat(it.purity_wt) || 0) > 0);
+        });
+        var hasCr = items.some(function (it) {
+            return it.cr_dr === 'Cr' && it.account_ledger && ((parseFloat(it.amount) || 0) > 0 || (parseFloat(it.purity_wt) || 0) > 0);
+        });
+        if (!hasDr || !hasCr) {
+            alert('Journal needs both sides: at least one Debit (Dr) and one Credit (Cr) account row.');
+            return;
+        }
         if (Math.abs(debitTotal - creditTotal) > 0.01) {
             alert('Debit Total and Credit Total must match.');
             return;
@@ -543,9 +560,9 @@ body { margin: 0; padding: 0; overflow-x: hidden; height: 100vh; background: #f4
             .then(function(result) {
                 var data = result.data;
                 if (result.ok && data.status === 'success') {
-                    alert('Saved successfully.');
-                    if (data.voucher_id) window.location.href = 'journal-voucher.php?id=' + data.voucher_id;
-                    else window.location.reload();
+                    alert(data.message || 'Saved successfully.');
+                    // Reload blank form ready for a new journal voucher
+                    window.location.href = 'journal-voucher.php';
                 } else {
                     alert(data.message || 'Error saving.');
                 }

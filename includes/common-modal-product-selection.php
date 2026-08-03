@@ -684,6 +684,15 @@ if (empty($common_modal_show_checkbox_column)) {
                 #productSearchModal {
                     z-index: 10700 !important;
                 }
+                /* Add Product / Add Category from product selection — stack above parent modal */
+                #productCreationModal.modal,
+                #categoryCreationModal.modal {
+                    z-index: 10800 !important;
+                }
+                body.modal-open:has(#productSelectionModal.show):has(#productCreationModal.show) .modal-backdrop:last-of-type,
+                body.modal-open:has(#productSelectionModal.show):has(#categoryCreationModal.show) .modal-backdrop:last-of-type {
+                    z-index: 10750 !important;
+                }
                 /* Row Details overlay (10850) — product picker must stack above it */
                 body.product-row-detail-modal-open #productSearchModal {
                     z-index: 10900 !important;

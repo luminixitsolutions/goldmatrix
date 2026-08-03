@@ -126,3 +126,22 @@ if (!empty($branches) && is_array($branches)) {
         }
     }
 }
+
+// Vendors (suppliers) for Add Product modal — same as product-opening.php
+$vendors = [];
+$supplier_type_row = getRecord(
+    "SELECT id FROM tbl_customer_types WHERE status = 1 AND LOWER(TRIM(name)) IN ('supplier', 'vendor') ORDER BY id ASC LIMIT 1"
+);
+$supplier_type_id = (int) ($supplier_type_row['id'] ?? 0);
+if ($supplier_type_id > 0) {
+    $vendors = getList(
+        "SELECT id, name FROM tbl_customers WHERE status = 1 AND customer_type_id = $supplier_type_id ORDER BY name ASC"
+    );
+} else {
+    $vendors = getList(
+        "SELECT id, name FROM tbl_customers WHERE status = 1 AND group_id = 2 ORDER BY name ASC"
+    );
+}
+if (!is_array($vendors)) {
+    $vendors = [];
+}

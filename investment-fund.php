@@ -1954,7 +1954,7 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Address</label>
-                                                        <textarea class="form-control form-control-sm" id="address" rows="2" placeholder="Address" style="height: 94px;" readonly></textarea>
+                                                        <textarea class="form-control form-control-sm" id="address" rows="2" placeholder="Address" style="height: 94px;"></textarea>
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Nominee Name</label>
@@ -1965,7 +1965,7 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                                                     </div>
                                                     <div class="form-group mb-0">
                                                         <label>Email</label>
-                                                        <input type="email" class="form-control form-control-sm" id="email" placeholder="Email" readonly>
+                                                        <input type="email" class="form-control form-control-sm" id="email" placeholder="Email">
                                                     </div>
                                                 </div>
                                                 <div class="col-md-5">
@@ -1981,29 +1981,29 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Maturity Date</label>
-                                                        <input type="date" class="form-control form-control-sm" id="maturityDate" value="" readonly tabindex="-1">
+                                                        <input type="date" class="form-control form-control-sm" id="maturityDate" value="">
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Redemption On</label>
-                                                        <input type="text" class="form-control form-control-sm" id="redemptionOn" placeholder="Redemption" readonly>
+                                                        <input type="text" class="form-control form-control-sm" id="redemptionOn" placeholder="Redemption">
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Contact No</label>
-                                                        <input type="text" class="form-control form-control-sm" id="contactNo" placeholder="Contact" readonly>
+                                                        <input type="text" class="form-control form-control-sm" id="contactNo" placeholder="Contact">
                                                     </div>
                                                     <div class="form-group mb-0">
                                                         <label>Relation Type</label>
-                                                        <input type="text" class="form-control form-control-sm" id="relationType" placeholder="Relation" readonly>
+                                                        <input type="text" class="form-control form-control-sm" id="relationType" placeholder="Relation">
                                                     </div>
                                                 </div>
                                                 <div class="col-md-3">
                                                     <div class="form-group">
                                                         <label>Duration</label>
-                                                        <input type="text" class="form-control form-control-sm" id="duration" placeholder="e.g. 12 months" readonly>
+                                                        <input type="text" class="form-control form-control-sm" id="duration" placeholder="e.g. 12 months">
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Inst. Type</label>
-                                                        <select class="form-control form-control-sm" id="instType" disabled>
+                                                        <select class="form-control form-control-sm" id="instType">
                                                             <option value="">Select</option>
                                                             <option value="monthly">Monthly</option>
                                                             <option value="weekly">Weekly</option>
@@ -2017,7 +2017,7 @@ if (defined('COMPANY_LEGAL_NAME') && is_string(COMPANY_LEGAL_NAME) && trim(COMPA
                                                     </div>
                                                     <div class="form-group mb-0">
                                                         <label>National Id</label>
-                                                        <input type="text" class="form-control form-control-sm" id="nationalId" placeholder="ID number" readonly>
+                                                        <input type="text" class="form-control form-control-sm" id="nationalId" placeholder="ID number">
                                                     </div>
                                                 </div>
                                             </div>
@@ -4322,6 +4322,59 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
         }
     }
 
+    function postInvestmentInstallmentsToLedger(rec, installmentPayloads, doneCb) {
+        var custName = String(rec.customer_name || '').trim();
+        var fundNo = String(rec.fund_no || '').trim();
+        if (!custName || !fundNo || !installmentPayloads || !installmentPayloads.length) {
+            if (typeof doneCb === 'function') doneCb({ ok: false, skipped: true });
+            return;
+        }
+        var ifAdminPath = window.location.pathname.replace(/[^/]*$/, '');
+        var url = ifAdminPath + 'ajax/post-investment-fund-installment-ledger.php';
+        var body = {
+            customer_id: parseInt(rec.customer_id, 10) || 0,
+            customer_name: custName,
+            fund_no: fundNo,
+            fund_local_id: String(rec.id || ''),
+            entry_by: (installmentPayloads[0] && installmentPayloads[0].entry_by) || '',
+            installments: installmentPayloads
+        };
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(body)
+        })
+            .then(function (r) {
+                return r.text().then(function (text) {
+                    var data = null;
+                    try {
+                        data = text ? JSON.parse(text) : null;
+                    } catch (e) {
+                        data = null;
+                    }
+                    if (!r.ok) {
+                        throw new Error((text && text.slice(0, 400)) || ('HTTP ' + r.status));
+                    }
+                    if (!data || typeof data !== 'object') {
+                        throw new Error((text && text.slice(0, 400)) || 'Invalid response from server');
+                    }
+                    return data;
+                });
+            })
+            .then(function (data) {
+                if (typeof doneCb === 'function') doneCb(data);
+            })
+            .catch(function (err) {
+                if (typeof doneCb === 'function') {
+                    doneCb({
+                        ok: false,
+                        message: (err && err.message) || 'Could not post installment to transaction report / ledger.'
+                    });
+                }
+            });
+    }
+
     function saveInvestmentReceiptFromModal() {
         var id = ifReceiptCtx.fundId;
         if (id == null || id === '') return;
@@ -4363,13 +4416,22 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
         var gwTotal = parseFloat(document.getElementById('ifRecGoldWt').value) || 0;
         var gwEach = shareCount > 0 ? gwTotal / shareCount : 0;
         var brkScale = shareCount > 0 ? 1 / shareCount : 1;
+        var entryByVal = document.getElementById('ifRecEntryBy').value;
+        var goldRateVal = document.getElementById('ifRecGoldRate').value;
+        var ledgerPayloads = [];
+        var saveBtn = document.getElementById('ifRecBtnSave');
+        var prevDis = saveBtn ? saveBtn.disabled : false;
+        if (saveBtn) saveBtn.disabled = true;
         for (var t = 0; t < targetIndices.length; t++) {
             ix = targetIndices[t];
             if (ix < 0 || ix >= n) continue;
             schedYmd = passbookScheduleDateYmd(rec, ix);
             var prevSlot = rec.installments[ix] || {};
+            var instNo = ix + 1;
+            var txnNo = (rec.fund_no || 'IF') + '-I' + instNo;
+            var payDesc = prevSlot.payment_desc || installmentOrdinalLabel(ix);
             var merged = Object.assign({}, prevSlot, {
-                inst_no: String(ix + 1),
+                inst_no: String(instNo),
                 inst_date: schedYmd || prevSlot.inst_date || '',
                 pay_date: payDate,
                 pay_mode: payMode,
@@ -4379,27 +4441,62 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
                     return o;
                 }),
                 amount: instAmtEach.toFixed(2),
-                gold_rate: document.getElementById('ifRecGoldRate').value,
+                gold_rate: goldRateVal,
                 gold_wt: gwEach.toFixed(3),
-                entry_by: document.getElementById('ifRecEntryBy').value,
+                entry_by: entryByVal,
                 tax: taxEach.toFixed(2),
                 tax_pct: prevSlot.tax_pct != null && prevSlot.tax_pct !== '' ? prevSlot.tax_pct : '0',
                 taxable: prevSlot.taxable != null && prevSlot.taxable !== '' ? prevSlot.taxable : '0',
                 entry_date: payDate || new Date().toISOString().slice(0, 10),
                 receipt_no: '',
                 product: '',
-                payment_desc: prevSlot.payment_desc || installmentOrdinalLabel(ix)
+                payment_desc: payDesc,
+                transaction_no: txnNo
             });
             rec.installments[ix] = merged;
+            ledgerPayloads.push({
+                inst_no: instNo,
+                inst_index: ix,
+                amount: instAmtEach,
+                tax: taxEach,
+                pay_date: payDate,
+                pay_mode: payMode,
+                gold_wt: gwEach,
+                gold_rate: parseFloat(goldRateVal) || 0,
+                entry_by: entryByVal,
+                payment_desc: payDesc,
+                transaction_no: txnNo
+            });
         }
-        recalcFundPassbookTotals(rec, n);
-        rec.saved_at = new Date().toISOString();
-        var lix = list.findIndex(function (x) { return String(x.id) === String(id); });
-        if (lix >= 0) list[lix] = rec;
-        saveFundRecords(list);
-        if (window.jQuery) window.jQuery('#investmentReceiptModal').modal('hide');
-        renderDetailInstallmentTable(rec);
-        renderFundList();
+        function finishLocalSave(ledgerData) {
+            if (ledgerData && ledgerData.ok && Array.isArray(ledgerData.posted)) {
+                ledgerData.posted.forEach(function (p) {
+                    var pNo = parseInt(p.inst_no, 10) || 0;
+                    if (pNo <= 0 || pNo > n) return;
+                    var slot = rec.installments[pNo - 1] || {};
+                    slot.ledger_posted = true;
+                    slot.ledger_id = p.ledger_id || 0;
+                    slot.transaction_no = p.transaction_no || slot.transaction_no || '';
+                    rec.installments[pNo - 1] = slot;
+                });
+            }
+            recalcFundPassbookTotals(rec, n);
+            rec.saved_at = new Date().toISOString();
+            var lix = list.findIndex(function (x) { return String(x.id) === String(id); });
+            if (lix >= 0) list[lix] = rec;
+            saveFundRecords(list);
+            if (window.jQuery) window.jQuery('#investmentReceiptModal').modal('hide');
+            renderDetailInstallmentTable(rec);
+            renderFundList();
+            if (saveBtn) saveBtn.disabled = prevDis;
+            if (ledgerData && !ledgerData.ok && !ledgerData.skipped) {
+                alert(
+                    (ledgerData.message || 'Installment saved locally, but could not post to Transaction Report / ledger.') +
+                        '\nLocal installment data was kept.'
+                );
+            }
+        }
+        postInvestmentInstallmentsToLedger(rec, ledgerPayloads, finishLocalSave);
     }
 
     function clearPassbookRowPayment(rowIndex) {
@@ -4407,6 +4504,8 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
         if (!rec) return;
         var n = getPassbookPeriodCount(rec);
         ensureInstallmentsLength(rec, n);
+        var prev = rec.installments[rowIndex] || {};
+        var txnNo = String(prev.transaction_no || ((rec.fund_no || 'IF') + '-I' + (rowIndex + 1)));
         rec.installments[rowIndex] = {};
         recalcFundPassbookTotals(rec, n);
         rec.saved_at = new Date().toISOString();
@@ -4416,6 +4515,20 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
         saveFundRecords(list);
         renderDetailInstallmentTable(rec);
         renderFundList();
+        if (prev.ledger_posted || txnNo) {
+            var ifAdminPath = window.location.pathname.replace(/[^/]*$/, '');
+            fetch(ifAdminPath + 'ajax/post-investment-fund-installment-ledger.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    action: 'void',
+                    transaction_no: txnNo,
+                    fund_no: rec.fund_no || '',
+                    customer_name: rec.customer_name || ''
+                })
+            }).catch(function () { /* best-effort void */ });
+        }
     }
 
     function formatInstTypeDisplay(v) {
@@ -6408,10 +6521,13 @@ window.IF_COMPANY_LEGAL_NAME = <?php echo json_encode($emi_voucher_company_legal
                 window.jQuery('a[href="#tabInstallmentReport"]').tab('show');
             }
             var fid = qs.get('fund_id');
-            if (fid) {
+            var fno = qs.get('fund_no');
+            if (fid || fno) {
                 var list = loadFundRecords();
                 var rec = list.filter(function (x) {
-                    return String(x.id) === String(fid);
+                    if (fid && String(x.id) === String(fid)) return true;
+                    if (fno && String(x.fund_no || '').toLowerCase() === String(fno).toLowerCase()) return true;
+                    return false;
                 })[0];
                 if (rec) {
                     selectedFundListId = rec.id;

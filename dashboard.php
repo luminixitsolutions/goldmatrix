@@ -11,7 +11,29 @@ if (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] <= 0) {
 require_once __DIR__ . '/includes/branch_profile_schema.php';
 require_once __DIR__ . '/includes/auragold_branch_data_scope.php';
 require_once __DIR__ . '/includes/dashboard_currency_display.php';
+require_once __DIR__ . '/includes/auragold_metal_rate_urls.php';
 auragold_ensure_tbl_branches_profile_columns(isset($conn_master) ? $conn_master : null);
+
+$dash_metal_rate_urls = [];
+if (isset($conn) && $conn instanceof mysqli) {
+    auragold_ensure_tbl_metal_rate_urls($conn);
+    $dash_mru_branch = function_exists('auragold_settings_branch_id')
+        ? (int) auragold_settings_branch_id()
+        : 0;
+    $dash_metal_rate_urls = auragold_get_metal_rate_urls($conn, $dash_mru_branch, true);
+}
+if ($dash_metal_rate_urls === []) {
+    // Fallback to built-in seeds if table empty / unavailable
+    foreach (auragold_metal_rate_url_default_seeds() as $seed) {
+        $dash_metal_rate_urls[] = [
+            'url' => (string) ($seed['url'] ?? ''),
+            'label' => (string) ($seed['label'] ?? ''),
+            'display' => trim((string) ($seed['label'] ?? '')) !== ''
+                ? (string) $seed['label']
+                : (string) ($seed['url'] ?? ''),
+        ];
+    }
+}
 
 /** Which branch’s dashboard rates to show and save (0 = legacy global rows). Branch logins are always scoped to their branch. */
 $dash_rates_branch_id = isset($_GET['branch']) ? (int) $_GET['branch'] : 0;
@@ -1346,11 +1368,19 @@ $dash_metal_icons = [
                 class="form-control form-control-sm js-dash-rate-source-url" autocomplete="off"
                 data-metal="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>">
                 <option value="">Select URL to fetch live rates…</option>
-                <option value="https://dubaicityofgold.com/">https://dubaicityofgold.com/</option>
-                <option value="https://igold.ae/gold-rate">https://igold.ae/gold-rate</option>
-                <option value="https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate">https://ae.fkjewellers.com/pages/today-gold-price-in-uae-gold-rate</option>
-                <option value="https://www.kitco.com/">https://www.kitco.com/</option>
-                <option value="https://goldprice.org/">https://goldprice.org/</option>
+                <?php foreach ($dash_metal_rate_urls as $mru): ?>
+                  <?php
+                  $mruUrl = trim((string) ($mru['url'] ?? ''));
+                  if ($mruUrl === '') {
+                      continue;
+                  }
+                  $mruLabel = trim((string) ($mru['display'] ?? $mru['label'] ?? ''));
+                  if ($mruLabel === '') {
+                      $mruLabel = $mruUrl;
+                  }
+                  ?>
+                <option value="<?= htmlspecialchars($mruUrl, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($mruLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
               </select>
               <input type="hidden" class="js-meta-source" value="<?= htmlspecialchars((string) ($m['source_url'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
               <input type="hidden" class="js-meta-ounce" value="<?= htmlspecialchars(preg_replace('/[^\d.]/', '', (string) ($m['ounce_rate'] ?? '0')), ENT_QUOTES, 'UTF-8') ?>">

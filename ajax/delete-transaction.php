@@ -311,6 +311,70 @@ if ($type === 'payment_voucher') {
     exit;
 }
 
+// Journal Voucher: delete voucher, items, and ledger rows.
+if ($type === 'journal_voucher' || $type === 'journal') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $voucher = getRecord("SELECT id, voucher_no FROM tbl_journal_vouchers WHERE id = $id");
+    if (!$voucher) {
+        echo json_encode(['status' => 'error', 'message' => 'Journal voucher not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        if (!mysqli_query($conn, "
+            DELETE FROM tbl_customer_ledger
+            WHERE transaction_type = 'journal_voucher' AND transaction_id = $id AND status = 1
+        ")) {
+            throw new Exception('Ledger delete failed: ' . mysqli_error($conn));
+        }
+        mysqli_query($conn, "DELETE FROM tbl_journal_voucher_items WHERE voucher_id = $id");
+        if (!mysqli_query($conn, "DELETE FROM tbl_journal_vouchers WHERE id = $id")) {
+            throw new Exception('Failed to delete journal voucher');
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Journal voucher deleted successfully']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// Contra Voucher: delete voucher, items, and ledger rows.
+if ($type === 'contra_voucher' || $type === 'contra') {
+    if ($id <= 0) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
+        exit;
+    }
+    $voucher = getRecord("SELECT id, voucher_no FROM tbl_contra_vouchers WHERE id = $id");
+    if (!$voucher) {
+        echo json_encode(['status' => 'error', 'message' => 'Contra voucher not found']);
+        exit;
+    }
+    mysqli_begin_transaction($conn);
+    try {
+        if (!mysqli_query($conn, "
+            DELETE FROM tbl_customer_ledger
+            WHERE transaction_type = 'contra_voucher' AND transaction_id = $id AND status = 1
+        ")) {
+            throw new Exception('Ledger delete failed: ' . mysqli_error($conn));
+        }
+        mysqli_query($conn, "DELETE FROM tbl_contra_voucher_items WHERE voucher_id = $id");
+        if (!mysqli_query($conn, "DELETE FROM tbl_contra_vouchers WHERE id = $id")) {
+            throw new Exception('Failed to delete contra voucher');
+        }
+        mysqli_commit($conn);
+        echo json_encode(['status' => 'success', 'message' => 'Contra voucher deleted successfully']);
+    } catch (Exception $e) {
+        mysqli_rollback($conn);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
 // Receipt Voucher: delete voucher, items, and ledger rows (Cash/Bank + party).
 if ($type === 'receipt_voucher') {
     if ($id <= 0) {

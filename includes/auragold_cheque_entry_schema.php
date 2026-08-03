@@ -404,7 +404,7 @@ if (!function_exists('auragold_save_cheque_entry')) {
         $limited_update = $id > 0 && !empty($data['limited_update']);
 
         if ($limited_update) {
-            $existing = auragold_get_cheque_entry_by_id($conn, $id, $branch_id);
+            $existing = auragold_get_cheque_entry_by_id($conn, $id, 0);
             if (!$existing) {
                 return ['ok' => false, 'message' => 'Cheque entry not found.'];
             }
@@ -463,6 +463,13 @@ if (!function_exists('auragold_save_cheque_entry')) {
         $nsf_fees = isset($data['nsf_fees']) ? (float) $data['nsf_fees'] : 0.0;
         $recoverable = !empty($data['recoverable']) ? 1 : 0;
 
+        // When marking Cleared without a cleared date, default to today so ledger date is set.
+        $status_for_date = trim((string) ($fields['status'] ?? ''));
+        $bcd_for_date = trim((string) ($data['bounced_cleared_date'] ?? ''));
+        if (strcasecmp($status_for_date, 'Cleared') === 0 && ($bcd_for_date === '' || $bcd_for_date === '0000-00-00')) {
+            $data['bounced_cleared_date'] = date('Y-m-d');
+        }
+
         $esc = static function ($v) use ($conn) {
             return mysqli_real_escape_string($conn, (string) $v);
         };
@@ -520,7 +527,7 @@ if (!function_exists('auragold_save_cheque_entry')) {
             $saved_id = (int) mysqli_insert_id($conn);
         }
 
-        $entry = auragold_get_cheque_entry_by_id($conn, $saved_id, $branch_id);
+        $entry = auragold_get_cheque_entry_by_id($conn, $saved_id, 0);
         $new_status = trim((string) ($fields['status'] ?? ''));
 
         if ($saved_id > 0) {
@@ -531,14 +538,30 @@ if (!function_exists('auragold_save_cheque_entry')) {
             } elseif ($user_id <= 0 && !empty($_SESSION['user_id'])) {
                 $user_id = (int) $_SESSION['user_id'];
             }
-            $clearance = auragold_sync_cheque_entry_clearance($conn, $branch_id, $saved_id, $user_id);
+            // Prefer document branch on the cheque row for ledger posting / Account Ledger filter.
+            $clearance_branch = $branch_id;
+            if (is_array($entry) && (int) ($entry['branch_id'] ?? 0) > 0) {
+                $clearance_branch = (int) $entry['branch_id'];
+            }
+            $clearance = auragold_sync_cheque_entry_clearance($conn, $clearance_branch, $saved_id, $user_id);
             if (strcasecmp($new_status, 'Cleared') === 0 && empty($clearance['ok'])) {
                 return [
                     'ok' => false,
                     'message' => (string) ($clearance['message'] ?? 'PDC clearance ledger posting failed.'),
                 ];
             }
-            $entry = auragold_get_cheque_entry_by_id($conn, $saved_id, $branch_id);
+            $entry = auragold_get_cheque_entry_by_id($conn, $saved_id, 0);
+            $ok_message = $id > 0 ? 'Cheque entry updated.' : 'Cheque entry saved.';
+            if (strcasecmp($new_status, 'Cleared') === 0 && !empty($clearance['ok']) && !empty($clearance['message'])) {
+                $ok_message = (string) $clearance['message'];
+            }
+
+            return [
+                'ok' => true,
+                'message' => $ok_message,
+                'id' => $saved_id,
+                'entry' => $entry,
+            ];
         }
 
         return [

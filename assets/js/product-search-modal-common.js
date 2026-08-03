@@ -179,6 +179,30 @@ function searchProducts(searchTerm) {
         });
 }
 
+// Build product object from search result row (payload JSON or data-* fallbacks).
+function parseProductSearchItemFromClick(item) {
+    var product = {};
+    if (!item) return product;
+    var enc = item.getAttribute('data-product-payload');
+    try {
+        if (enc) product = JSON.parse(decodeURIComponent(enc));
+    } catch (err) {}
+    if (!product || typeof product !== 'object') product = {};
+    if ((product.id == null || product.id === '') && (product.product_id == null || product.product_id === '')) {
+        var pid = item.getAttribute('data-product-id');
+        if (pid) product.id = pid;
+    }
+    if (product.characteristic_id == null || product.characteristic_id === '') {
+        var cid = item.getAttribute('data-characteristic-id');
+        if (cid) product.characteristic_id = cid;
+    }
+    if (product.metal_id == null || product.metal_id === '') {
+        var mid = item.getAttribute('data-metal-id');
+        if (mid) product.metal_id = mid;
+    }
+    return product;
+}
+
 // Select product from search results — fetch full get-product-details so product.taxes (tbl_product_tax) is present
 function selectProductFromSearch(product) {
     if (!currentProductRow) return;
@@ -188,6 +212,7 @@ function selectProductFromSearch(product) {
     var pidNum = parseInt(String(rawPid != null ? rawPid : ''), 10);
     if (isNaN(pidNum) || pidNum <= 0) {
         console.warn('[GST] product search: invalid or missing product_id', product);
+        closeProductSearchModal();
         return;
     }
     var cid = product && product.characteristic_id != null && product.characteristic_id !== '' ? String(product.characteristic_id) : '';
@@ -198,8 +223,13 @@ function selectProductFromSearch(product) {
     var midNum = parseInt(metalIdStr, 10);
     
     function applyFullProduct(full) {
-        populateRowWithProduct(row, full);
-        closeProductSearchModal();
+        try {
+            populateRowWithProduct(row, full);
+        } catch (err) {
+            console.error('populateRowWithProduct failed', err);
+        } finally {
+            closeProductSearchModal();
+        }
         if (typeof window.refreshMobileInlineProductFormIfOpen === 'function') {
             window.refreshMobileInlineProductFormIfOpen(row);
         }
@@ -217,12 +247,9 @@ function selectProductFromSearch(product) {
         if (window.AURAGOLD_LOG_PRODUCT_SELECT !== false) {
             console.log('[get-product-details] full JSON response', response);
         }
-        if (!response || !response.success) {
-            console.error('API Error:', response && response.message);
-            return;
-        }
-        if (!response.product) {
-            console.error('API Error: missing product payload');
+        if (!response || !response.success || !response.product) {
+            console.warn('[get-product-details] using search list payload:', response && response.message, product);
+            applyFullProduct(product);
             return;
         }
         applyFullProduct(response.product);
@@ -269,12 +296,7 @@ if (!window._auragoldProductSearchItemClickBound) {
         var item = e.target.closest('#productSearchModal .product-search-item');
         if (!item) return;
         e.preventDefault();
-        var enc = item.getAttribute('data-product-payload');
-        var product = {};
-        try {
-            if (enc) product = JSON.parse(decodeURIComponent(enc));
-        } catch (err) {}
-        selectProductFromSearch(product);
+        selectProductFromSearch(parseProductSearchItemFromClick(item));
     });
 }
 

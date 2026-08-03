@@ -7,6 +7,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/login_authenticate.php';
 require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/login_financial_years_helper.php';
+require_once __DIR__ . '/includes/auragold_user_login_dashboard.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');
@@ -40,7 +41,9 @@ if ($url_scope_id <= 0) {
         header('Location: index.php?login_error=' . rawurlencode('This server address is not assigned to any branch. Set subdomain URL or IP in Branch settings.'));
         exit;
     }
-} elseif (!auragold_super_portal_login_target_ok($target_url) && $login_branch_id !== $url_scope_id) {
+} elseif (!auragold_super_portal_login_target_ok($target_url)
+    && !(auragold_gm_portal_login_target_ok($target_url) && auragold_username_is_superadmin($username) && $login_branch_id === 0)
+    && $login_branch_id !== $url_scope_id) {
     header('Location: index.php?login_error=' . rawurlencode('Selected branch does not match the server address.'));
     exit;
 }
@@ -59,13 +62,14 @@ if ($posted_db_name !== '' && function_exists('auragold_login_expected_db_name_f
 }
 
 $portalOk = auragold_super_portal_login_target_ok($target_url);
-if (!$portalOk) {
+$gmPortalOk = auragold_gm_portal_login_target_ok($target_url);
+if (!$portalOk && !$gmPortalOk) {
     if (strcasecmp($username, 'superbranch') === 0) {
         header('Location: index.php?login_error=' . rawurlencode('Super branch login is only allowed from the main GoldMatrix portal URL (main.goldmatrixsoftware.com).'));
         exit;
     }
     if ($login_branch_id === 0 && auragold_username_is_superadmin($username)) {
-        header('Location: index.php?login_error=' . rawurlencode('Superadmin login to the default main branch is only allowed from the main GoldMatrix portal URL (main.goldmatrixsoftware.com).'));
+        header('Location: index.php?login_error=' . rawurlencode('Superadmin login to the default main branch is only allowed from the main GoldMatrix portal URL (main.goldmatrixsoftware.com) or the GM portal URL (gm.goldmatrixsoft.com).'));
         exit;
     }
 }
@@ -81,6 +85,11 @@ if (!empty($result['success'])) {
             auragold_login_abort_to_index($ctx['message'] ?? 'Could not open branch database.');
         }
         $_SESSION['auragold_login_branch_id'] = $login_branch_id;
+        if (auragold_username_is_superadmin($username) && auragold_gm_portal_login_target_ok($target_url)) {
+            $_SESSION['auragold_may_create_main_branch'] = 1;
+        } else {
+            unset($_SESSION['auragold_may_create_main_branch']);
+        }
         $ls = isset($_SESSION['login_source']) ? (string) $_SESSION['login_source'] : '';
         if ($ls === 'user') {
             if ($login_branch_id > 0) {
@@ -139,7 +148,7 @@ if (!empty($result['success'])) {
             }
         }
 
-        header('Location: dashboard.php');
+        header('Location: ' . auragold_resolve_post_login_redirect_url((int) ($_SESSION['user_id'] ?? 0)));
         exit;
     } catch (Throwable $e) {
         if (function_exists('error_log')) {

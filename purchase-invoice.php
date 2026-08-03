@@ -22,7 +22,7 @@ $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherS
 
 // Load Karat master data (Purchase + Common)
 require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
-$carats = auragold_get_carat_list($conn, 'purchase');
+$carats = auragold_get_carat_list($conn, 'purchase', $auragold_working_branch_id);
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_location') . " ORDER BY id ASC");
@@ -3229,7 +3229,7 @@ include 'includes/common-modal.php';
 
 <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
-<script src="assets/js/product-modal-add-item-common.js"></script>
+<script src="assets/js/product-modal-add-item-common.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-add-item-common.js'); ?>"></script>
 <?php require __DIR__ . '/includes/auragold-gst-page-bootstrap.php'; ?>
 <script src="assets/js/product-list-table-shared.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-list-table-shared.js'); ?>"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -3239,6 +3239,7 @@ include 'includes/common-modal.php';
     // Runs after footer-script.php (jQuery, Bootstrap). EDIT_ORDER_DATA and master data are valid JSON.
     // Master data for dropdowns (safe fallbacks so no invalid/empty JSON)
     const carats = <?php echo json_encode(isset($carats) && is_array($carats) ? $carats : []); ?>;
+    window.carats = carats;
     const locations = <?php echo json_encode(isset($locations) && is_array($locations) ? $locations : []); ?>;
     const categories = <?php echo json_encode(isset($categories) && is_array($categories) ? $categories : []); ?>;
     const metals = <?php echo json_encode(isset($metals) && is_array($metals) ? $metals : []); ?>;
@@ -4025,18 +4026,13 @@ window.PB_PAGE_CONFIG = {
             }, 300);
         });
         
-        // Handle invoice selection from suggestions
-        $(document).on('click', '.invoice-suggestion-item', function() {
-            const invoiceId = $(this).data('invoice-id');
-            const invoiceNo = $(this).data('invoice-no');
-            
-            // Clear search input
+        // Handle invoice selection from suggestions → open in edit mode (?id=)
+        $(document).on('click', '#saleInvoiceSuggestions .invoice-suggestion-item', function() {
+            const invoiceId = parseInt($(this).data('invoice-id'), 10) || 0;
             saleInvoiceSearchInput.val('');
             saleInvoiceSuggestions.hide();
-            
-            // Load the invoice
-            if (invoiceId) {
-                loadOrder(invoiceId);
+            if (invoiceId > 0) {
+                window.location.href = 'purchase-invoice.php?id=' + invoiceId;
             }
         });
         
@@ -5421,7 +5417,8 @@ window.PB_PAGE_CONFIG = {
         // Populate dropdowns
         const caratSelect = row.querySelector('.carat-select');
         if (caratSelect) {
-            populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
+            if (typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(caratSelect, row);
+            else populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
         }
         
         const locationSelect = row.querySelector('.location-select');
@@ -6310,7 +6307,9 @@ window.PB_PAGE_CONFIG = {
                     }
                     // Populate carat and location dropdowns
                     tbody.querySelectorAll('.carat-select').forEach(function(select) {
-                        populateSelect(select, carats, 'id', 'name', 'Select Karat');
+                        var crow = select.closest('tr');
+                        if (typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(select, crow);
+                        else populateSelect(select, carats, 'id', 'name', 'Select Karat');
                     });
                     
                     tbody.querySelectorAll('.location-select').forEach(function(select) {
@@ -6500,7 +6499,9 @@ window.PB_PAGE_CONFIG = {
                         }
                         // Populate carat and location dropdowns
                         tbody.querySelectorAll('.carat-select').forEach(function(select) {
-                            populateSelect(select, carats, 'id', 'name', 'Select Karat');
+                            var crow = select.closest('tr');
+                            if (typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(select, crow);
+                            else populateSelect(select, carats, 'id', 'name', 'Select Karat');
                         });
                         
                         tbody.querySelectorAll('.location-select').forEach(function(select) {
@@ -7683,6 +7684,14 @@ window.PB_PAGE_CONFIG = {
     
     // Update a merged Product List row from current modal rows (re-merge and save)
     function updateMergedRowFromModalRows(rowId, modalRowsData) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function') {
+            var _qFn = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(rowId, modalRowsData, _qFn ? { quantityFromLine: _qFn } : {});
+            return;
+        }
         const row = document.getElementById(rowId);
         if (!row || !modalRowsData || modalRowsData.length === 0) return;
         var productNames = modalRowsData.map(function(d) { return (d.product_name || '').trim(); }).filter(Boolean);
@@ -7787,6 +7796,15 @@ window.PB_PAGE_CONFIG = {
     
     // Update Product List table row with data from Product Selection modal row
     function updateProductListRowFromModalRow(productListRowId, modalRow) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function' && typeof getModalRowDataFromRow === 'function' && modalRow) {
+            var _d = getModalRowDataFromRow(modalRow, true);
+            var _qFn2 = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn2 = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn2 = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn2 = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(productListRowId, [_d], _qFn2 ? { quantityFromLine: _qFn2 } : {});
+            return;
+        }
         const productListRow = document.getElementById(productListRowId);
         if (!productListRow || !modalRow) {
             console.error('Row not found');
@@ -10424,7 +10442,8 @@ window.PB_PAGE_CONFIG = {
         // Populate dropdowns (location, carat, etc.)
         const caratSelect = row.querySelector('.carat-select');
         if (caratSelect && typeof populateSelect === 'function') {
-            populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
+            if (typeof populateCaratSelectForModalRow === 'function') populateCaratSelectForModalRow(caratSelect, row);
+            else populateSelect(caratSelect, carats, 'id', 'name', 'Select Karat');
             if (item.carat_id) {
                 caratSelect.value = item.carat_id;
             }

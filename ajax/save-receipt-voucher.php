@@ -3,6 +3,7 @@ session_start();
 require_once '../config.php';
 require_once __DIR__ . '/../includes/ensure_customer_ledger_branch_column.php';
 require_once __DIR__ . '/../includes/auragold_metal_exchange_stock.php';
+require_once __DIR__ . '/../includes/auragold_ensure_payment_mode_ledger.php';
 
 header('Content-Type: application/json');
 
@@ -50,25 +51,21 @@ try {
     $metal_exchange_barcodes_out = [];
 
     $rv_money_types = ['cash', 'bank', 'cheque', 'upi', 'card'];
+    $rv_company_types = ['cash', 'bank', 'cheque', 'upi', 'card', 'metal'];
     $sum_money_from_items = 0.0;
     $party_against_display = '';
     $party_against_parts = [];
     if (is_array($items)) {
         foreach ($items as $it) {
             $pt = strtolower(trim($it['payment_type'] ?? ''));
-            if (!in_array($pt, $rv_money_types, true)) {
-                continue;
+            $a = (float) ($it['amount'] ?? 0);
+            if (in_array($pt, $rv_money_types, true)) {
+                $sum_money_from_items += $a;
             }
-            $a = (float)($it['amount'] ?? 0);
-            $sum_money_from_items += $a;
-            if ($a > 0) {
-                $d = trim($it['deposit_into'] ?? '');
-                if ($d === '' && $pt === 'cash') {
-                    $d = 'Cash';
-                }
-                if ($d !== '') {
-                    $party_against_parts[] = $d . '(' . number_format($a, 2) . 'Dr)';
-                }
+            if ($a > 0 && in_array($pt, $rv_company_types, true)) {
+                $d = auragold_payment_mode_default_ledger_name($pt, trim((string) ($it['deposit_into'] ?? '')));
+                // Company ledger is Credited → show Cr on party against
+                $party_against_parts[] = $d . '(' . number_format($a, 2) . 'Cr)';
             }
         }
     }
@@ -516,19 +513,19 @@ try {
     $prev_silver = (float)($last_balance['balance_silver'] ?? 0);
     $prev_gold_pure = $use_gold_pure ? (float)($last_balance['balance_gold_pure'] ?? 0) : 0.000;
 
-    // Receipt: money on party Credit side; Cash/Bank Debit (money in).
-    // balance_amount follows CL = opening + Dr − Cr → Credit reduces running balance.
-    // Metal: debit gold/silver on customer (main line). Scrap rupee value: extra Credit line(s) vs OJB.
-    $new_balance_amt_final = $prev_amt - $total_amount;
-    $new_balance_gold = $prev_gold - $total_gold;
-    $new_balance_silver = $prev_silver - $total_silver;
+    // Receipt Voucher: money + metal on party Debit side; company Cash/Bank/Metal Credit.
+    // balance_amount follows CL = opening + Dr − Cr → Debit increases running balance.
+    // Scrap rupee value: extra Debit line(s) vs OJB.
+    $new_balance_amt_final = $prev_amt + $total_amount;
+    $new_balance_gold = $prev_gold + $total_gold;
+    $new_balance_silver = $prev_silver + $total_silver;
     $debit_gold = $total_gold;
     $credit_gold = 0;
     $debit_silver = $total_silver;
     $credit_silver = 0;
     $debit_gold_pure = $total_gold_pure;
     $credit_gold_pure = 0;
-    $new_balance_gold_pure = $use_gold_pure ? ($prev_gold_pure - $debit_gold_pure) : 0.000;
+    $new_balance_gold_pure = $use_gold_pure ? ($prev_gold_pure + $debit_gold_pure) : 0.000;
 
     $sum_scrap_amt = 0.0;
     foreach ($scrap_ledger_segments as $seg) {
@@ -541,6 +538,9 @@ try {
     $desc = (strtolower(trim($against)) === 'against advance')
         ? "Receipt Voucher $voucher_no (Advance Adjusted - " . number_format($total_amount, 2) . ")"
         : "Receipt Voucher: $voucher_no";
+    if ($total_gold > 0 || $total_silver > 0) {
+        $desc .= " (Hedging)";
+    }
     $desc_esc = mysqli_real_escape_string($conn, $desc);
     $has_against = @mysqli_query($conn, "SHOW COLUMNS FROM tbl_customer_ledger LIKE 'against_ledger'");
     $ledger_has_against_cols = ($has_against && mysqli_num_rows($has_against) > 0);
@@ -563,8 +563,8 @@ try {
         : "balance_amount, balance_gold, balance_silver,";
 
     if (empty($scrap_ledger_segments) || $sum_scrap_amt <= 0) {
-        $debit_amt = 0;
-        $credit_amt = $total_amount;
+        $debit_amt = $total_amount;
+        $credit_amt = 0;
         $ledger_debit_credit_vals = $use_gold_pure
             ? "$debit_gold, $credit_gold, $debit_gold_pure, $credit_gold_pure, $debit_silver, $credit_silver,"
             : "$debit_gold, $credit_gold, $debit_silver, $credit_silver,";
@@ -603,10 +603,10 @@ try {
             throw new Exception('Customer ledger entry failed: ' . mysqli_error($conn));
         }
     } else {
-        $money_credit = max(0.0, $total_amount - $sum_scrap_amt);
-        $new_balance_amt_main = $prev_amt - $money_credit;
-        $debit_amt = 0;
-        $credit_amt = $money_credit;
+        $money_debit = max(0.0, $total_amount - $sum_scrap_amt);
+        $new_balance_amt_main = $prev_amt + $money_debit;
+        $debit_amt = $money_debit;
+        $credit_amt = 0;
         $ledger_debit_credit_vals = $use_gold_pure
             ? "$debit_gold, $credit_gold, $debit_gold_pure, $credit_gold_pure, $debit_silver, $credit_silver,"
             : "$debit_gold, $credit_gold, $debit_silver, $credit_silver,";
@@ -651,11 +651,11 @@ try {
             if ($samt <= 0) {
                 continue;
             }
-            $run_bal_amt -= $samt;
+            $run_bal_amt += $samt;
             $ojb_no_seg = $seg['ojb'] ?? '';
             $desc_scrap_esc = mysqli_real_escape_string($conn, $desc . ' (Scrap ' . $ojb_no_seg . ')');
             if ($ledger_has_against_cols) {
-                $agl = mysqli_real_escape_string($conn, $ojb_no_seg . '(' . number_format($samt, 2) . 'Dr)');
+                $agl = mysqli_real_escape_string($conn, $ojb_no_seg . '(' . number_format($samt, 2) . 'Cr)');
                 $agi = mysqli_real_escape_string($conn, $ojb_no_seg);
                 $against_vals_scrap = ", '$agl', '$agi'";
             } else {
@@ -683,8 +683,8 @@ try {
                     $voucher_id,
                     '$voucher_no',
                     '$voucher_date',
-                    0,
                     $samt,
+                    0,
                     $ledger_zero_metal
                     $ledger_bal_scrap
                     '$desc_scrap_esc',
@@ -703,100 +703,163 @@ try {
 
     $new_balance_amt = $new_balance_amt_final;
 
-    // Cash / Bank / Cheque / UPI / Card: debit (money in), same transaction_id so delete/update stays in sync
+    // Cash / Bank / Metal / company ledgers: Credit payment mode (double-entry vs party Debit)
     $against_inv_esc = mysqli_real_escape_string($conn, $ref_no !== '' ? $ref_no : $voucher_no);
     $voucher_no_db = mysqli_real_escape_string($conn, $voucher_no);
     $voucher_date_db = mysqli_real_escape_string($conn, $voucher_date);
 
+    $company_post_items = [];
     if (is_array($items) && count($items) > 0) {
         foreach ($items as $item) {
             $pt = strtolower(trim($item['payment_type'] ?? ''));
-            $line_amt = (float)($item['amount'] ?? 0);
-            $dep_raw = trim($item['deposit_into'] ?? '');
-            if ($dep_raw === '' && $pt === 'cash') {
-                $dep_raw = 'Cash';
-            }
-            if ($line_amt <= 0 || $dep_raw === '') {
+            if (!in_array($pt, $rv_company_types, true)) {
                 continue;
             }
-            $dep_esc = esc($dep_raw);
-            if (!in_array($pt, $rv_money_types, true)) {
+            $line_amt = (float) ($item['amount'] ?? 0);
+            $dep_raw = auragold_payment_mode_default_ledger_name($pt, trim((string) ($item['deposit_into'] ?? '')));
+            $line_gold = 0.0;
+            $line_silver = 0.0;
+            if ($pt === 'metal') {
+                $mid = isset($item['metal_id']) ? (int) $item['metal_id'] : 0;
+                $wt = (float) ($item['weight'] ?? 0);
+                if ($mid > 0 && $wt > 0) {
+                    if (in_array($mid, $gold_metal_ids, true)) {
+                        $line_gold = $wt;
+                    } elseif (in_array($mid, $silver_metal_ids, true)) {
+                        $line_silver = $wt;
+                    }
+                }
+            }
+            if ($line_amt <= 0 && $line_gold <= 0 && $line_silver <= 0) {
                 continue;
             }
+            $company_post_items[] = [
+                'payment_type' => $pt,
+                'deposit_into' => $dep_raw,
+                'amount' => $line_amt,
+                'gold' => $line_gold,
+                'silver' => $line_silver,
+            ];
+        }
+    }
+    // Fallback: voucher total with no item lines → credit company-name ledger
+    if ($company_post_items === [] && $total_amount > 0) {
+        $company_post_items[] = [
+            'payment_type' => 'cash',
+            'deposit_into' => auragold_payment_company_ledger_name(),
+            'amount' => $total_amount,
+            'gold' => 0.0,
+            'silver' => 0.0,
+        ];
+    }
 
-            $cash_balance_record = getRecord("
-                SELECT balance_amount
-                FROM tbl_customer_ledger
-                WHERE customer_name = '$dep_esc'
-                AND status = 1
-                $ledger_br_scope
-                ORDER BY transaction_date DESC, id DESC
-                LIMIT 1
-            ");
-            $cash_prev_balance = (float)($cash_balance_record['balance_amount'] ?? 0);
-            $cash_new_balance = $cash_prev_balance + $line_amt;
-            $cash_desc_esc = mysqli_real_escape_string($conn, "Receipt from {$customer_name} (Receipt Voucher {$voucher_no})");
-            $ca_line_esc = mysqli_real_escape_string($conn, accountledger_against_party_payment_label($customer_name, $pt, $line_amt, 'Cr'));
+    foreach ($company_post_items as $citem) {
+        $pt = (string) $citem['payment_type'];
+        $line_amt = (float) $citem['amount'];
+        $line_gold = (float) $citem['gold'];
+        $line_silver = (float) $citem['silver'];
+        $dep_raw = trim((string) $citem['deposit_into']);
+        if ($dep_raw === '') {
+            $dep_raw = auragold_payment_company_ledger_name();
+        }
 
-            if ($ledger_has_against_cols) {
-                $cash_ledger_sql = "
-                    INSERT INTO tbl_customer_ledger (
-                        customer_id" . $ledger_branch_sql_col . ", customer_name, transaction_type, transaction_id, transaction_no,
-                        transaction_date, debit_amount, credit_amount,
-                        balance_amount, balance_gold, balance_silver,
-                        description, reference_no, status, created_by, created_at,
-                        against_ledger, against_invoice_no
-                    ) VALUES (
-                        0" . $ledger_branch_sql_val . ",
-                        '$dep_esc',
-                        'receipt_voucher',
-                        $voucher_id,
-                        '$voucher_no_db',
-                        '$voucher_date_db',
-                        $line_amt,
-                        0,
-                        $cash_new_balance,
-                        0,
-                        0,
-                        '$cash_desc_esc',
-                        $ref_sql,
-                        1,
-                        " . ($user_id ? $user_id : 'NULL') . ",
-                        NOW(),
-                        '$ca_line_esc',
-                        '$against_inv_esc'
-                    )
-                ";
-            } else {
-                $cash_ledger_sql = "
-                    INSERT INTO tbl_customer_ledger (
-                        customer_id" . $ledger_branch_sql_col . ", customer_name, transaction_type, transaction_id, transaction_no,
-                        transaction_date, debit_amount, credit_amount,
-                        balance_amount, balance_gold, balance_silver,
-                        description, reference_no, status, created_by, created_at
-                    ) VALUES (
-                        0" . $ledger_branch_sql_val . ",
-                        '$dep_esc',
-                        'receipt_voucher',
-                        $voucher_id,
-                        '$voucher_no_db',
-                        '$voucher_date_db',
-                        $line_amt,
-                        0,
-                        $cash_new_balance,
-                        0,
-                        0,
-                        '$cash_desc_esc',
-                        $ref_sql,
-                        1,
-                        " . ($user_id ? $user_id : 'NULL') . ",
-                        NOW()
-                    )
-                ";
-            }
-            if (!mysqli_query($conn, $cash_ledger_sql)) {
-                throw new Exception('Cash/Bank ledger entry failed: ' . mysqli_error($conn));
-            }
+        $ensured = auragold_ensure_payment_mode_ledger($conn, $dep_raw, $pt, $rv_branch_for_ledger);
+        if (!$ensured['ok']) {
+            throw new Exception('Could not create company ledger "' . $dep_raw . '": ' . ($ensured['message'] ?? ''));
+        }
+        $dep_raw = $ensured['name'] !== '' ? $ensured['name'] : $dep_raw;
+        $dep_esc = esc($dep_raw);
+
+        $cash_balance_record = getRecord("
+            SELECT balance_amount, balance_gold, balance_silver
+            FROM tbl_customer_ledger
+            WHERE customer_name = '$dep_esc'
+            AND status = 1
+            $ledger_br_scope
+            ORDER BY transaction_date DESC, id DESC
+            LIMIT 1
+        ");
+        $cash_prev_balance = (float) ($cash_balance_record['balance_amount'] ?? 0);
+        $cash_prev_gold = (float) ($cash_balance_record['balance_gold'] ?? 0);
+        $cash_prev_silver = (float) ($cash_balance_record['balance_silver'] ?? 0);
+        // Credit decreases company running CL
+        $cash_new_balance = $cash_prev_balance - $line_amt;
+        $cash_new_gold = $cash_prev_gold - $line_gold;
+        $cash_new_silver = $cash_prev_silver - $line_silver;
+        $sl_ledger = mysqli_real_escape_string(
+            $conn,
+            accountledger_against_party_payment_label($customer_name, $pt, $line_amt > 0 ? $line_amt : max($line_gold, $line_silver), 'Dr')
+        );
+        $cash_desc_esc = mysqli_real_escape_string($conn, "Receipt mode ({$pt}) from {$customer_name} (Receipt Voucher {$voucher_no})");
+
+        if ($ledger_has_against_cols) {
+            $cash_ledger_sql = "
+                INSERT INTO tbl_customer_ledger (
+                    customer_id" . $ledger_branch_sql_col . ", customer_name, transaction_type, transaction_id, transaction_no,
+                    transaction_date, debit_amount, credit_amount,
+                    debit_gold, credit_gold, debit_silver, credit_silver,
+                    balance_amount, balance_gold, balance_silver,
+                    description, reference_no, status, created_by, created_at,
+                    against_ledger, against_invoice_no
+                ) VALUES (
+                    0" . $ledger_branch_sql_val . ",
+                    '$dep_esc',
+                    'receipt_voucher',
+                    $voucher_id,
+                    '$voucher_no_db',
+                    '$voucher_date_db',
+                    0,
+                    $line_amt,
+                    0,
+                    " . (float) $line_gold . ",
+                    0,
+                    " . (float) $line_silver . ",
+                    $cash_new_balance,
+                    $cash_new_gold,
+                    $cash_new_silver,
+                    '$cash_desc_esc',
+                    $ref_sql,
+                    1,
+                    " . ($user_id ? $user_id : 'NULL') . ",
+                    NOW(),
+                    '$sl_ledger',
+                    '$against_inv_esc'
+                )
+            ";
+        } else {
+            $cash_ledger_sql = "
+                INSERT INTO tbl_customer_ledger (
+                    customer_id" . $ledger_branch_sql_col . ", customer_name, transaction_type, transaction_id, transaction_no,
+                    transaction_date, debit_amount, credit_amount,
+                    debit_gold, credit_gold, debit_silver, credit_silver,
+                    balance_amount, balance_gold, balance_silver,
+                    description, reference_no, status, created_by, created_at
+                ) VALUES (
+                    0" . $ledger_branch_sql_val . ",
+                    '$dep_esc',
+                    'receipt_voucher',
+                    $voucher_id,
+                    '$voucher_no_db',
+                    '$voucher_date_db',
+                    0,
+                    $line_amt,
+                    0,
+                    " . (float) $line_gold . ",
+                    0,
+                    " . (float) $line_silver . ",
+                    $cash_new_balance,
+                    $cash_new_gold,
+                    $cash_new_silver,
+                    '$cash_desc_esc',
+                    $ref_sql,
+                    1,
+                    " . ($user_id ? $user_id : 'NULL') . ",
+                    NOW()
+                )
+            ";
+        }
+        if (!mysqli_query($conn, $cash_ledger_sql)) {
+            throw new Exception('Company ledger entry failed: ' . mysqli_error($conn));
         }
     }
 

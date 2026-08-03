@@ -750,6 +750,7 @@ $ce_filter_ledgers = $ce_filter_options['ledgers'];
 
 <script src="assets/libs/popper/popper.js"></script>
 <script src="assets/js/bootstrap.js"></script>
+<input type="hidden" id="settingsBranchId" value="<?php echo (int) $settings_branch_id; ?>">
 <script>
 (function () {
     var $ = jQuery;
@@ -1087,6 +1088,9 @@ $ce_filter_ledgers = $ce_filter_options['ledgers'];
                 return;
             }
             modal.modal('hide');
+            if (res.message && /clearance|posted/i.test(String(res.message))) {
+                alert(res.message);
+            }
             reloadList();
         }).fail(function () {
             alert('Save failed.');
@@ -1173,6 +1177,27 @@ $ce_filter_ledgers = $ce_filter_options['ledgers'];
     updateFooter();
     syncFilterFormFromActive();
     updateFilterBadge();
+
+    // Deep-link from Account Ledger View (cheque-entry.php?id=…)
+    (function openFromQueryId() {
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            var qid = parseInt(params.get('id') || '0', 10) || 0;
+            if (qid <= 0) return;
+            $.getJSON('ajax/cheque-entry.php', {
+                action: 'get',
+                id: qid,
+                settings_branch_id: settingsBranchId
+            }).done(function (res) {
+                if (res && res.success && res.entry) {
+                    fillForm(res.entry);
+                    $('#chequeEntryModalTitle').text('Cheque Entry');
+                    setFormLocked(true);
+                    modal.modal('show');
+                }
+            });
+        } catch (e) {}
+    })();
 })();
 </script>
 <script src="assets/libs/sortablejs/sortable.js"></script>

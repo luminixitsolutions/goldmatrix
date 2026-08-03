@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/branch_working_context.php';
 require_once __DIR__ . '/includes/international-dial-codes.php';
 require_once __DIR__ . '/includes/location-helpers.php';
 require_once __DIR__ . '/includes/auragold_user_menu_preferences.php';
+require_once __DIR__ . '/includes/auragold_user_login_dashboard.php';
 require_once __DIR__ . '/includes/auragold_api_shop_connection.php';
 require_once __DIR__ . '/includes/auragold_access_token.php';
 
@@ -20,6 +21,7 @@ auragold_ensure_tbl_branches_profile_columns($conn_master);
 $auragold_profile_user_link = (isset($conn) && $conn instanceof mysqli) ? $conn : $conn_master;
 auragold_ensure_tbl_users_profile_photo_column($auragold_profile_user_link);
 auragold_ensure_tbl_users_menu_style_column($auragold_profile_user_link);
+auragold_ensure_tbl_users_login_dashboard_column($auragold_profile_user_link);
 
 $uid = (int) $_SESSION['user_id'];
 $userRow = getRecord('SELECT * FROM tbl_users WHERE id = ' . $uid . ' LIMIT 1');
@@ -31,24 +33,23 @@ if (!$userRow || !is_array($userRow)) {
     exit;
 }
 
+$targetBid = auragold_my_profile_target_branch_id();
+
 // Shop access token (same as /api/shops.php) — used by CRM + customers API.
+// Kept separate from the per-user tbl_users.access_token so the two never mix.
 $shopAccessToken = '';
 if (function_exists('auragold_bootstrap_session_shop_access_token')) {
     $shopAccessToken = auragold_bootstrap_session_shop_access_token();
 }
-$userAccessToken = $shopAccessToken;
-if ($userAccessToken === '' && function_exists('auragold_bootstrap_session_access_token')) {
-    // Fallback to user token if shop token unavailable.
-    $userAccessToken = auragold_bootstrap_session_access_token();
+if ($shopAccessToken === '') {
+    $shopAccessToken = trim((string) ($_SESSION['shop_access_token'] ?? $_SESSION['Admin']['shop_access_token'] ?? ''));
 }
-if ($userAccessToken === '') {
-    $userAccessToken = trim((string) ($userRow['access_token'] ?? ''));
+if ($shopAccessToken === '' && $targetBid > 0 && function_exists('auragold_ensure_shop_access_token')) {
+    // Sub-branches share the main branch token, same as /api/shops.php.
+    $mainBidRow = getRecordMaster('SELECT main_branch_id FROM tbl_branches WHERE id = ' . (int) $targetBid . ' LIMIT 1');
+    $mainBid    = is_array($mainBidRow) ? (int) ($mainBidRow['main_branch_id'] ?? 0) : 0;
+    $shopAccessToken = auragold_ensure_shop_access_token($conn_master, $mainBid > 0 ? $mainBid : $targetBid);
 }
-if ($userAccessToken !== '') {
-    $userRow['access_token'] = $userAccessToken;
-}
-
-$targetBid = auragold_my_profile_target_branch_id();
 
 $branch_profile_hint = '';
 $branchRow           = null;
@@ -83,6 +84,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
     $phone = trim((string) ($_POST['Phone'] ?? ''));
     $email = trim((string) ($_POST['EmailId'] ?? ''));
     $menu_style = auragold_normalize_menu_style($_POST['menu_style'] ?? 'horizontal');
+    $login_dashboard = auragold_normalize_login_dashboard($_POST['login_dashboard'] ?? '');
+    $allowed_login_dashboards = auragold_login_dashboard_select_options_for_user();
+    if (!array_key_exists($login_dashboard, $allowed_login_dashboards)) {
+        $fail('Invalid after-login dashboard selection.');
+    }
 
     if (strlen($fname) > 100 || strlen($lname) > 100) {
         $fail('First or last name is too long.');
@@ -166,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
             Phone = " . ($phone === '' ? 'NULL' : "'" . esc($phone) . "'") . ",
             EmailId = " . ($email === '' ? 'NULL' : "'" . esc($email) . "'") . ",
             menu_style = '" . esc($menu_style) . "',
+            login_dashboard = '" . esc($login_dashboard) . "',
             profile_photo = " . $photoSql . ",
             ModifiedBy = " . (int) $uid . ",
             ModifiedDate = NOW()
@@ -189,8 +196,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['profile_form'] ??
         $_SESSION['Admin']['EmailId'] = $email;
         $_SESSION['Admin']['profile_photo'] = $user_photo_path;
         $_SESSION['Admin']['menu_style'] = $menu_style;
+        $_SESSION['Admin']['login_dashboard'] = $login_dashboard;
     }
     auragold_sync_user_menu_style_in_session($menu_style);
+    auragold_sync_user_login_dashboard_in_session($login_dashboard);
+
+    // Keep /api/shops.php in sync when branch contact fields were never filled in shop profile.
+    if ($targetBid > 0 && isset($conn_master) && $conn_master instanceof mysqli) {
+        $mainBid = $targetBid;
+        $mainBidRow = getRecordMaster('SELECT main_branch_id FROM tbl_branches WHERE id = ' . (int) $targetBid . ' LIMIT 1');
+        if (is_array($mainBidRow) && (int) ($mainBidRow['main_branch_id'] ?? 0) > 0) {
+            $mainBid = (int) $mainBidRow['main_branch_id'];
+        }
+        $branchContact = getRecordMaster(
+            'SELECT email, phone FROM tbl_branches WHERE id = ' . (int) $mainBid . ' LIMIT 1'
+        );
+        if (is_array($branchContact)) {
+            $sync = [];
+            if ($email !== '' && trim((string) ($branchContact['email'] ?? '')) === '') {
+                $sync[] = 'email = ' . ($email === '' ? 'NULL' : "'" . esc($email) . "'");
+            }
+            if ($phone !== '' && trim((string) ($branchContact['phone'] ?? '')) === '') {
+                $sync[] = 'phone = ' . ($phone === '' ? 'NULL' : "'" . esc($phone) . "'");
+            }
+            if (!empty($sync)) {
+                @mysqli_query(
+                    $conn_master,
+                    'UPDATE tbl_branches SET ' . implode(', ', $sync) . ' WHERE id = ' . (int) $mainBid . ' LIMIT 1'
+                );
+            }
+        }
+    }
 
     $_SESSION['auragold_toast'] = ['type' => 'success', 'message' => 'Your profile was saved.'];
     header('Location: my-profile.php');
@@ -394,14 +430,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if ((!$userRow || !is_array($userRow)) && function_exists('getRecordMaster')) {
         $userRow = getRecordMaster('SELECT * FROM tbl_users WHERE id = ' . $uid . ' LIMIT 1');
     }
-    if (is_array($userRow)) {
-        $tok = trim((string) ($userRow['access_token'] ?? ''));
-        if ($tok === '' && !empty($userAccessToken)) {
-            $userRow['access_token'] = $userAccessToken;
-        } elseif ($tok !== '') {
-            $userAccessToken = $tok;
-        }
-    }
     if ($branchRow) {
         $branchRow = getRecordMaster('SELECT * FROM tbl_branches WHERE id = ' . $targetBid . ' LIMIT 1');
     }
@@ -488,7 +516,9 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
         $uPhotoUrl = $uPhotoPath . '?v=' . (int) @filemtime(__DIR__ . '/' . $uPhotoPath);
     }
     $uMenuStyle = auragold_normalize_menu_style($ur['menu_style'] ?? auragold_get_user_menu_style($uid));
-    $uAccessToken = trim((string) ($ur['access_token'] ?? $userAccessToken ?? ''));
+    $uLoginDashboard = auragold_normalize_login_dashboard($ur['login_dashboard'] ?? auragold_get_user_login_dashboard($uid));
+    $uLoginDashboardOptions = auragold_login_dashboard_select_options_for_user();
+    $uAccessToken = trim((string) $shopAccessToken);
     ?>
         <form method="post" action="my-profile.php" enctype="multipart/form-data" autocomplete="on" class="mb-3">
             <input type="hidden" name="profile_form" value="user">
@@ -562,6 +592,17 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
                         </div>
                     </div>
                     <div class="mp-hint">Choose how the main navigation appears. Vertical mode opens submenus below each item (like Region in Set Software). Use the tab on the menu edge to hide or show the sidebar.</div>
+                </div>
+                <div class="form-group mb-3">
+                    <label for="mp_login_dashboard">After login, open</label>
+                    <select class="form-control" id="mp_login_dashboard" name="login_dashboard" style="max-width:420px;">
+                        <?php foreach ($uLoginDashboardOptions as $ldKey => $ldLabel): ?>
+                            <option value="<?php echo htmlspecialchars($ldKey); ?>"<?php echo $uLoginDashboard === $ldKey ? ' selected' : ''; ?>>
+                                <?php echo htmlspecialchars($ldLabel); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="mp-hint">Choose which dashboard page opens right after you sign in. Only dashboards you can access are listed.</div>
                 </div>
                 <div class="form-group mb-3">
                     <label for="mp_access_token">Shop access token</label>

@@ -56,7 +56,7 @@ $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherS
 
 // Load Karat master data (Sales + Common)
 require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
-$carats = auragold_get_carat_list($conn, 'sales');
+$carats = auragold_get_carat_list($conn, 'sales', $auragold_working_branch_id);
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 ORDER BY id ASC");
@@ -3513,7 +3513,7 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
 <?php include 'footer-script.php';?>
 <?php auragold_echo_party_select2_scripts(); ?>
 
-<script src="assets/js/product-modal-add-item-common.js"></script>
+<script src="assets/js/product-modal-add-item-common.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-add-item-common.js'); ?>"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <?php include __DIR__ . '/includes/auragold_voucher_runtime_scripts.php'; ?>
 
@@ -4579,12 +4579,12 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
             }, 300);
         });
 
-        $(document).on('click', '.invoice-suggestion-item', function() {
-            const invoiceId = $(this).data('invoice-id');
+        $(document).on('click', '#saleReturnSuggestions .invoice-suggestion-item', function() {
+            const invoiceId = parseInt($(this).data('invoice-id'), 10) || 0;
             saleReturnSearchInput.val('');
             saleReturnSuggestions.hide();
-            if (invoiceId) {
-                loadOrder(invoiceId);
+            if (invoiceId > 0) {
+                window.location.href = 'sale-order.php?id=' + invoiceId;
             }
         });
 
@@ -8311,6 +8311,14 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     
     // Update a merged Product List row from current modal rows (re-merge and save)
     function updateMergedRowFromModalRows(rowId, modalRowsData) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function') {
+            var _qFn = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(rowId, modalRowsData, _qFn ? { quantityFromLine: _qFn } : {});
+            return;
+        }
         const row = document.getElementById(rowId);
         if (!row || !modalRowsData || modalRowsData.length === 0) return;
         var productNames = modalRowsData.map(function(d) { return (d.product_name || '').trim(); }).filter(Boolean);
@@ -8409,6 +8417,15 @@ window.AURAGOLD_VOUCHER_DS = <?php echo json_encode(['voucherKind' => 'sale_orde
     
     // Update Product List table row with data from Product Selection modal row
     function updateProductListRowFromModalRow(productListRowId, modalRow) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function' && typeof getModalRowDataFromRow === 'function' && modalRow) {
+            var _d = getModalRowDataFromRow(modalRow, true);
+            var _qFn2 = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn2 = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn2 = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn2 = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(productListRowId, [_d], _qFn2 ? { quantityFromLine: _qFn2 } : {});
+            return;
+        }
         const productListRow = document.getElementById(productListRowId);
         if (!productListRow || !modalRow) {
             console.error('Row not found');

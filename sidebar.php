@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/auragold_user_menu_preferences.php';
 require_once __DIR__ . '/includes/auragold_employee_management_menu.php';
 require_once __DIR__ . '/includes/auragold_gst_reports_catalog.php';
 require_once __DIR__ . '/includes/branch_profile_schema.php';
+require_once __DIR__ . '/includes/branch_working_context.php';
 if (is_file(__DIR__ . '/includes/auragold_api_shop_connection.php')) {
     require_once __DIR__ . '/includes/auragold_api_shop_connection.php';
 }
@@ -52,8 +53,6 @@ $auragold_utilities_pages = [
     'account-ledger.php',
     'metal-to-amount.php',
     'amount-to-metal.php',
-    'assign-inventory-to-sales-team.php',
-    'assign-inventory-items.php',
 ];
 $auragold_transaction_pages = [
     'sale-invoice.php',
@@ -152,6 +151,10 @@ $auragold_employee_management_pages = [
     'employee-incentive.php',
     'employee-reports.php',
     'employee-salary-payroll.php',
+    'assign-inventory-to-sales-team.php',
+    'assign-inventory.php',
+    'unassign-inventory.php',
+    'assign-inventory-items.php',
 ];
 $auragold_settings_pages = [
     'set-software.php',
@@ -185,9 +188,9 @@ $auragold_employee_management_nav_active = in_array($auragold_nav_basename, $aur
 $auragold_settings_nav_active = in_array($auragold_nav_basename, $auragold_settings_pages, true);
 
 /**
- * External CRM (opens in new tab): https://crm.goldmatrixsoft.com/{login shop email}/{shop access token}
+ * External CRM auto-login (opens in a new tab).
  */
-$auragold_crm_external_url = 'https://crm.goldmatrixsoft.com/';
+$auragold_crm_external_url = 'https://crmsoftware.goldmatrixsoftware.com/';
 $auragold_crm_shop_email = '';
 $auragold_crm_access_token = '';
 if (function_exists('auragold_bootstrap_session_shop_access_token')) {
@@ -195,12 +198,6 @@ if (function_exists('auragold_bootstrap_session_shop_access_token')) {
 }
 if ($auragold_crm_access_token === '') {
     $auragold_crm_access_token = trim((string) ($_SESSION['shop_access_token'] ?? $_SESSION['Admin']['shop_access_token'] ?? ''));
-}
-if ($auragold_crm_access_token === '' && function_exists('auragold_bootstrap_session_access_token')) {
-    $auragold_crm_access_token = auragold_bootstrap_session_access_token();
-}
-if ($auragold_crm_access_token === '') {
-    $auragold_crm_access_token = trim((string) ($_SESSION['Admin']['access_token'] ?? $_SESSION['access_token'] ?? ''));
 }
 $auragold_crm_bid = 0;
 if (function_exists('auragold_my_profile_target_branch_id')) {
@@ -210,16 +207,26 @@ if ($auragold_crm_bid <= 0) {
     $auragold_crm_bid = (int) ($_SESSION['working_branch_id'] ?? $_SESSION['branch_id'] ?? 0);
 }
 if ($auragold_crm_bid > 0 && function_exists('getRecordMaster')) {
-    $auragold_crm_br = @getRecordMaster('SELECT email FROM tbl_branches WHERE id = ' . $auragold_crm_bid . ' LIMIT 1');
+    $auragold_crm_br = @getRecordMaster(
+        'SELECT email, main_branch_id FROM tbl_branches WHERE id = ' . $auragold_crm_bid . ' LIMIT 1'
+    );
     if (is_array($auragold_crm_br)) {
         $auragold_crm_shop_email = trim((string) ($auragold_crm_br['email'] ?? ''));
+        if ($auragold_crm_access_token === '' && function_exists('auragold_ensure_shop_access_token')) {
+            $auragold_crm_main_bid = (int) ($auragold_crm_br['main_branch_id'] ?? 0);
+            global $conn_master;
+            $auragold_crm_access_token = auragold_ensure_shop_access_token(
+                $conn_master,
+                $auragold_crm_main_bid > 0 ? $auragold_crm_main_bid : $auragold_crm_bid
+            );
+        }
     }
 }
 if ($auragold_crm_shop_email === '') {
     $auragold_crm_shop_email = trim((string) ($_SESSION['Admin']['EmailId'] ?? $_SESSION['Admin']['email'] ?? ''));
 }
 if ($auragold_crm_shop_email !== '' && $auragold_crm_access_token !== '') {
-    $auragold_crm_external_url = 'https://crm.goldmatrixsoft.com/'
+    $auragold_crm_external_url = 'https://crmsoftware.goldmatrixsoftware.com/autologin/'
         . rawurlencode($auragold_crm_shop_email) . '/'
         . rawurlencode($auragold_crm_access_token);
 }
@@ -508,9 +515,42 @@ if ($auragold_dropdown_branch_title === '') {
                                     </li>
                                     <li><a class="dropdown-item" href="my-profile.php"><i class="feather icon-user"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.my_profile'), ENT_QUOTES, 'UTF-8') : 'My Profile'; ?></a></li>
                                     <li><a class="dropdown-item" href="change-password.php"><i class="feather icon-lock"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.change_password'), ENT_QUOTES, 'UTF-8') : 'Change Password'; ?></a></li>
-                                    <li><a class="dropdown-item" href="branches.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.branch'), ENT_QUOTES, 'UTF-8') : 'Branch'; ?></a></li>
-                                    <!-- <li><a class="dropdown-item" href="#"><i class="feather icon-settings"></i> Account Settings</a></li> -->
                                     <li><a class="dropdown-item" href="#"><i class="feather icon-bell"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.notifications'), ENT_QUOTES, 'UTF-8') : 'Notifications'; ?></a></li>
+                                    <?php
+                                    $auragold_profile_switch_branches = function_exists('auragold_profile_dropdown_switchable_branches')
+                                        ? auragold_profile_dropdown_switchable_branches()
+                                        : [];
+                                    if (!is_array($auragold_profile_switch_branches)) {
+                                        $auragold_profile_switch_branches = [];
+                                    }
+                                    ?>
+                                    <?php if ($auragold_profile_switch_branches !== []): ?>
+                                    <li class="dropdown-divider"></li>
+                                    <li class="user-dropdown-branch-label" aria-hidden="true">
+                                        <span><?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.branch'), ENT_QUOTES, 'UTF-8') : 'Branch'; ?></span>
+                                    </li>
+                                    <?php foreach ($auragold_profile_switch_branches as $swBr): ?>
+                                    <li>
+                                        <button type="button"
+                                            class="dropdown-item user-dropdown-branch-item<?php echo !empty($swBr['is_current']) ? ' is-current' : ''; ?><?php echo !empty($swBr['is_main']) ? ' is-main' : ' is-sub'; ?>"
+                                            data-branch-id="<?php echo (int) ($swBr['id'] ?? 0); ?>"
+                                            data-branch-name="<?php echo htmlspecialchars((string) ($swBr['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                            <?php echo !empty($swBr['is_current']) ? ' aria-current="true"' : ''; ?>>
+                                            <span class="udb-avatar" aria-hidden="true"><?php echo htmlspecialchars((string) ($swBr['initials'] ?? '?'), ENT_QUOTES, 'UTF-8'); ?><?php if (!empty($swBr['is_current'])): ?><span class="udb-dot"></span><?php endif; ?></span>
+                                            <span class="udb-name"><?php echo htmlspecialchars((string) ($swBr['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                        </button>
+                                    </li>
+                                    <?php endforeach; ?>
+                                    <li>
+                                        <a class="dropdown-item user-dropdown-manage-branches" href="branches.php">
+                                            <i class="feather icon-layers"></i>
+                                            <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.manage_branches'), ENT_QUOTES, 'UTF-8') : 'Manage Branches'; ?>
+                                        </a>
+                                    </li>
+                                    <?php else: ?>
+                                    <li><a class="dropdown-item" href="branches.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('user.branch'), ENT_QUOTES, 'UTF-8') : 'Branch'; ?></a></li>
+                                    <?php endif; ?>
+                                    <!-- <li><a class="dropdown-item" href="#"><i class="feather icon-settings"></i> Account Settings</a></li> -->
                                     <!-- <li class="dropdown-divider"></li>
                                     <li><a class="dropdown-item" href="#"><i class="feather icon-shield"></i> Security</a></li>
                                     
@@ -562,10 +602,6 @@ if ($auragold_dropdown_branch_title === '') {
                                     <a class="nav-link<?php echo $auragold_utilities_nav_active ? ' active' : ''; ?>" href="#"><i class="feather icon-box"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.utilities'), ENT_QUOTES, 'UTF-8') : 'Opening'; ?></a>
                                     <ul class="dropdown-menu utilities-submenu">
                                         <?php if (auragold_nav_show_php_href('product-opening.php')): ?><li><a class="dropdown-item" href="product-opening.php"><i class="feather icon-package"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.product_opening'), ENT_QUOTES, 'UTF-8') : 'Product Opening'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('assign-inventory-to-sales-team.php')): ?><li><a class="dropdown-item" href="assign-inventory-to-sales-team.php"><i class="feather icon-user-check"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.assign_inv_sales'), ENT_QUOTES, 'UTF-8') : 'Assign Inventory To Sales Team'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_can_page_keys('utilities', 'assign_inventory')): ?><li data-mm-page="utilities.assign_inventory"><a class="dropdown-item" href="#"><i class="feather icon-check-circle"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.assign_inventory'), ENT_QUOTES, 'UTF-8') : 'Assign Inventory'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_can_page_keys('utilities', 'unassign_inventory')): ?><li data-mm-page="utilities.unassign_inventory"><a class="dropdown-item" href="#"><i class="feather icon-x-circle"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.unassign_inventory'), ENT_QUOTES, 'UTF-8') : 'UnAssign Inventory'; ?></a></li><?php endif; ?>
-                                        <?php if (auragold_nav_show_php_href('assign-inventory-items.php')): ?><li><a class="dropdown-item" href="assign-inventory-items.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.assign_items'), ENT_QUOTES, 'UTF-8') : 'Assign Inventory Items'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('account-ledger.php')): ?><li><a class="dropdown-item" href="account-ledger.php"><i class="feather icon-book"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.account_ledger'), ENT_QUOTES, 'UTF-8') : 'Account Ledger'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('metal-to-amount.php')): ?><li><a class="dropdown-item" href="metal-to-amount.php"><i class="feather icon-layers"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.metal_to_amount'), ENT_QUOTES, 'UTF-8') : 'Metal to Amount'; ?></a></li><?php endif; ?>
                                         <?php if (auragold_nav_show_php_href('amount-to-metal.php')): ?><li><a class="dropdown-item" href="amount-to-metal.php"><i class="feather icon-repeat"></i> <?php echo function_exists('auragold_t') ? htmlspecialchars(auragold_t('nav.util.amount_to_metal'), ENT_QUOTES, 'UTF-8') : 'Amount to Metal'; ?></a></li><?php endif; ?>
@@ -774,19 +810,30 @@ if ($auragold_dropdown_branch_title === '') {
                                     <ul class="dropdown-menu employee-management-submenu">
                                         <?php foreach (auragold_employee_management_menu_items() as $emNavItem):
                                             $emNavFile = (string) ($emNavItem['file'] ?? '');
-                                            if ($emNavFile === '' || !auragold_nav_show_php_href($emNavFile)) {
+                                            $emNavHref = (string) ($emNavItem['href'] ?? $emNavFile);
+                                            $emNavKey = (string) ($emNavItem['key'] ?? '');
+                                            $emIsPlaceholder = ($emNavHref === '' || $emNavHref === '#');
+                                            if ($emIsPlaceholder) {
+                                                if (!auragold_nav_can_page_keys('employee_management', $emNavKey)
+                                                    && !auragold_nav_can_page_keys('utilities', $emNavKey)) {
+                                                    continue;
+                                                }
+                                            } elseif ($emNavFile === '' || !auragold_nav_show_php_href($emNavFile)) {
                                                 continue;
                                             }
-                                            $emNavActive = ($auragold_nav_basename === $emNavFile);
+                                            $emNavActive = ($emNavFile !== '' && $auragold_nav_basename === $emNavFile);
                                             $emNavIcon = htmlspecialchars((string) ($emNavItem['icon'] ?? 'icon-circle'), ENT_QUOTES, 'UTF-8');
                                             $emNavLabel = function_exists('auragold_t')
-                                                ? htmlspecialchars(auragold_t('em.' . ($emNavItem['key'] ?? '')), ENT_QUOTES, 'UTF-8')
+                                                ? htmlspecialchars(auragold_t('em.' . $emNavKey), ENT_QUOTES, 'UTF-8')
                                                 : htmlspecialchars((string) ($emNavItem['label'] ?? ''), ENT_QUOTES, 'UTF-8');
-                                            if ($emNavLabel === 'em.' . ($emNavItem['key'] ?? '')) {
+                                            if ($emNavLabel === 'em.' . $emNavKey) {
                                                 $emNavLabel = htmlspecialchars((string) ($emNavItem['label'] ?? ''), ENT_QUOTES, 'UTF-8');
                                             }
+                                            $emMmAttr = $emIsPlaceholder
+                                                ? ' data-mm-page="employee_management.' . htmlspecialchars($emNavKey, ENT_QUOTES, 'UTF-8') . '"'
+                                                : '';
                                         ?>
-                                        <li><a class="dropdown-item<?php echo $emNavActive ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($emNavFile, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather <?php echo $emNavIcon; ?>"></i> <?php echo $emNavLabel; ?></a></li>
+                                        <li<?php echo $emMmAttr; ?>><a class="dropdown-item<?php echo $emNavActive ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($emIsPlaceholder ? '#' : $emNavHref, ENT_QUOTES, 'UTF-8'); ?>"><i class="feather <?php echo $emNavIcon; ?>"></i> <?php echo $emNavLabel; ?></a></li>
                                         <?php endforeach; ?>
                                     </ul>
                             </li> 
@@ -1387,4 +1434,159 @@ if (isset($conn) && $conn instanceof mysqli) {
 })();
 
 </script>
+
+<?php if (!empty($_SESSION['Admin'])): ?>
+<div id="auragoldProfileBranchPwdOverlay" class="auragold-profile-branch-pwd-overlay" role="dialog" aria-modal="true" aria-labelledby="auragoldProfileBranchPwdTitle" hidden>
+    <div class="auragold-profile-branch-pwd-dialog">
+        <div class="auragold-profile-branch-pwd-dialog__head">
+            <h2 id="auragoldProfileBranchPwdTitle" class="auragold-profile-branch-pwd-dialog__title">Enter branch password</h2>
+            <button type="button" class="auragold-profile-branch-pwd-dialog__close" id="auragoldProfileBranchPwdClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="auragold-profile-branch-pwd-dialog__body">
+            <p class="auragold-profile-branch-pwd-dialog__label" id="auragoldProfileBranchPwdBranchLabel">Enter the password for this branch.</p>
+            <label class="auragold-profile-branch-pwd-label" for="auragoldProfileBranchPwdInput">Password</label>
+            <input type="password" id="auragoldProfileBranchPwdInput" class="auragold-profile-branch-pwd-input" autocomplete="current-password">
+            <div id="auragoldProfileBranchPwdError" class="auragold-profile-branch-pwd-error" role="alert"></div>
+        </div>
+        <div class="auragold-profile-branch-pwd-dialog__foot">
+            <button type="button" class="auragold-profile-branch-pwd-btn auragold-profile-branch-pwd-btn--ghost" id="auragoldProfileBranchPwdCancel">Cancel</button>
+            <button type="button" class="auragold-profile-branch-pwd-btn auragold-profile-branch-pwd-btn--primary" id="auragoldProfileBranchPwdSubmit">Continue</button>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var overlay = document.getElementById('auragoldProfileBranchPwdOverlay');
+    var input = document.getElementById('auragoldProfileBranchPwdInput');
+    var errEl = document.getElementById('auragoldProfileBranchPwdError');
+    var labelEl = document.getElementById('auragoldProfileBranchPwdBranchLabel');
+    var submitBtn = document.getElementById('auragoldProfileBranchPwdSubmit');
+    var cancelBtn = document.getElementById('auragoldProfileBranchPwdCancel');
+    var closeBtn = document.getElementById('auragoldProfileBranchPwdClose');
+    var branchId = 0;
+    var submitDefaultHtml = submitBtn ? submitBtn.innerHTML : 'Continue';
+
+    function showErr(msg) {
+        if (!errEl) return;
+        if (!msg) {
+            errEl.textContent = '';
+            errEl.classList.remove('is-visible');
+            return;
+        }
+        errEl.textContent = msg;
+        errEl.classList.add('is-visible');
+    }
+
+    function setLoading(on) {
+        if (!submitBtn) return;
+        if (on) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="auragold-profile-branch-pwd-spinner" aria-hidden="true"></span> Please wait…';
+        } else {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitDefaultHtml;
+        }
+        if (cancelBtn) cancelBtn.disabled = !!on;
+        if (closeBtn) closeBtn.disabled = !!on;
+        if (input) input.disabled = !!on;
+    }
+
+    function openModal(id, name) {
+        if (!overlay) return;
+        branchId = parseInt(id, 10) || 0;
+        if (labelEl) {
+            labelEl.textContent = name ? ('Branch: ' + name) : 'Enter the password for this branch.';
+        }
+        if (input) {
+            input.value = '';
+            input.disabled = false;
+        }
+        setLoading(false);
+        showErr('');
+        overlay.hidden = false;
+        overlay.classList.add('is-open');
+        setTimeout(function () {
+            if (input) input.focus();
+        }, 40);
+    }
+
+    function closeModal() {
+        if (!overlay) return;
+        overlay.classList.remove('is-open');
+        overlay.hidden = true;
+        branchId = 0;
+        setLoading(false);
+        showErr('');
+    }
+
+    function submitPassword() {
+        if (!branchId || !input) return;
+        var pw = String(input.value || '');
+        if (!pw.trim()) {
+            showErr('Enter the branch password');
+            return;
+        }
+        setLoading(true);
+        showErr('');
+        var body = 'id=' + encodeURIComponent(String(branchId)) + '&password=' + encodeURIComponent(pw);
+        fetch('ajax/verify-branch-panel-password.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body,
+            credentials: 'same-origin'
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.status === 'ok' && d.redirect) {
+                    window.location.href = d.redirect;
+                    return;
+                }
+                setLoading(false);
+                showErr((d && d.message) ? d.message : 'Incorrect password');
+            })
+            .catch(function () {
+                setLoading(false);
+                showErr('Network error');
+            });
+    }
+
+    document.querySelectorAll('.user-dropdown-branch-item').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (btn.classList.contains('is-current')) {
+                return;
+            }
+            var dd = document.getElementById('userDropdown');
+            if (dd) {
+                dd.classList.remove('show');
+            }
+            var id = btn.getAttribute('data-branch-id');
+            var nm = btn.getAttribute('data-branch-name') || '';
+            openModal(id, nm);
+        });
+    });
+
+    if (submitBtn) submitBtn.addEventListener('click', submitPassword);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (input) {
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitPassword();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeModal();
+            }
+        });
+    }
+    if (overlay) {
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) closeModal();
+        });
+    }
+})();
+</script>
+<?php endif; ?>
 <?php include __DIR__ . '/includes/toast_flash.php'; ?>

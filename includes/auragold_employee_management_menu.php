@@ -62,6 +62,34 @@ function auragold_employee_management_menu_items()
             'icon'  => 'icon-credit-card',
             'lead'  => 'Manage salary structures, payroll runs, payslips, and payment history.',
         ],
+        [
+            'key'   => 'assign_inventory_sales_team',
+            'file'  => 'assign-inventory-to-sales-team.php',
+            'label' => 'Assign Inventory To Sales Team',
+            'icon'  => 'icon-user-check',
+            'lead'  => 'Assign stock barcodes to sales team members for selling and tracking.',
+        ],
+        [
+            'key'   => 'assign_inventory',
+            'file'  => 'assign-inventory.php',
+            'label' => 'Assign Inventory',
+            'icon'  => 'icon-check-circle',
+            'lead'  => 'Assign inventory items to employees or sales persons.',
+        ],
+        [
+            'key'   => 'unassign_inventory',
+            'file'  => 'unassign-inventory.php',
+            'label' => 'UnAssign Inventory',
+            'icon'  => 'icon-x-circle',
+            'lead'  => 'Unassign inventory previously assigned to employees or sales persons.',
+        ],
+        [
+            'key'   => 'assign_inventory_items',
+            'file'  => 'assign-inventory-items.php',
+            'label' => 'Assign Inventory Items',
+            'icon'  => 'icon-layers',
+            'lead'  => 'View and manage assigned inventory item lines per sales person.',
+        ],
     ];
 }
 
@@ -193,6 +221,16 @@ function auragold_employee_management_can_view_page($pageKey)
             || auragold_nav_can_page_keys('employee_management', 'employee_attendance');
     }
     if (auragold_nav_can_page_keys('employee_management', $key)) {
+        return true;
+    }
+    // Inventory assign pages moved from Opening → Employee Management; honor legacy utilities grants.
+    $legacyUtilKeys = [
+        'assign_inventory_sales_team',
+        'assign_inventory',
+        'unassign_inventory',
+        'assign_inventory_items',
+    ];
+    if (in_array($key, $legacyUtilKeys, true) && auragold_nav_can_page_keys('utilities', $key)) {
         return true;
     }
     // Alias: salary page renamed from salary_payroll → employee_salary. Only an

@@ -808,7 +808,6 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
         }
 
         require_once __DIR__ . '/auragold_superadmin.php';
-        $superPortalOk = auragold_super_portal_login_target_ok($login_target_url);
 
         $url_scope_id = 0;
         if ($login_target_url !== '' && function_exists('auragold_registry_branch_id_for_login_target_url')) {
@@ -882,16 +881,16 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
                                     ),
                                 ];
                             }
-                            if (!$superPortalOk) {
+                            if (!auragold_superadmin_allowed_login_portal_ok($login_target_url)) {
                                 return [
                                     'success' => false,
-                                    'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) in the server address field.',
+                                    'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) or the GM portal URL (gm.goldmatrixsoft.com) in the server address field.',
                                 ];
                             }
                             return [
                                 'success'       => true,
                                 'is_superadmin' => true,
-                                'branches'      => auragold_login_superadmin_discovery_branch_options(),
+                                'branches'      => auragold_superadmin_discovery_branches_for_login_target($login_target_url, $url_scope_id),
                             ];
                         }
 
@@ -987,16 +986,16 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
 
         if ($user0) {
             if (function_exists('auragold_user_row_is_superadmin') && auragold_user_row_is_superadmin($user0)) {
-                if (!$superPortalOk) {
+                if (!auragold_superadmin_allowed_login_portal_ok($login_target_url)) {
                     return [
                         'success' => false,
-                        'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) in the server address field.',
+                        'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) or the GM portal URL (gm.goldmatrixsoft.com) in the server address field.',
                     ];
                 }
                 return [
                     'success'       => true,
                     'is_superadmin' => true,
-                    'branches'      => auragold_login_superadmin_discovery_branch_options(),
+                    'branches'      => auragold_superadmin_discovery_branches_for_login_target($login_target_url, $url_scope_id),
                 ];
             }
             if (!function_exists('auragold_login_build_branch_options_for_user')) {
@@ -1049,16 +1048,16 @@ if (!function_exists('auragold_discover_branch_logins_for_credentials')) {
                 continue;
             }
             if (function_exists('auragold_user_row_is_superadmin') && auragold_user_row_is_superadmin($urow)) {
-                if (!$superPortalOk) {
+                if (!auragold_superadmin_allowed_login_portal_ok($login_target_url)) {
                     return [
                         'success' => false,
-                        'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) in the server address field.',
+                        'message' => 'Superadmin sign-in must use the main GoldMatrix portal URL (main.goldmatrixsoftware.com) or the GM portal URL (gm.goldmatrixsoft.com) in the server address field.',
                     ];
                 }
                 return [
                     'success'       => true,
                     'is_superadmin' => true,
-                    'branches'      => auragold_login_superadmin_discovery_branch_options(),
+                    'branches'      => auragold_superadmin_discovery_branches_for_login_target($login_target_url, $url_scope_id),
                 ];
             }
             $nm = trim((string) ($r['name'] ?? ''));

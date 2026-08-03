@@ -310,9 +310,9 @@ function auragold_branches_page_row_visit_url(string $host): string {
                     <div class="branches-page">
                         <div class="branch-add-toolbar">
                             <h1>Branches</h1>
-                            <?php if ($is_logged_in && auragold_session_is_admin_login_type() && auragold_session_is_superadmin()): ?>
+                            <?php if ($is_logged_in && auragold_session_may_create_main_branch()): ?>
                                 <div class="branch-add-toolbar-actions">
-                                    <button type="button" class="btn-branch-add-open btn-branch-add-main" id="branchAddMainOpen" title="Create a new main branch with its own database">+ Main branch</button>
+                                    <button type="button" class="btn-branch-add-open btn-branch-add-main" id="branchAddMainOpen" title="Create a new main branch with its own database">Create Main Branch</button>
                                 </div>
                             <?php endif; ?>
                         </div>

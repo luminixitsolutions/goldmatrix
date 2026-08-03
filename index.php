@@ -1,10 +1,11 @@
 <?php
 require_once __DIR__ . '/includes/session_init.php';
 require_once __DIR__ . '/includes/auragold_require_login.php';
+require_once __DIR__ . '/includes/auragold_user_login_dashboard.php';
 
 // Redirect if already logged in — keep active session, do not show login again
 if (auragold_is_logged_in_session()) {
-    header('Location: dashboard.php');
+    header('Location: ' . auragold_resolve_post_login_redirect_url((int) ($_SESSION['user_id'] ?? 0)));
     exit;
 }
 

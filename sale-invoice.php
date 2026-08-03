@@ -82,7 +82,7 @@ $voucher_settings_by_metal = function_exists('getVoucherSettings') ? getVoucherS
 // Load Karat master data (Sales + Common; metal_id when column exists)
 require_once __DIR__ . '/includes/auragold_carat_purity_for_schema.php';
 $si_carat_has_metal_col = isset($conn) && $conn instanceof mysqli && function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_carat', 'metal_id');
-$carats = auragold_get_carat_list($conn, 'sales');
+$carats = auragold_get_carat_list($conn, 'sales', $auragold_working_branch_id);
 
 // Load Location master data
 $locations = getList("SELECT id, name FROM tbl_location WHERE status = 1 " . auragold_master_list_sql_suffix($conn, 'tbl_location') . " ORDER BY id ASC");
@@ -2277,6 +2277,10 @@ text-transform: uppercase;
         gap: 12px;
         margin-bottom: 12px;
     }
+
+    #productCreationModal .form-row-custom.form-row-4 {
+        grid-template-columns: repeat(4, 1fr);
+    }
     
     #productCreationModal .form-row-custom .form-group {
         margin-bottom: 0;
@@ -3659,7 +3663,7 @@ text-transform: uppercase;
 
 <?php require __DIR__ . '/includes/voucher_diamond_stone_assets.php'; ?>
 
-<script src="assets/js/product-modal-add-item-common.js"></script>
+<script src="assets/js/product-modal-add-item-common.js?v=<?php echo @filemtime(__DIR__ . '/assets/js/product-modal-add-item-common.js'); ?>"></script>
 <link rel="stylesheet" href="assets/libs/select2/select2.css">
 <script src="assets/libs/select2/select2.js"></script>
 <?php auragold_echo_party_select2_config_script([
@@ -3709,8 +3713,10 @@ window.PB_PAGE_CONFIG = {
     // Runs after footer-script.php (jQuery, Bootstrap). EDIT_ORDER_DATA and master data are valid JSON.
     // Master data for dropdowns (safe fallbacks so no invalid/empty JSON)
     const carats = <?php echo json_encode(isset($carats) && is_array($carats) ? $carats : []); ?>;
+    window.carats = carats;
     const locations = <?php echo json_encode(isset($locations) && is_array($locations) ? $locations : []); ?>;
     const categories = <?php echo json_encode(isset($categories) && is_array($categories) ? $categories : []); ?>;
+    window.categories = categories;
     window.AURAGOLD_CALCULATION_MODES = <?php echo json_encode(isset($calculation_modes) && is_array($calculation_modes) ? $calculation_modes : []); ?>;
 <?php if (function_exists('auragold_echo_product_modal_spec_masters_js')) { auragold_echo_product_modal_spec_masters_js(); } ?>
     const metals = <?php echo json_encode(isset($metals) && is_array($metals) ? $metals : []); ?>;
@@ -3982,15 +3988,53 @@ window.PB_PAGE_CONFIG = {
         return '';
     }
 
+    function auragoldMetalDisplayNameById(metalId) {
+        var idStr = metalId != null ? String(metalId).trim() : '';
+        if (!idStr || typeof window.metals === 'undefined' || !window.metals || !window.metals.length) return '';
+        for (var i = 0; i < window.metals.length; i++) {
+            var x = window.metals[i];
+            if (String(x.id) === idStr) {
+                return String(x.display_name || x.system_name || x.name || '').trim();
+            }
+        }
+        return '';
+    }
+
+    /** Match carat master row to active metal tab (by id, metal name, or karat name pattern). */
+    function auragoldCaratRowMatchesModalMetal(crow, tabMetalId) {
+        if (!crow) return false;
+        var cm = crow.metal_id;
+        var hasMetalLink = !(cm == null || String(cm).trim() === '' || String(cm) === '0');
+        if (hasMetalLink && String(cm) === String(tabMetalId)) return true;
+        var tabName = auragoldMetalDisplayNameById(tabMetalId).toLowerCase();
+        var caratMetalName = String(crow.metal_name || crow.metal_display_name || '').trim().toLowerCase();
+        if (tabName && caratMetalName && tabName === caratMetalName) return true;
+        var tabCat = auragoldMetalTabCategoryFromMetalId(tabMetalId);
+        if (!tabCat && tabMetalId && typeof currentMetalId !== 'undefined' && currentMetalName &&
+            String(currentMetalId) === String(tabMetalId)) {
+            tabCat = auragoldMetalTabCategoryFromLabel(currentMetalName);
+        }
+        if (tabCat && caratMetalName && auragoldMetalTabCategoryFromLabel(caratMetalName) === tabCat) return true;
+        if (tabCat) return auragoldCaratMatchesTabCategory(crow, tabCat);
+        return !hasMetalLink;
+    }
+
     function caratsFilteredForModalMetal(metalId) {
         if (typeof carats === 'undefined' || !carats || !carats.length) return [];
         var idKey = metalId != null ? String(metalId).trim() : '';
         if (auragoldCaratsMasterUsesMetalIds()) {
-            return carats.filter(function(c) {
-                var m = c.metal_id;
-                if (m == null || String(m).trim() === '' || String(m) === '0') return false;
-                return String(m) === idKey;
+            if (!idKey) return carats.slice();
+            var filtered = carats.filter(function(c) { return auragoldCaratRowMatchesModalMetal(c, idKey); });
+            if (filtered.length) return filtered;
+            var tabCatFb = auragoldMetalTabCategoryFromMetalId(idKey);
+            if (!tabCatFb && typeof currentMetalId !== 'undefined' && currentMetalName &&
+                String(currentMetalId) === idKey) {
+                tabCatFb = auragoldMetalTabCategoryFromLabel(currentMetalName);
+            }
+            var byCat = carats.filter(function(c) {
+                return tabCatFb ? auragoldCaratMatchesTabCategory(c, tabCatFb) : true;
             });
+            return byCat.length ? byCat : carats.slice();
         }
         var tabCat = auragoldMetalTabCategoryFromMetalId(idKey);
         if (!tabCat && idKey && typeof currentMetalId !== 'undefined' && currentMetalName &&
@@ -3998,7 +4042,8 @@ window.PB_PAGE_CONFIG = {
             tabCat = auragoldMetalTabCategoryFromLabel(currentMetalName);
         }
         if (!tabCat) return carats.slice();
-        return carats.filter(function(c) { return auragoldCaratMatchesTabCategory(c, tabCat); });
+        var byTab = carats.filter(function(c) { return auragoldCaratMatchesTabCategory(c, tabCat); });
+        return byTab.length ? byTab : carats.slice();
     }
 
     function populateCaratSelectForModalRow(caratSelect, row) {
@@ -4545,6 +4590,7 @@ window.PB_PAGE_CONFIG = {
         
         $(document).on('click', '.add-product-icon', function(e) {
             e.stopPropagation();
+            e.preventDefault();
             $('#productCreationModal').modal('show');
             // Initialize column dropdown when modal opens
             setTimeout(function() {
@@ -4565,7 +4611,7 @@ window.PB_PAGE_CONFIG = {
                 openCustomerModalForAdd();
             }
         });
-        $(document).on('click', '.add-category-icon', function(e) {
+        $(document).on('click', '.add-category-icon, .add-product-category-icon', function(e) {
             e.stopPropagation();
             e.preventDefault();
             $('#categoryCreationModal').modal('show');
@@ -5137,18 +5183,13 @@ window.PB_PAGE_CONFIG = {
             }, 300);
         });
         
-        // Handle invoice selection from suggestions
-        $(document).on('click', '.invoice-suggestion-item', function() {
-            const invoiceId = $(this).data('invoice-id');
-            const invoiceNo = $(this).data('invoice-no');
-            
-            // Clear search input
+        // Handle invoice selection from suggestions → open in edit mode (sale-invoice.php?id=…)
+        $(document).on('click', '#saleInvoiceSuggestions .invoice-suggestion-item', function() {
+            const invoiceId = parseInt($(this).data('invoice-id'), 10) || 0;
             saleInvoiceSearchInput.val('');
             saleInvoiceSuggestions.hide();
-            
-            // Load the invoice
-            if (invoiceId) {
-                loadOrder(invoiceId);
+            if (invoiceId > 0) {
+                window.location.href = 'sale-invoice.php?id=' + invoiceId;
             }
         });
         
@@ -5812,8 +5853,9 @@ window.PB_PAGE_CONFIG = {
     }
 
     function openCustomerModalForAdd() {
+        window.auragoldVendorSaveTarget = 'customer';
         initNewLedgerModalDefaults();
-        $('#customerCreationModal').modal('show');
+        $('#customerCreationModal').appendTo('body').modal('show');
     }
 
     async function openCustomerModalForEdit(customerId) {
@@ -6000,10 +6042,21 @@ window.PB_PAGE_CONFIG = {
         })
         .then(data => {
             if (data.status === 'success' || data.success === true) {
-                alert(data.message || 'Customer created successfully!');
-                
                 // Close the customer creation modal
                 $('#customerCreationModal').modal('hide');
+
+                if (window.auragoldVendorSaveTarget === 'product' && data.customer_id && data.customer_name) {
+                    alert('Record or Account Created Successfully');
+                    if (typeof window.updateProductVendorDropdown === 'function') {
+                        window.updateProductVendorDropdown(data.customer_id, data.customer_name);
+                    }
+                    window.auragoldVendorSaveTarget = '';
+                    clearCustomerForm();
+                    return;
+                }
+
+                alert(data.message || 'Customer created successfully!');
+                window.auragoldVendorSaveTarget = 'customer';
                 
                 if (data.customer_id) {
                     selectedCustomerId = data.customer_id;
@@ -6084,7 +6137,18 @@ window.PB_PAGE_CONFIG = {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
+        .then(function(response) {
+            return response.text().then(function(text) {
+                if (!text || !String(text).trim()) {
+                    throw new Error('Empty server response');
+                }
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error(String(text).trim().substring(0, 200) || 'Invalid JSON from server');
+                }
+            });
+        })
         .then(data => {
             if (data.status === 'success') {
                 alert(data.message || 'Category added successfully!');
@@ -6095,8 +6159,14 @@ window.PB_PAGE_CONFIG = {
                 // Clear form
                 clearCategoryForm();
                 
-                // Update all category dropdowns
-                updateCategoryDropdowns(data.id, data.name);
+                // Refresh all product/category dropdowns (Product category column + category column)
+                if (typeof window.auragoldReloadCategoriesFromServer === 'function') {
+                    window.auragoldReloadCategoriesFromServer(data.id);
+                } else if (typeof window.auragoldRefreshCategoryMasterDropdowns === 'function') {
+                    window.auragoldRefreshCategoryMasterDropdowns(data.id, data.name, true);
+                } else {
+                    updateCategoryDropdowns(data.id, data.name);
+                }
             } else {
                 alert('Error: ' + (data.message || 'Failed to create category'));
             }
@@ -6151,10 +6221,14 @@ window.PB_PAGE_CONFIG = {
     }
     
     function updateCategoryDropdowns(categoryId, categoryName) {
-        // Update all category dropdowns in the product selection table
-        const categorySelects = document.querySelectorAll('.category-select');
+        if (typeof window.auragoldRefreshCategoryMasterDropdowns === 'function') {
+            window.auragoldRefreshCategoryMasterDropdowns(categoryId, categoryName, true);
+            return;
+        }
+        // Fallback: update product category + category column dropdowns
+        const categorySelects = document.querySelectorAll('.category-select, .product-category-select');
         categorySelects.forEach(function(select) {
-            // Check if option already exists
+            if (select.classList.contains('diamond-category-select')) return;
             let exists = false;
             for (let i = 0; i < select.options.length; i++) {
                 if (select.options[i].value == categoryId) {
@@ -6169,15 +6243,39 @@ window.PB_PAGE_CONFIG = {
                 option.textContent = categoryName;
                 select.appendChild(option);
             }
+            select.value = String(categoryId);
         });
         
-        // Also update parent category dropdown in modal
+        if (typeof categories !== 'undefined' && Array.isArray(categories)) {
+            var inList = categories.some(function(c) { return String(c.id) === String(categoryId); });
+            if (!inList) categories.push({ id: categoryId, name: categoryName });
+            window.categories = categories;
+        }
+        
         const parentSelect = document.getElementById('categoryParentId');
         if (parentSelect) {
             const option = document.createElement('option');
             option.value = categoryId;
             option.textContent = categoryName;
             parentSelect.appendChild(option);
+        }
+
+        const productCategory = document.getElementById('productCategory');
+        if (productCategory) {
+            let existsPc = false;
+            for (let i = 0; i < productCategory.options.length; i++) {
+                if (String(productCategory.options[i].value) === String(categoryId)) {
+                    existsPc = true;
+                    break;
+                }
+            }
+            if (!existsPc) {
+                const optPc = document.createElement('option');
+                optPc.value = categoryId;
+                optPc.textContent = categoryName;
+                productCategory.appendChild(optPc);
+            }
+            productCategory.value = String(categoryId);
         }
     }
     
@@ -6901,6 +6999,30 @@ window.PB_PAGE_CONFIG = {
             });
     }
     
+    // Build product object from search result row (payload JSON or data-* fallbacks).
+    function parseProductSearchItemFromClick(item) {
+        var product = {};
+        if (!item) return product;
+        var enc = item.getAttribute('data-product-payload');
+        try {
+            if (enc) product = JSON.parse(decodeURIComponent(enc));
+        } catch (err) {}
+        if (!product || typeof product !== 'object') product = {};
+        if ((product.id == null || product.id === '') && (product.product_id == null || product.product_id === '')) {
+            var pid = item.getAttribute('data-product-id');
+            if (pid) product.id = pid;
+        }
+        if (product.characteristic_id == null || product.characteristic_id === '') {
+            var cid = item.getAttribute('data-characteristic-id');
+            if (cid) product.characteristic_id = cid;
+        }
+        if (product.metal_id == null || product.metal_id === '') {
+            var mid = item.getAttribute('data-metal-id');
+            if (mid) product.metal_id = mid;
+        }
+        return product;
+    }
+
     // Select product from search results — fetch full get-product-details so product.taxes (tbl_product_tax) is present
     function selectProductFromSearch(product) {
         if (!currentProductRow) return;
@@ -6910,6 +7032,7 @@ window.PB_PAGE_CONFIG = {
         var pidNum = parseInt(String(rawPid != null ? rawPid : ''), 10);
         if (isNaN(pidNum) || pidNum <= 0) {
             console.warn('[GST] product search: invalid or missing product_id', product);
+            closeProductSearchModal();
             return;
         }
         var cid = product && product.characteristic_id != null && product.characteristic_id !== '' ? String(product.characteristic_id) : '';
@@ -6920,8 +7043,13 @@ window.PB_PAGE_CONFIG = {
         var midNum = parseInt(metalIdStr, 10);
         
         function applyFullProduct(full) {
-            populateRowWithProduct(row, full);
-            closeProductSearchModal();
+            try {
+                populateRowWithProduct(row, full);
+            } catch (err) {
+                console.error('populateRowWithProduct failed', err);
+            } finally {
+                closeProductSearchModal();
+            }
             if (typeof window.refreshMobileInlineProductFormIfOpen === 'function') {
                 window.refreshMobileInlineProductFormIfOpen(row);
             }
@@ -6939,12 +7067,9 @@ window.PB_PAGE_CONFIG = {
             if (window.AURAGOLD_LOG_PRODUCT_SELECT !== false) {
                 console.log('[get-product-details] full JSON response', response);
             }
-            if (!response || !response.success) {
-                console.error('API Error:', response && response.message);
-                return;
-            }
-            if (!response.product) {
-                console.error('API Error: missing product payload');
+            if (!response || !response.success || !response.product) {
+                console.warn('[get-product-details] using search list payload:', response && response.message, product);
+                applyFullProduct(product);
                 return;
             }
             applyFullProduct(response.product);
@@ -6991,12 +7116,7 @@ window.PB_PAGE_CONFIG = {
             var item = e.target.closest('#productSearchModal .product-search-item');
             if (!item) return;
             e.preventDefault();
-            var enc = item.getAttribute('data-product-payload');
-            var product = {};
-            try {
-                if (enc) product = JSON.parse(decodeURIComponent(enc));
-            } catch (err) {}
-            selectProductFromSearch(product);
+            selectProductFromSearch(parseProductSearchItemFromClick(item));
         });
     }
     
@@ -8312,6 +8432,9 @@ window.PB_PAGE_CONFIG = {
         var prefs;
         if (isDiamondTab) {
             prefs = Object.assign({}, diamondVisibleSet, savedDiamond && typeof savedDiamond === 'object' ? savedDiamond : {});
+            if (typeof window.auragoldProductModalApplyAlwaysVisibleAmountColumns === 'function') {
+                prefs = window.auragoldProductModalApplyAlwaysVisibleAmountColumns(prefs);
+            }
         } else {
             prefs = (typeof window.mergeProductModalMetalTabPrefs === 'function')
                 ? window.mergeProductModalMetalTabPrefs(tk, tabKey)
@@ -9114,6 +9237,14 @@ window.PB_PAGE_CONFIG = {
     
     // Update a merged Product List row from current modal rows (re-merge and save)
     function updateMergedRowFromModalRows(rowId, modalRowsData) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function') {
+            var _qFn = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(rowId, modalRowsData, _qFn ? { quantityFromLine: _qFn } : {});
+            return;
+        }
         const row = document.getElementById(rowId);
         if (!row || !modalRowsData || modalRowsData.length === 0) return;
         var productNames = modalRowsData.map(function(d) { return (d.product_name || '').trim(); }).filter(Boolean);
@@ -9214,6 +9345,15 @@ window.PB_PAGE_CONFIG = {
     
     // Update Product List table row with data from Product Selection modal row
     function updateProductListRowFromModalRow(productListRowId, modalRow) {
+        if (typeof window.rebuildProductListRowFromModalRows === 'function' && typeof getModalRowDataFromRow === 'function' && modalRow) {
+            var _d = getModalRowDataFromRow(modalRow, true);
+            var _qFn2 = null;
+            if (typeof purchaseInvoiceQuantityFromModalLine === 'function') _qFn2 = purchaseInvoiceQuantityFromModalLine;
+            else if (typeof saleInvoiceQuantityFromModalLine === 'function') _qFn2 = saleInvoiceQuantityFromModalLine;
+            else if (typeof quantityFromModalLine === 'function') _qFn2 = quantityFromModalLine;
+            window.rebuildProductListRowFromModalRows(productListRowId, [_d], _qFn2 ? { quantityFromLine: _qFn2 } : {});
+            return;
+        }
         const productListRow = document.getElementById(productListRowId);
         if (!productListRow || !modalRow) {
             console.error('Row not found');
@@ -10712,7 +10852,7 @@ window.PB_PAGE_CONFIG = {
                     if (!th || !headerRow2.contains(th)) return;
                     if (th.getAttribute('data-column') === 'actions') return;
                     if (e.target.closest('.product-modal-col-drag-handle--locked')) return;
-                    if (e.target.closest('input,button,select,textarea,a,.add-category-icon,.add-product-icon,.add-location-icon')) return;
+                    if (e.target.closest('input,button,select,textarea,a,.add-category-icon,.add-product-category-icon,.add-product-icon,.add-location-icon')) return;
                     e.preventDefault();
                     modalDraggedTh = th;
                     modalDragIdx = getModalColIndex(th);
@@ -10742,7 +10882,7 @@ window.PB_PAGE_CONFIG = {
                     fallbackOnBody: true,
                     draggable: 'th[data-group]:not([data-group-locked])',
                     handle: '.product-modal-group-drag-handle',
-                    filter: 'input,button,select,textarea,a,.add-category-icon,.add-product-icon,.add-location-icon',
+                    filter: 'input,button,select,textarea,a,.add-category-icon,.add-product-category-icon,.add-product-icon,.add-location-icon',
                     preventOnFilter: true,
                     ghostClass: 'product-modal-group-sortable-ghost',
                     dragClass: 'product-modal-group-sortable-drag-chosen',
@@ -11764,8 +11904,15 @@ window.PB_PAGE_CONFIG = {
                     if (msg) document.body.removeChild(msg);
                     if (response.status === 'success') {
                         populateOrderForm(response.order, response.items || [], response.payments || []);
-                        // Update URL without reload and set edit mode so Save updates this invoice
-                        window.history.pushState({}, '', 'sale-invoice.php?id=' + orderId);
+                        // Keep browser URL in edit mode (sale-invoice.php?id=…)
+                        try {
+                            var editUrl = 'sale-invoice.php?id=' + encodeURIComponent(orderId);
+                            if (window.history && window.history.replaceState) {
+                                window.history.replaceState({ saleInvoiceId: orderId }, '', editUrl);
+                            } else {
+                                window.location.href = editUrl;
+                            }
+                        } catch (e) { /* ignore */ }
                         window.isPurchaseInvoiceEditMode = true;
                     } else {
                         alert('Error loading order: ' + (response.message || 'Unknown error'));
@@ -11786,7 +11933,14 @@ window.PB_PAGE_CONFIG = {
                     if (msg) document.body.removeChild(msg);
                     if (data.status === 'success') {
                         populateOrderForm(data.order, data.items || [], data.payments || []);
-                        window.history.pushState({}, '', 'sale-invoice.php?id=' + orderId);
+                        try {
+                            var editUrl2 = 'sale-invoice.php?id=' + encodeURIComponent(orderId);
+                            if (window.history && window.history.replaceState) {
+                                window.history.replaceState({ saleInvoiceId: orderId }, '', editUrl2);
+                            } else {
+                                window.location.href = editUrl2;
+                            }
+                        } catch (e2) { /* ignore */ }
                         window.isPurchaseInvoiceEditMode = true;
                     } else {
                         alert('Error loading order: ' + (data.message || 'Unknown error'));

@@ -103,6 +103,7 @@ return [
     'user.my_profile'                    => 'My Profile',
     'user.change_password'                => 'Change Password',
     'user.branch'                         => 'Branch',
+    'user.manage_branches'                => 'Manage Branches',
     'user.notifications'                  => 'Notifications',
     'user.logout'                         => 'Logout',
     'user.pos'                            => 'POS',

@@ -286,6 +286,7 @@ require __DIR__ . '/includes/dashboard_shell_top.php';
         <a href="gold-silver-financial-analysis.php" class="gsa-subnav-active">Gold Silver Analysis</a>
         <a href="diamond-stone-financial-analysis.php">Diamond &amp; Stone Analysis</a>
         <a href="salesperson-performance.php">Salesperson Performance</a>
+        <a href="vendor-report.php">Vendor Report</a>
     </nav>
 
     <div class="gsa-table-outer">

@@ -21,19 +21,25 @@
             'table.acr-col-table tfoot td:first-child { border-left: none; }',
             'table.acr-col-table thead th.acr-th-reorder,',
             'table.acr-col-table thead th.acr-th-resizable { position: relative !important; }',
+            'table.acr-col-table thead th .acr-th-inner {',
+            '  display: inline-flex; align-items: center; gap: 0.35rem;',
+            '  max-width: calc(100% - 12px); vertical-align: middle; cursor: grab;',
+            '}',
+            'table.acr-col-table thead th .acr-th-inner:active { cursor: grabbing; }',
             'table.acr-col-table thead th .acr-th-drag {',
             '  display: inline-flex; align-items: center; justify-content: center;',
-            '  vertical-align: middle; margin-left: 0.35rem; cursor: grab; color: #c9a962;',
+            '  vertical-align: middle; cursor: grab; color: #c9a962;',
             '  line-height: 1; flex-shrink: 0;',
             '}',
-            'table.acr-col-table thead th .acr-th-drag .feather { width: 0.95rem; height: 0.95rem; }',
+            'table.acr-col-table thead th .acr-th-drag .feather,',
+            'table.acr-col-table thead th .acr-th-drag svg { width: 0.95rem; height: 0.95rem; }',
             'table.acr-col-table thead th .acr-th-drag:active { cursor: grabbing; }',
-            'table.acr-col-table thead th.acr-th-reorder { cursor: grab; }',
+            'table.acr-col-table thead th.acr-th-reorder { cursor: default; }',
             'table.acr-col-table thead th.acr-sortable-drag { opacity: 0.95; background: #fff7ed !important; }',
             'table.acr-col-table thead th .acr-th-resize {',
-            '  position: absolute; right: 0; top: 0; bottom: 0; width: 6px;',
-            '  cursor: col-resize; z-index: 4;',
-            '  background: linear-gradient(90deg, transparent, rgba(15, 23, 42, 0.08));',
+            '  position: absolute; right: 0; top: 0; bottom: 0; width: 10px;',
+            '  cursor: col-resize; z-index: 6; touch-action: none;',
+            '  background: linear-gradient(90deg, transparent, rgba(201, 169, 98, 0.2));',
             '}',
             'table.acr-col-table thead th .acr-th-resize:hover {',
             '  background: rgba(201, 169, 98, 0.35);',
@@ -226,8 +232,31 @@
                 || (k && fixedKeySet[k]);
             th.classList.toggle('acr-th-fixed', isFixed);
             th.classList.toggle('acr-th-reorder', !isFixed);
+
+            var inner = th.querySelector('.acr-th-inner');
+            if (!inner) {
+                inner = document.createElement('span');
+                inner.className = 'acr-th-inner';
+                var nodes = Array.prototype.slice.call(th.childNodes);
+                nodes.forEach(function (node) {
+                    if (node.nodeType === 1 && node.classList
+                        && (node.classList.contains('acr-th-resize') || node.classList.contains('acr-th-drag'))) {
+                        return;
+                    }
+                    inner.appendChild(node);
+                });
+                th.insertBefore(inner, th.firstChild);
+            }
+
             if (!isFixed) {
                 th.classList.add('acr-th-resizable');
+                if (!inner.querySelector('.acr-th-drag')) {
+                    var drag = document.createElement('span');
+                    drag.className = 'acr-th-drag';
+                    drag.title = 'Drag to reorder column';
+                    drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
+                    inner.insertBefore(drag, inner.firstChild);
+                }
                 if (!th.querySelector('.acr-th-resize')) {
                     var resize = document.createElement('span');
                     resize.className = 'acr-th-resize';
@@ -235,15 +264,18 @@
                     resize.setAttribute('aria-hidden', 'true');
                     th.appendChild(resize);
                 }
-                if (!th.querySelector('.acr-th-drag')) {
-                    var drag = document.createElement('span');
-                    drag.className = 'acr-th-drag';
-                    drag.title = 'Drag to reorder columns';
-                    drag.innerHTML = '<i class="feather icon-move" aria-hidden="true"></i>';
-                    th.appendChild(drag);
-                }
             }
         });
+    }
+
+    function resolveDragHandle(table, dragHandle) {
+        if (dragHandle && String(dragHandle).trim()) {
+            return String(dragHandle).trim();
+        }
+        if (table.querySelector('thead th .acr-th-inner')) {
+            return '.acr-th-inner';
+        }
+        return 'th.acr-th-reorder';
     }
 
     function bindResize(table, widthsKey, minWidthDefault) {
@@ -254,6 +286,7 @@
             if (!handle || !table.contains(handle)) return;
             e.preventDefault();
             e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
             var th = handle.closest('th');
             if (!th) return;
             var startX = e.clientX;
@@ -268,6 +301,7 @@
                 if (col) {
                     table.querySelectorAll('tbody td[data-col="' + col + '"], tfoot td[data-col="' + col + '"]').forEach(function (td) {
                         td.style.minWidth = w + 'px';
+                        td.style.width = w + 'px';
                     });
                 }
             }
@@ -282,10 +316,10 @@
             document.body.style.cursor = 'col-resize';
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
-        });
+        }, true);
     }
 
-    function bindSortable(table, storageKey, fixedFirst, fixedKey, fixedLast) {
+    function bindSortable(table, storageKey, fixedFirst, fixedKey, fixedLast, dragHandle) {
         if (typeof Sortable === 'undefined') return;
         var tr = theadRow(table);
         if (!tr) return;
@@ -298,11 +332,10 @@
             lastGood = getOrder(table).slice();
         }
         refreshLastGood();
+        var handleSel = resolveDragHandle(table, dragHandle);
         tr._acrSortable = Sortable.create(tr, {
             animation: 150,
-            // Whole header is draggable; resize handle is filtered out.
-            // forceFallback is required for <table>/<th> column reorder in Chromium.
-            handle: 'th.acr-th-reorder',
+            handle: handleSel,
             draggable: 'th.acr-th-reorder',
             filter: '.acr-th-fixed, .acr-th-resize',
             preventOnFilter: true,
@@ -310,6 +343,7 @@
             fallbackOnBody: true,
             fallbackTolerance: 3,
             direction: 'horizontal',
+            swapThreshold: 0.65,
             ghostClass: 'acr-sortable-ghost',
             chosenClass: 'acr-sortable-chosen',
             dragClass: 'acr-sortable-drag',
@@ -381,8 +415,11 @@
         }
 
         enhanceHeaders(table, !!opts.fixedFirst, opts.fixedKey || null, !!opts.fixedLast, opts.fixedKeys || null);
+        if (typeof global.feather !== 'undefined' && typeof global.feather.replace === 'function') {
+            global.feather.replace({ scope: table });
+        }
         bindResize(table, opts.widthsStorageKey, opts.minWidth);
-        bindSortable(table, opts.storageKey, !!opts.fixedFirst, opts.fixedKey || null, !!opts.fixedLast);
+        bindSortable(table, opts.storageKey, !!opts.fixedFirst, opts.fixedKey || null, !!opts.fixedLast, opts.dragHandle || null);
 
         var savedW = loadWidths(opts.widthsStorageKey);
         if (savedW) applyWidths(table, savedW, opts.minWidth);

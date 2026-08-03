@@ -42,14 +42,20 @@ $em_menu_close = function_exists('auragold_t')
                 continue;
             }
             $emFile = (string) ($emItem['file'] ?? '');
-            if ($emFile === '') {
+            $emHref = (string) ($emItem['href'] ?? $emFile);
+            if ($emFile === '' && ($emHref === '' || $emHref === '#')) {
+                // Placeholder menu entries (no page yet) — still list them.
+                $emHref = '#';
+            } elseif ($emFile === '') {
                 continue;
+            } else {
+                $emHref = $emFile;
             }
-            $emActive = ($current_page === $emFile);
+            $emActive = ($emFile !== '' && $current_page === $emFile);
             $emIcon = htmlspecialchars((string) ($emItem['icon'] ?? 'icon-circle'), ENT_QUOTES, 'UTF-8');
             $emLabel = htmlspecialchars((string) ($emItem['label'] ?? ''), ENT_QUOTES, 'UTF-8');
         ?>
-        <a href="<?php echo htmlspecialchars($emFile, ENT_QUOTES, 'UTF-8'); ?>" class="set-software-nav-item<?php echo $emActive ? ' active' : ''; ?>">
+        <a href="<?php echo htmlspecialchars($emHref, ENT_QUOTES, 'UTF-8'); ?>" class="set-software-nav-item<?php echo $emActive ? ' active' : ''; ?>">
             <span><i class="feather <?php echo $emIcon; ?>"></i> <?php echo $emLabel; ?></span>
             <i class="feather icon-chevron-right"></i>
         </a>

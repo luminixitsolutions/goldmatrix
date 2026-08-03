@@ -173,7 +173,7 @@
                 fallbackOnBody: true,
                 draggable: 'th[data-group]:not([data-group-locked])',
                 handle: '.product-modal-group-drag-handle',
-                filter: 'input,button,select,textarea,a,.add-category-icon,.add-product-icon,.add-location-icon',
+                filter: 'input,button,select,textarea,a,.add-category-icon,.add-product-category-icon,.add-product-icon,.add-location-icon',
                 preventOnFilter: true,
                 ghostClass: 'product-modal-group-sortable-ghost',
                 dragClass: 'product-modal-group-sortable-drag-chosen',

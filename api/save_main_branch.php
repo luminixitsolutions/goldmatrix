@@ -74,8 +74,8 @@ if (!auragold_session_is_admin_login_type()) {
     exit;
 }
 
-if (!auragold_session_is_superadmin()) {
-    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Only the configured superadmin account can create a new main branch.']);
+if (!auragold_session_may_create_main_branch()) {
+    echo auragold_save_branch_json_encode(['ok' => false, 'message' => 'Only superadmin logged in from the GM portal (gm.goldmatrixsoft.com) can create a new main branch.']);
     exit;
 }
 

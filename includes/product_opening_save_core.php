@@ -34,6 +34,9 @@ function auragold_product_opening_save(mysqli $conn, array $post, array $opts = 
     $alternate_name = esc($post['alternate_name'] ?? '');
     $article        = esc($post['article'] ?? '');
     $category_id    = isset($post['category_id']) && $post['category_id'] != '' ? (int)$post['category_id'] : 0;
+    $vendor_id      = isset($post['vendor_id']) && $post['vendor_id'] != '' ? (int) $post['vendor_id'] : 0;
+
+    auragold_ensure_product_branch_local_schema($conn);
 
     $branch_ids = [];
     if (isset($post['branch_ids']) && is_array($post['branch_ids'])) {
@@ -178,12 +181,17 @@ function auragold_product_opening_save(mysqli $conn, array $post, array $opts = 
                 }
             }
 
-            // Shared product master: name / article only. Category & stock are per-branch (tbl_product_branch_settings).
+            // Shared product master: name / article / vendor. Category & stock are per-branch (tbl_product_branch_settings).
+            $has_vendor_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_products', 'vendor_id');
+            $vendor_sql = $has_vendor_col
+                ? ', vendor_id = ' . ($vendor_id > 0 ? (string) $vendor_id : 'NULL')
+                : '';
             $sql = "
                 UPDATE tbl_products 
                 SET name = '$name',
                     alternate_name = '$alternate_name',
-                    article = '$article',
+                    article = '$article'
+                    $vendor_sql,
                     updated_at = NOW()
                 $update_where
             ";
@@ -204,6 +212,7 @@ function auragold_product_opening_save(mysqli $conn, array $post, array $opts = 
     } else {
         $has_cat_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_products', 'category_id');
         $has_stk_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_products', 'is_stock_item');
+        $has_vendor_col = function_exists('auragold_tbl_has_column') && auragold_tbl_has_column($conn, 'tbl_products', 'vendor_id');
         $cat0          = (int) $category_id;
         $stk0          = (int) $is_stock_item;
         if ($sync) {
@@ -212,6 +221,10 @@ function auragold_product_opening_save(mysqli $conn, array $post, array $opts = 
         } else {
             $cols = ['name', 'alternate_name', 'article'];
             $vals = ["'$name'", "'$alternate_name'", "'$article'"];
+        }
+        if ($has_vendor_col) {
+            $cols[] = 'vendor_id';
+            $vals[] = $vendor_id > 0 ? (string) $vendor_id : 'NULL';
         }
         if ($has_cat_col) {
             $cols[] = 'category_id';

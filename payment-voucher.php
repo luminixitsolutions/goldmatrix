@@ -3339,19 +3339,29 @@ $saved_vouchers = getList("SELECT id, voucher_no, customer_name, voucher_date, t
             voucherData.items.push(item);
         });
 
-        // Calculate totals (amount for cash/bank/etc., purity_wt for Metal)
+        // Calculate totals (amount for cash/bank/scrap/etc., purity_wt/weight for Metal + Scrap)
         let totalAmount = 0;
         let totalGold = 0;
         let totalSilver = 0;
         voucherData.items.forEach(function(item) {
-            if (item.payment_type === 'Metal') {
-                const metalId = parseInt(item.metal_id);
-                if (metalId === 1) {
-                    totalGold += parseFloat(item.purity_wt || 0);
-                } else if (metalId === 2) {
-                    totalSilver += parseFloat(item.purity_wt || 0);
+            const ptype = String(item.payment_type || '').trim().toLowerCase();
+            const isMetal = (ptype === 'metal' || ptype === 'm. exch.' || ptype === 'metal exchange');
+            const isScrap = (ptype === 'scrap');
+            if (isMetal || isScrap) {
+                const wt = parseFloat(item.purity_wt || item.purity_weight || item.weight || 0) || 0;
+                if (wt > 0) {
+                    const metalLabel = String(item.metal || item.product || '').toLowerCase();
+                    const metalId = parseInt(item.metal_id, 10) || 0;
+                    if (metalLabel.indexOf('silver') !== -1 || metalId === 2) {
+                        totalSilver += wt;
+                    } else {
+                        // Gold or unresolved metal type
+                        totalGold += wt;
+                    }
                 }
-            } else {
+            }
+            // Money side: cash/bank/cheque/upi/card/scrap amounts (metal amount stays on metal line only)
+            if (!isMetal) {
                 totalAmount += parseFloat(item.amount || 0);
             }
         });
